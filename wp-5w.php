@@ -3,7 +3,7 @@
  * Plugin Name:       wp-5w
  * Plugin URI:        https://github.com/mavidasnc/wp-5w
  * Description:       Dashboard di analytics in wp-admin che incrocia i dati già raccolti da WP Statistics e da Rank Math (Search Console), salvandoli in tabelle proprie pronte per le interrogazioni.
- * Version:           0.8.0
+ * Version:           0.9.0
  * Requires at least: 6.5
  * Requires PHP:      8.3
  * Author:            Mavida snc
@@ -25,7 +25,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // Costanti del plugin (guard per evitare conflitti con wp-config.php).
 if ( ! defined( 'WP5W_VERSION' ) ) {
-	define( 'WP5W_VERSION', '0.8.0' );
+	define( 'WP5W_VERSION', '0.9.0' );
 }
 if ( ! defined( 'WP5W_PLUGIN_FILE' ) ) {
 	define( 'WP5W_PLUGIN_FILE', __FILE__ );
