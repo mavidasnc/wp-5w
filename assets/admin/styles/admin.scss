@@ -1,0 +1,163 @@
+// Stili della pagina 5W (BEM con prefisso wp5w-).
+
+.wp5w-admin {
+	max-width: 1400px;
+
+	&__header {
+		margin-bottom: 16px;
+
+		h1 {
+			margin-bottom: 4px;
+		}
+
+		p {
+			margin-top: 0;
+			color: #646970;
+		}
+	}
+
+	.components-tab-panel__tab-content {
+		padding-top: 16px;
+	}
+}
+
+.wp5w-card {
+	margin-bottom: 16px;
+	padding: 16px 20px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+
+	h2 {
+		margin: 0 0 12px;
+		font-size: 15px;
+	}
+}
+
+.wp5w-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+	align-items: flex-end;
+	margin-bottom: 16px;
+
+	.components-base-control {
+		min-width: 220px;
+	}
+
+	&__compare {
+		margin: 0 0 10px;
+		color: #646970;
+	}
+}
+
+.wp5w-kpis {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.wp5w-kpi {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 0;
+
+	&__label {
+		color: #646970;
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	&__value {
+		font-size: 24px;
+		line-height: 1.2;
+	}
+
+	&__change {
+		font-size: 12px;
+
+		&.is-good {
+			color: #00a32a;
+		}
+
+		&.is-bad {
+			color: #d63638;
+		}
+	}
+}
+
+.wp5w-grid {
+	display: grid;
+	grid-template-columns: 3fr 1fr;
+	gap: 16px;
+
+	@media (max-width: 1100px) {
+		grid-template-columns: 1fr;
+	}
+
+	.wp5w-card {
+		margin-bottom: 16px;
+	}
+}
+
+.wp5w-chart {
+	position: relative;
+	height: 320px;
+	padding-bottom: 24px;
+}
+
+.wp5w-note {
+	margin: 8px 0 0;
+	color: #646970;
+	font-size: 12px;
+}
+
+.wp5w-channels {
+	margin: 0;
+
+	li {
+		margin-bottom: 10px;
+	}
+
+	&__row {
+		display: flex;
+		justify-content: space-between;
+	}
+
+	&__value {
+		color: #646970;
+	}
+
+	// La larghezza (quota del canale) arriva dallo style inline.
+	&__bar {
+		display: block;
+		min-width: 2px;
+		height: 6px;
+		margin-top: 4px;
+		background: #2271b1;
+		border-radius: 3px;
+	}
+}
+
+.wp5w-table,
+.wp5w-status table {
+	.num {
+		text-align: right;
+		white-space: nowrap;
+	}
+}
+
+.wp5w-type,
+.wp5w-edit {
+	margin-left: 8px;
+	font-size: 11px;
+	color: #646970;
+}
+
+.wp5w-actions {
+	display: flex;
+	gap: 8px;
+}

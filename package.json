@@ -1,0 +1,31 @@
+{
+  "name": "wp-5w",
+  "version": "0.1.0",
+  "description": "Dashboard di analytics in wp-admin che incrocia WP Statistics e Rank Math (Search Console).",
+  "private": true,
+  "license": "GPL-2.0-or-later",
+  "author": "Mavida snc <https://mavida.it>",
+  "scripts": {
+    "build": "wp-scripts build",
+    "start": "wp-scripts start",
+    "format": "wp-scripts format",
+    "lint:js": "wp-scripts lint-js",
+    "lint:css": "wp-scripts lint-style",
+    "build:zip": "npm run build && composer install --no-dev -o -q && node scripts/build-zip.js && composer install -q",
+    "wp-env": "wp-env",
+    "release": "node scripts/release.js",
+    "release:patch": "node scripts/release.js patch",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major",
+    "check": "npm run build && node scripts/check-build.js"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.0",
+    "react-chartjs-2": "^5.2.0"
+  },
+  "devDependencies": {
+    "@wordpress/env": "^10.0.0",
+    "@wordpress/scripts": "^30.0.0",
+    "archiver": "^7.0.1"
+  }
+}

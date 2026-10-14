@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<ruleset name="wp-5w">
+    <description>Coding standards per wp-5w</description>
+
+    <!-- File da analizzare -->
+    <file>./src</file>
+    
+    <file>./wp-5w.php</file>
+    <file>./uninstall.php</file>
+    
+
+    <!-- Esclusioni -->
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <exclude-pattern>*/build/*</exclude-pattern>
+
+    <!-- Argomenti CLI -->
+    <arg value="sp"/>
+    <arg name="basepath" value="."/>
+    <arg name="colors"/>
+    <arg name="extensions" value="php"/>
+    <arg name="parallel" value="8"/>
+    <arg name="cache" value=".phpcs-cache"/>
+
+    <!-- Standard WordPress -->
+    <rule ref="WordPress">
+        <!-- Nomi file PascalCase per le classi PSR-4 -->
+        <exclude name="WordPress.Files.FileName"/>
+
+        <!-- Yoda conditions: lasciato al criterio del developer -->
+        <exclude name="WordPress.PHP.YodaConditions"/>
+    </rule>
+
+    <!-- Compatibilità PHP -->
+    <rule ref="PHPCompatibilityWP"/>
+    <config name="testVersion" value="8.3-"/>
+
+    <!-- Compatibilità WordPress -->
+    <config name="minimum_wp_version" value="6.5"/>
+
+    <!-- Text domain -->
+    <rule ref="WordPress.WP.I18n">
+        <properties>
+            <property name="text_domain" type="array">
+                <element value="wp-5w"/>
+            </property>
+        </properties>
+    </rule>
+
+    <!-- Prefissi consentiti -->
+    <rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+        <properties>
+            <property name="prefixes" type="array">
+                <element value="wp5w"/>
+                <element value="WP5W"/>
+                <element value="Mavida\FiveW"/>
+            </property>
+        </properties>
+    </rule>
+</ruleset>

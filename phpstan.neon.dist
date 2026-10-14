@@ -1,0 +1,17 @@
+includes:
+    - vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+    level: 6
+    ignoreErrors:
+        # plugin-update-checker restituisce tipi generici: i metodi esistono a runtime.
+        - '#Call to an undefined method .+::(getUpdate|checkForUpdates|getUpdateState|enableReleaseAssets)\(\)#'
+    paths:
+        - src
+        - wp-5w.php
+        - uninstall.php
+    scanFiles:
+        - phpstan-constants.php
+    bootstrapFiles:
+        - vendor/php-stubs/wordpress-stubs/wordpress-stubs.php
+        - vendor/php-stubs/wp-cli-stubs/wp-cli-stubs.php
