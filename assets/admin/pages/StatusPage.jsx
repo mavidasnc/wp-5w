@@ -22,6 +22,21 @@ const TABLES = {
 const formatTime = ( ts ) =>
 	ts ? new Date( ts * 1000 ).toLocaleString( 'it-IT', { dateStyle: 'medium', timeStyle: 'short' } ) : '–';
 
+/**
+ * Solo la data da timestamp UNIX.
+ *
+ * @param {?number} ts Timestamp in secondi.
+ */
+const formatDate = ( ts ) => ( ts ? new Date( ts * 1000 ).toLocaleDateString( 'it-IT', { dateStyle: 'medium' } ) : '–' );
+
+/**
+ * Mese e anno di una chiave Y-m (es. «ottobre 2026»).
+ *
+ * @param {string} month Mese.
+ */
+const formatMonth = ( month ) =>
+	new Date( `${ month }-15T12:00:00Z` ).toLocaleDateString( 'it-IT', { month: 'long', year: 'numeric', timeZone: 'UTC' } );
+
 export default function StatusPage() {
 	const [ status, setStatus ] = useState( null );
 	const [ running, setRunning ] = useState( false );
@@ -112,6 +127,32 @@ export default function StatusPage() {
 						) ) }
 					</tbody>
 				</table>
+			</Card>
+
+			<Card id="status-geo" title={ __( 'Database dei paesi', 'wp-5w' ) }>
+				{ status.geo.available ? (
+					<p>
+						{ __( 'DB-IP Lite Country di', 'wp-5w' ) } { status.geo.month ? formatMonth( status.geo.month ) : '–' }, { __( 'compilato il', 'wp-5w' ) }{ ' ' }
+						{ formatDate( status.geo.built ) }, { formatNumber( Math.round( ( status.geo.size / 1048576 ) * 10 ) / 10 ) } MB. { __( 'Installato il', 'wp-5w' ) }{ ' ' }
+						{ formatDate( status.geo.updated ) }.
+					</p>
+				) : (
+					<p>{ __( 'Non ancora scaricato: il paese delle visite resta vuoto finché non arriva il primo aggiornamento.', 'wp-5w' ) }</p>
+				) }
+				<p>
+					{ __( 'Ultimo controllo:', 'wp-5w' ) } { formatTime( status.geo.checked ) }. { __( 'Prossimo:', 'wp-5w' ) } { formatTime( status.geo.next ) }.
+				</p>
+				{ status.geo.error && (
+					<Notice status="warning" isDismissible={ false }>
+						{ status.geo.error }
+					</Notice>
+				) }
+				<p className="wp5w-note">
+					<a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">
+						{ __( 'IP Geolocation by DB-IP', 'wp-5w' ) }
+					</a>{ ' ' }
+					({ __( 'licenza CC BY 4.0', 'wp-5w' ) })
+				</p>
 			</Card>
 
 			<Card id="status-import" title={ __( 'Import', 'wp-5w' ) }>

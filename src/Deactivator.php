@@ -27,6 +27,7 @@ final class Deactivator {
 		wp_clear_scheduled_hook( Scheduler::DAILY_HOOK );
 		wp_clear_scheduled_hook( Scheduler::FULL_HOOK );
 		wp_clear_scheduled_hook( Scheduler::OWN_HOURLY_HOOK );
+		wp_clear_scheduled_hook( Scheduler::GEO_HOOK );
 
 		// La chiave del giorno non deve restare nel database con la raccolta ferma.
 		delete_option( 'wp5w_daily_salt' );

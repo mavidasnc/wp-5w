@@ -43,7 +43,9 @@ final class Origin {
 			return "{$prefix}origin = 'wps'";
 		}
 
-		// Passaggio: wps prima della data, own dalla data in poi.
-		return "( ( {$prefix}origin = 'wps' AND {$prefix}day < '{$own_since}' ) OR ( {$prefix}origin = 'own' AND {$prefix}day >= '{$own_since}' ) )";
+		// Passaggio: wps prima della data, own dalla data in poi. Non si scrive come "( origin = 'wps' AND day < X ) OR ( origin = 'own' AND day >= X )":
+		// con quella forma l'ottimizzatore di MariaDB (provato sulla 10.11 del blog e sulla 12.3) scarta le righe own delle tabelle con chiave
+		// primaria composta (dim_daily...) quando il periodo comprende la data di passaggio. Con IF() la condizione è equivalente e il risultato è giusto.
+		return "{$prefix}origin = IF( {$prefix}day < '{$own_since}', 'wps', 'own' )";
 	}
 }

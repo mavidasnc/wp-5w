@@ -19,6 +19,11 @@
 	.components-tab-panel__tab-content {
 		padding-top: 16px;
 	}
+
+	// Attribuzione di DB-IP (CC BY 4.0) sotto le schede.
+	&__credits {
+		margin-top: 16px;
+	}
 }
 
 .wp5w-card {
@@ -113,6 +118,12 @@
 	margin: 8px 0 0;
 	color: #646970;
 	font-size: 12px;
+}
+
+// Box «Pubblico»: titoli degli elenchi.
+.wp5w-dimensions h3 {
+	margin: 0 0 8px;
+	font-size: 14px;
 }
 
 .wp5w-channels {

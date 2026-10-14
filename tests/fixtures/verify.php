@@ -5,7 +5,8 @@
  * Uso: npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php
  *
  * Controlla lo schema v4 e la migrazione da v3, confronta le tabelle wp5w_* con le sorgenti, simula le visite
- * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine, le rotte delle opzioni e il confronto con WP Statistics.
+ * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine, le rotte delle opzioni, il confronto con WP Statistics
+ * e, dalla fase 3, il box Pubblico, il database dei paesi (download reale e guasti simulati) e paese e user agent delle visite.
  *
  * @package Mavida\FiveW
  */
@@ -15,6 +16,7 @@
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Front\Tracker;
+use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Plugin;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\OverviewQuery;
@@ -360,6 +362,7 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 		'top 30'       => (string) wp_json_encode( $posts->top( 30 ) ),
 		'dettaglio'    => (string) wp_json_encode( $posts->detail( $post_a, $r60 ) ),
 		'visitatori'   => (string) wp_json_encode( $audience->get() ),
+		'pubblico'     => (string) wp_json_encode( $audience->dimensions( $r30 ) ),
 		'trend sito'   => (string) wp_json_encode( $trend->site() ),
 		'trend oggetti' => (string) wp_json_encode( $trend->objects( $seed_posts ) ),
 		'coverage'     => (string) wp_json_encode( $overview->coverage() ),
@@ -1001,7 +1004,340 @@ $check( 'confronto: righe own ripristinate', md5( $own_digest ), md5( $rows_dige
 $admin_user( 0 );
 
 // ---------------------------------------------------------------------------
-// 11. Pulizia finale.
+// 11. Pubblico, paese e user agent (fase 3).
+// ---------------------------------------------------------------------------
+// Passo 0: si salvano lo stato del database dei paesi e l'impronta del file, che i controlli simulano di rompere.
+$geo_path          = CountryDatabase::path();
+$geo_dir           = CountryDatabase::dir();
+$geo_option_backup = get_option( CountryDatabase::OPTION, false );
+$geo_this_month    = gmdate( 'Y-m' );
+$geo_prev_month    = ( new DateTimeImmutable( $geo_this_month . '-01' ) )->modify( '-1 month' )->format( 'Y-m' );
+$geo_prev2_month   = ( new DateTimeImmutable( $geo_this_month . '-01' ) )->modify( '-2 months' )->format( 'Y-m' );
+$admin_user( 0 );
+unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+update_option( Settings::OPTION, Settings::defaults() );
+update_option( Settings::OWN_SINCE, '' );
+
+// Passo 1: box «Pubblico» con i dati wps (wp5w_own_since vuota).
+$dim_route = '/wp5w/v1/admin/audience/dimensions';
+$check( 'pubblico senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $dim_route, array( 'days' => 30 ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$box_response = $rest_call( 'GET', $dim_route, array( 'days' => 30 ) );
+$box          = $box_response->get_data();
+$check( 'pubblico con amministratore: 200', 200, $box_response->get_status() );
+$check( 'pubblico: Cache-Control no-store', 'no-store, max-age=0', $box_response->get_headers()['Cache-Control'] ?? '' );
+$check( 'pubblico con days=15: 400', 400, $rest_call( 'GET', $dim_route, array( 'days' => 15 ) )->get_status() );
+$check( 'pubblico: periodo di 30 giorni compreso oggi', DateRange::last_days( 30, $today )->from . '|' . $today, ( $box['range']['from'] ?? '' ) . '|' . ( $box['range']['to'] ?? '' ) );
+$check( 'pubblico: le quattro dimensioni', implode( ',', Mavida\FiveW\Support\Dimensions::DIMS ), implode( ',', array_keys( $box['dims'] ?? array() ) ) );
+
+$dim_table = Schema::table( 'dim_daily' );
+foreach ( Mavida\FiveW\Support\Dimensions::DIMS as $wp5w_dim ) {
+	$wp5w_from  = (string) ( $box['range']['from'] ?? '' );
+	$wp5w_to    = (string) ( $box['range']['to'] ?? '' );
+	$wp5w_total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = 'wps' AND dim = %s AND day BETWEEN %s AND %s", $wp5w_dim, $wp5w_from, $wp5w_to ) );
+	$wp5w_rows  = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT IF(value IN ('', 'UNK'), '(n/d)', value) AS v, SUM(visitors) AS n FROM {$dim_table} WHERE origin = 'wps' AND dim = %s AND day BETWEEN %s AND %s GROUP BY v ORDER BY n DESC, BINARY v LIMIT 10",
+			$wp5w_dim,
+			$wp5w_from,
+			$wp5w_to
+		),
+		ARRAY_A
+	);
+	$wp5w_sql   = implode( ',', array_map( static fn( $r ) => $r['v'] . ':' . (int) $r['n'], $wp5w_rows ) );
+	$wp5w_api   = implode( ',', array_map( static fn( $r ) => $r['value'] . ':' . $r['visitors'], $box['dims'][ $wp5w_dim ]['rows'] ?? array() ) );
+	$check( "pubblico {$wp5w_dim}: total = SUM(dim_daily wps)", $wp5w_total, $box['dims'][ $wp5w_dim ]['total'] ?? '' );
+	$check( "pubblico {$wp5w_dim}: righe = SELECT diretta", $wp5w_sql, $wp5w_api );
+}
+
+// Con i dati del seed (le visite di WP Statistics sono tutte da smartphone Android con Chrome, da IT o US).
+if ( get_page_by_path( 'calendario-2006', OBJECT, 'post' ) ) {
+	$seed_countries = array_column( $box['dims']['country']['rows'] ?? array(), 'value' );
+	sort( $seed_countries );
+	$check( 'pubblico seed: paesi', 'IT,US', implode( ',', $seed_countries ) );
+	$check( 'pubblico seed: dispositivi', 'smartphone', implode( ',', array_column( $box['dims']['device']['rows'] ?? array(), 'value' ) ) );
+	$check( 'pubblico seed: browser', 'Chrome', implode( ',', array_column( $box['dims']['browser']['rows'] ?? array(), 'value' ) ) );
+	$check( 'pubblico seed: sistemi', 'Android', implode( ',', array_column( $box['dims']['platform']['rows'] ?? array(), 'value' ) ) );
+}
+$admin_user( 0 );
+
+// Passo 2: download reale del database. Con il file già del mese corrente lo si tiene, altrimenti update() deve riuscire.
+$geo_saved = is_array( $geo_option_backup ) ? $geo_option_backup : array();
+if ( ! is_readable( $geo_path ) || ( $geo_saved['month'] ?? '' ) !== $geo_this_month ) {
+	$geo_update = CountryDatabase::update();
+	$check( 'geo: update() riuscito', 1, (int) $geo_update['ok'] );
+}
+$geo_now         = get_option( CountryDatabase::OPTION, array() );
+$geo_option_good = get_option( CountryDatabase::OPTION, false );
+$geo_md5         = is_readable( $geo_path ) ? md5_file( $geo_path ) : '';
+$check( 'geo: il file esiste ed è oltre 1 MB', true, is_readable( $geo_path ) && filesize( $geo_path ) > 1048576 );
+$check( 'geo: opzione con il mese corrente o precedente', true, in_array( $geo_now['month'] ?? '', array( $geo_this_month, $geo_prev_month ), true ) );
+$check( 'geo: opzione senza errore', '', $geo_now['error'] ?? 'x' );
+$check( 'geo: .htaccess con Require all denied', true, str_contains( (string) @file_get_contents( $geo_dir . '/.htaccess' ), 'Require all denied' ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Lettura di un file locale della prova.
+$check( 'geo: index.php presente', true, file_exists( $geo_dir . '/index.php' ) );
+if ( ( $geo_now['month'] ?? '' ) === $geo_this_month ) {
+	$geo_http_calls  = 0;
+	$geo_count_calls = static function ( $pre, $args, $url ) use ( &$geo_http_calls ) {
+		++$geo_http_calls;
+		return $pre;
+	};
+	add_filter( 'pre_http_request', $geo_count_calls, 10, 3 );
+	$geo_again = CountryDatabase::update();
+	remove_filter( 'pre_http_request', $geo_count_calls, 10 );
+	$check( 'geo: secondo update() senza richieste di rete', 0, $geo_http_calls );
+	$check( 'geo: secondo update() riuscito', 1, (int) $geo_again['ok'] );
+}
+
+// Passo 3: ricerche.
+$check( 'geo: 8.8.8.8 = US', 'US', CountryDatabase::lookup( '8.8.8.8' ) );
+$check( 'geo: IP privato = vuoto', '', CountryDatabase::lookup( '10.0.0.1' ) );
+$check( 'geo: IP non valido = vuoto', '', CountryDatabase::lookup( 'non-un-ip' ) );
+$check( 'geo: IPv6 = IT', 'IT', CountryDatabase::lookup( '2a00:1450:4002::1' ) );
+
+// Passo 4: errori di download simulati con pre_http_request (il corpo va scritto in $args['filename'], come fa WordPress).
+$geo_db = (string) file_get_contents( $geo_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- File locale della prova.
+$geo_gz = (string) gzencode( $geo_db );
+$geo_tmp_files = static fn(): int => count( (array) glob( $geo_dir . '/*.tmp' ) );
+
+$geo_mock = null;
+$geo_mock_filter = static function ( $pre, $args, $url ) use ( &$geo_mock ) {
+	if ( null === $geo_mock || ! str_contains( (string) $url, 'download.db-ip.com' ) ) {
+		return $pre;
+	}
+	[ $code, $body ] = $geo_mock( (string) $url );
+	if ( null !== $body && ! empty( $args['filename'] ) ) {
+		file_put_contents( $args['filename'], $body ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Simula il download in streaming.
+	}
+	return array(
+		'headers'  => array(),
+		'body'     => $body ?? '',
+		'response' => array(
+			'code'    => $code,
+			'message' => 404 === $code ? 'Not Found' : 'Simulato',
+		),
+		'cookies'  => array(),
+		'filename' => $args['filename'] ?? null,
+	);
+};
+add_filter( 'pre_http_request', $geo_mock_filter, 10, 3 );
+
+/**
+ * Forza il mese salvato nell'opzione (così update() sceglie i mesi da provare).
+ *
+ * @param string $month Mese Y-m.
+ * @return void
+ */
+$geo_force_month = static function ( string $month ): void {
+	update_option( CountryDatabase::OPTION, array( 'month' => $month ) + (array) get_option( CountryDatabase::OPTION, array() ), false );
+};
+$geo_state = static fn(): string => (string) wp_json_encode( get_option( CountryDatabase::OPTION, array() ) );
+
+// Caso 1: 404 per tutti i mesi, con il mese precedente già installato: non è un errore.
+$geo_force_month( $geo_prev_month );
+$geo_mock = static fn( string $url ): array => array( 404, null );
+$r        = CountryDatabase::update();
+$o        = get_option( CountryDatabase::OPTION, array() );
+$check( 'geo errori 1 (404): ok', 1, (int) $r['ok'] );
+$check( 'geo errori 1 (404): file identico', $geo_md5, md5_file( $geo_path ) );
+$check( 'geo errori 1 (404): month invariato', $geo_prev_month, $o['month'] ?? '' );
+$check( 'geo errori 1 (404): error vuoto', '', $o['error'] ?? 'x' );
+$check( 'geo errori 1 (404): nessun .tmp', 0, $geo_tmp_files() );
+
+// Caso 2: il corpo non è un gzip.
+$geo_force_month( $geo_prev_month );
+$geo_mock = static fn( string $url ): array => array( 200, 'questo non è un gzip, è solo testo' );
+$r        = CountryDatabase::update();
+$o        = get_option( CountryDatabase::OPTION, array() );
+$check( 'geo errori 2 (non gzip): ok falso', 0, (int) $r['ok'] );
+$check( 'geo errori 2 (non gzip): file identico', $geo_md5, md5_file( $geo_path ) );
+$check( 'geo errori 2 (non gzip): error non vuoto', true, '' !== ( $o['error'] ?? '' ) );
+$check( 'geo errori 2 (non gzip): nessun .tmp', 0, $geo_tmp_files() );
+
+// Caso 3: gzip dei primi 2 MB del database (troncato).
+$geo_force_month( $geo_prev_month );
+$geo_truncated = (string) gzencode( substr( $geo_db, 0, 2 * 1048576 ) );
+$geo_mock      = static fn( string $url ): array => array( 200, $geo_truncated );
+$r             = CountryDatabase::update();
+$check( 'geo errori 3 (database troncato): ok falso', 0, (int) $r['ok'] );
+$check( 'geo errori 3 (database troncato): file identico', $geo_md5, md5_file( $geo_path ) );
+$check( 'geo errori 3 (database troncato): nessun .tmp', 0, $geo_tmp_files() );
+
+// Caso 4: gzip valido di 2 MB di byte casuali (metadati non trovati).
+$geo_force_month( $geo_prev_month );
+$geo_random = (string) gzencode( random_bytes( 2 * 1048576 ) );
+$geo_mock   = static fn( string $url ): array => array( 200, $geo_random );
+$r          = CountryDatabase::update();
+$check( 'geo errori 4 (byte casuali): ok falso', 0, (int) $r['ok'] );
+$check( 'geo errori 4 (byte casuali): file identico', $geo_md5, md5_file( $geo_path ) );
+$check( 'geo errori 4 (byte casuali): nessun .tmp', 0, $geo_tmp_files() );
+
+// Caso 5: mese corrente 404 e mese precedente valido (ripiego). Il mese installato è di due mesi fa, quindi si provano entrambi.
+$geo_force_month( $geo_prev2_month );
+$geo_mock = static fn( string $url ): array => str_contains( $url, $geo_this_month ) ? array( 404, null ) : array( 200, $geo_gz );
+$r        = CountryDatabase::update();
+$o        = get_option( CountryDatabase::OPTION, array() );
+$check( 'geo errori 5 (ripiego): ok', 1, (int) $r['ok'] );
+$check( 'geo errori 5 (ripiego): month = mese precedente', $geo_prev_month, $o['month'] ?? '' );
+$check( 'geo errori 5 (ripiego): file valido e uguale', $geo_md5, md5_file( $geo_path ) );
+$check( 'geo errori 5 (ripiego): nessun .tmp', 0, $geo_tmp_files() );
+
+// Caso 6: 503 per il mese corrente: è un errore vero, non «non ancora pubblicato».
+$geo_force_month( $geo_prev_month );
+$geo_mock = static fn( string $url ): array => array( 503, null );
+$r        = CountryDatabase::update();
+$o        = get_option( CountryDatabase::OPTION, array() );
+$check( 'geo errori 6 (503): ok falso', 0, (int) $r['ok'] );
+$check( 'geo errori 6 (503): error non vuoto', true, str_contains( (string) ( $o['error'] ?? '' ), '503' ) );
+$check( 'geo errori 6 (503): file identico', $geo_md5, md5_file( $geo_path ) );
+
+// Caso 7: gzip reale tagliato a metà (il guasto di rete più realistico).
+$geo_force_month( $geo_prev_month );
+$geo_half = substr( $geo_gz, 0, intdiv( strlen( $geo_gz ), 2 ) );
+$geo_mock = static fn( string $url ): array => array( 200, $geo_half );
+$r        = CountryDatabase::update();
+$check( 'geo errori 7 (gzip a metà): ok falso', 0, (int) $r['ok'] );
+$check( 'geo errori 7 (gzip a metà): file identico', $geo_md5, md5_file( $geo_path ) );
+$check( 'geo errori 7 (gzip a metà): nessun .tmp', 0, $geo_tmp_files() );
+
+// Fine dei casi: si toglie il filtro e si rimette l'opzione com'era dopo il download del passo 2.
+$geo_mock = null;
+remove_filter( 'pre_http_request', $geo_mock_filter, 10 );
+update_option( CountryDatabase::OPTION, $geo_option_good, false );
+unset( $geo_db, $geo_gz, $geo_truncated, $geo_random, $geo_half );
+
+// Passo 5: lock tenuto da una seconda connessione (nella stessa sessione MySQL il lock è rientrante e non bloccherebbe).
+$geo_state_before = $geo_state();
+$other            = new mysqli( $wp5w_host, DB_USER, DB_PASSWORD, DB_NAME, (int) $wp5w_port );
+$other->query( "SELECT GET_LOCK( 'wp5w_geo_update', 0 )" );
+$r = CountryDatabase::update();
+$check( 'geo lock occupato: ok falso', 0, (int) $r['ok'] );
+$check( 'geo lock occupato: messaggio «già in corso»', true, str_contains( $r['message'], 'già in corso' ) );
+$check( 'geo lock occupato: opzione invariata', $geo_state_before, $geo_state() );
+$other->query( "SELECT RELEASE_LOCK( 'wp5w_geo_update' )" );
+$other->close();
+
+// Passo 6: database assente. Il paese resta vuoto, la visita è registrata e non ci sono warning.
+rename( $geo_path, $geo_path . '.bak' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- Prova: il file si rimette subito dopo.
+$check( 'geo assente: lookup vuoto', '', CountryDatabase::lookup( '8.8.8.8' ) );
+$check( 'geo assente: status().available falso', false, CountryDatabase::status()['available'] );
+$warnings = array();
+set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.prevent_path_disclosure_set_error_handler -- Prova isolata, il gestore viene tolto subito dopo.
+	static function ( int $errno, string $errstr ) use ( &$warnings ): bool {
+		$warnings[] = $errstr;
+		return true;
+	}
+);
+$geo_status = $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-senza-db/' ) ), '8.8.8.8', $chrome );
+restore_error_handler();
+rename( $geo_path . '.bak', $geo_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- Si rimette il file.
+$no_db = $wpdb->get_row( "SELECT country, device FROM {$hits_table} WHERE uri = '/wp5w-v11-senza-db/'" );
+$check( 'geo assente: visita 204', 204, $geo_status );
+$check( 'geo assente: visita registrata con paese vuoto', '|desktop', ( $no_db->country ?? 'nessuna riga' ) . '|' . ( $no_db->device ?? '' ) );
+$check( 'geo assente: nessun warning', '', implode( ' | ', $warnings ) );
+
+// Passo 7: visite con paese e user agent.
+$ua_iphone   = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+$ua_nintendo = 'Mozilla/5.0 (Nintendo Switch; WifiWebAuthApplet) AppleWebKit/606.4 (KHTML, like Gecko) NF/6.0.1.15.4 NintendoBrowser/5.1.0.20393';
+$check( 'visita da 8.8.8.8 (Chrome Windows): 204', 204, $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-us/' ) ), '8.8.8.8', $chrome ) );
+$check( 'visita da 151.38.1.1 (iPhone): 204', 204, $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-it/' ) ), '151.38.1.1', $ua_iphone ) );
+$check( 'visita da 198.51.100.30 (Nintendo): 204', 204, $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-nd/' ) ), '198.51.100.30', $ua_nintendo ) );
+$geo_row = static function ( string $uri ) use ( $wpdb, $hits_table ): string {
+	$row = $wpdb->get_row( $wpdb->prepare( "SELECT country, device, browser, os FROM {$hits_table} WHERE uri = %s", $uri ) );
+	return $row ? implode( '|', array( $row->country, $row->device, $row->browser, $row->os ) ) : 'nessuna riga';
+};
+$check( 'visita US: country, device, browser, os', 'US|desktop|Chrome|Windows', $geo_row( '/wp5w-v11-us/' ) );
+$check( 'visita IT: country, device, browser, os', 'IT|smartphone|Mobile Safari|iOS', $geo_row( '/wp5w-v11-it/' ) );
+$check( 'visita senza paese né user agent noto: registrata con campi vuoti', '|||', $geo_row( '/wp5w-v11-nd/' ) );
+$before = array( $count_hits(), $discarded( 'bot' ) );
+$check( 'bot da 8.8.8.8: 204', 204, $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-bot/' ) ), '8.8.8.8', 'Googlebot/2.1 (+http://www.google.com/bot.html)' ) );
+$check( 'bot da 8.8.8.8: nessuna riga', $before[0], $count_hits() );
+$check( 'bot da 8.8.8.8: scarto bot +1', $before[1] + 1, $discarded( 'bot' ) );
+
+// Passo 8: nessuna query in più. Dopo il riscaldamento (chiave del giorno valida, database presente) una visita registrata
+// esegue solo la SELECT e la INSERT su wp5w_hits: il numero totale di query è 2 e nessuna riguarda wp5w_geo.
+$send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-warm/' ) ), '8.8.4.4', $chrome );
+$queries = array();
+add_filter( 'query', $capture_query );
+$check( 'visita con paese: 204', 204, $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-query/' ) ), '8.8.8.8', $ua_iphone ) );
+remove_filter( 'query', $capture_query );
+$check( 'nessuna query in più: totale delle query = query su wp5w_hits', count( array_filter( $queries, static fn( $q ) => str_contains( $q, $hits_table ) ) ), count( $queries ) );
+$check( 'nessuna query in più: due query', 2, count( $queries ) );
+$check( 'nessuna query in più: nessuna su wp5w_geo', 0, count( array_filter( $queries, static fn( $q ) => str_contains( $q, 'wp5w_geo' ) ) ) );
+if ( 2 !== count( $queries ) ) {
+	WP_CLI::log( 'Query catturate: ' . implode( ' || ', array_map( static fn( $q ) => substr( trim( $q ), 0, 120 ), $queries ) ) );
+}
+
+// Passo 9: privacy. Nessuna colonna di wp5w_hits contiene un IP usato nei test o una parte dello user agent.
+$privacy_columns = "CONCAT_WS('|', object_type, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, country, device, browser, os)";
+$privacy_hits    = 0;
+foreach ( array( '8.8.8.8', '8.8.4.4', '151.38.1.1', '198.51.100.30', 'Mozilla', 'AppleWebKit' ) as $wp5w_needle ) {
+	$privacy_hits += (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits_table} WHERE {$privacy_columns} LIKE %s", '%' . $wpdb->esc_like( $wp5w_needle ) . '%' ) );
+}
+$check( 'privacy: nessun IP né user agent nelle colonne di wp5w_hits', 0, $privacy_hits );
+
+// Passo 10: aggregazione. La somma dei visitatori è uguale per tutte le dimensioni e ai visitatori own di site_daily.
+$wps_digest_before = $rows_digest( 'wps' );
+( new OwnSource() )->run_hourly();
+$own_dims = array();
+foreach ( $wpdb->get_results( $wpdb->prepare( "SELECT dim, SUM(visitors) AS n FROM {$dim_table} WHERE origin = 'own' AND day = %s GROUP BY dim", $today ), ARRAY_A ) as $wp5w_row ) {
+	$own_dims[ $wp5w_row['dim'] ] = (int) $wp5w_row['n'];
+}
+$own_visitors = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT visitors FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) );
+ksort( $own_dims );
+$check( 'aggregazione: dimensioni own', 'browser,channel,country,device,platform,source', implode( ',', array_keys( array_diff_key( $own_dims, array( 'os' => 1 ) ) ) ) );
+foreach ( array( 'channel', 'source', 'country', 'device', 'browser', 'platform' ) as $wp5w_dim ) {
+	$check( "aggregazione: somma di {$wp5w_dim} = visitatori own del sito", $own_visitors, $own_dims[ $wp5w_dim ] ?? 'nessuna riga' );
+}
+$own_value = static fn( string $dim, string $value ): int => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = 'own' AND day = %s AND dim = %s AND value = %s", $today, $dim, $value ) );
+$check( 'aggregazione: country US >= 1', true, $own_value( 'country', 'US' ) >= 1 );
+$check( 'aggregazione: country IT >= 1', true, $own_value( 'country', 'IT' ) >= 1 );
+$check( 'aggregazione: country (n/d) per le visite senza paese', true, $own_value( 'country', '(n/d)' ) >= 1 );
+$check( 'aggregazione: platform Windows e iOS', true, $own_value( 'platform', 'Windows' ) >= 1 && $own_value( 'platform', 'iOS' ) >= 1 );
+$check( 'aggregazione: nessuna riga own con dim = os', 0, $wpdb->get_var( "SELECT COUNT(*) FROM {$dim_table} WHERE origin = 'own' AND dim = 'os'" ) );
+$check( 'aggregazione: righe wps invariate', $wps_digest_before, $rows_digest( 'wps' ) );
+
+// Passo 11: regola dell'origine nel box.
+$audience_query = new AudienceQuery( new SearchQuery() );
+$box_range      = DateRange::last_days( 30, $today );
+$check( 'pubblico con own_since vuota: identico al passo 1 (le righe own non entrano)', md5( (string) wp_json_encode( $box ) ), md5( (string) wp_json_encode( $audience_query->dimensions( $box_range ) ) ) );
+update_option( Settings::OWN_SINCE, $today );
+$box_own      = $audience_query->dimensions( $box_range );
+$wps_country  = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = 'wps' AND dim = 'country' AND day BETWEEN %s AND %s AND day < %s", $box_range->from, $box_range->to, $today ) );
+$own_country  = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = 'own' AND dim = 'country' AND day = %s", $today ) );
+$check( 'pubblico con own_since = oggi: total dei paesi = wps prima di oggi + own di oggi', $wps_country + $own_country, $box_own['dims']['country']['total'] ?? '' );
+$check( 'pubblico con own_since = oggi: first_day invariato', $box['first_day'] ?? '', $box_own['first_day'] ?? '' );
+// Regressione dell'ottimizzatore di MariaDB: con la forma "( origin = 'wps' AND day < X ) OR ( origin = 'own' AND day >= X )" le righe own
+// di dim_daily sparivano quando il periodo comprendeva la data di passaggio. Origin::where() deve restituire wps prima di oggi più own di oggi.
+$straddle_sql = Mavida\FiveW\Support\Origin::where( $today );
+$check(
+	'regola dell\'origine su dim_daily con il periodo a cavallo della data di passaggio',
+	(int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE dim = 'channel' AND origin = 'wps' AND day BETWEEN %s AND %s AND day < %s", $box_range->from, $box_range->to, $today ) )
+		+ (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE dim = 'channel' AND origin = 'own' AND day = %s", $today ) ),
+	(int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE dim = 'channel' AND day BETWEEN %s AND %s AND {$straddle_sql}", $box_range->from, $box_range->to ) )
+);
+update_option( Settings::OWN_SINCE, '' );
+
+// Passo 12: scheda Stato.
+$admin_user( $admin_id );
+$status_geo = $rest_call( 'GET', '/wp5w/v1/admin/status' )->get_data()['geo'] ?? array();
+$admin_user( 0 );
+$check( 'stato: geo.available', true, $status_geo['available'] ?? false );
+$check( 'stato: geo.month non vuoto', true, '' !== ( $status_geo['month'] ?? '' ) );
+$check( 'stato: geo.built > 0', true, ( $status_geo['built'] ?? 0 ) > 0 );
+
+// Passo 13: cron giornaliero del database dei paesi.
+$geo_event = wp_get_scheduled_event( Mavida\FiveW\Etl\Scheduler::GEO_HOOK );
+$check( 'cron: wp5w_geo_update pianificato', true, (bool) wp_next_scheduled( Mavida\FiveW\Etl\Scheduler::GEO_HOOK ) );
+$check( 'cron: wp5w_geo_update giornaliero', 'daily', $geo_event->schedule ?? '' );
+
+// Passo 14: opzione e file sono quelli dopo il download del passo 2. Il database dei paesi non si cancella nella pulizia finale,
+// così le esecuzioni successive non lo riscaricano (se l'opzione non esisteva all'inizio, ora c'è).
+$check( 'geo: opzione come dopo il download', wp_json_encode( $geo_option_good ), $geo_state() );
+$check( 'geo: file come dopo il download', $geo_md5, md5_file( $geo_path ) );
+$check( 'geo: nessun file di prova rimasto', 0, count( (array) glob( $geo_dir . '/*.bak' ) ) + $geo_tmp_files() );
+
+// ---------------------------------------------------------------------------
+// 12. Pulizia finale.
 // ---------------------------------------------------------------------------
 update_option( Settings::OPTION, Settings::defaults() );
 update_option( Settings::OWN_SINCE, '' );

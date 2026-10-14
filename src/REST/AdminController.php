@@ -11,6 +11,7 @@ namespace Mavida\FiveW\REST;
 
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
+use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Query\CompareQuery;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
@@ -140,6 +141,24 @@ final class AdminController extends RestController {
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => fn() => $this->respond( $this->audience->get() ),
 				'permission_callback' => array( $this, 'check_admin_permission' ),
+			)
+		);
+
+		// Box «Pubblico»: paesi, dispositivi, browser e sistemi degli ultimi N giorni (compreso oggi).
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/audience/dimensions',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->audience->dimensions( DateRange::last_days( (int) $request->get_param( 'days' ), wp_date( 'Y-m-d' ) ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => array(
+					'days' => array(
+						'type'    => 'integer',
+						'enum'    => array( 7, 30, 90 ),
+						'default' => 30,
+					),
+				),
 			)
 		);
 
@@ -280,6 +299,7 @@ final class AdminController extends RestController {
 				'next_run' => $next ? (int) $next : null,
 				'version'  => WP5W_VERSION,
 				'updates'  => Updater::status(),
+				'geo'      => CountryDatabase::status(),
 			)
 		);
 	}

@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Mavida\FiveW\Etl;
 
+use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Support\DateRange;
 
@@ -41,6 +42,13 @@ final class Scheduler {
 	public const OWN_HOURLY_HOOK = 'wp5w_own_hourly';
 
 	/**
+	 * Hook del controllo giornaliero del database dei paesi (scarica il file solo a inizio mese).
+	 *
+	 * @var string
+	 */
+	public const GEO_HOOK = 'wp5w_geo_update';
+
+	/**
 	 * Giorni rielaborati ogni notte: coprono il ritardo di 2-3 giorni di Search Console.
 	 *
 	 * @var int
@@ -55,7 +63,7 @@ final class Scheduler {
 	public function __construct( private readonly Importer $importer ) {}
 
 	/**
-	 * Aggancia gli eventi e pianifica quelli ricorrenti (giornaliero e orario) se mancano.
+	 * Aggancia gli eventi e pianifica quelli ricorrenti (giornaliero, orario e database dei paesi) se mancano.
 	 *
 	 * @return void
 	 */
@@ -63,6 +71,12 @@ final class Scheduler {
 		add_action( self::DAILY_HOOK, array( $this, 'run_daily' ) );
 		add_action( self::FULL_HOOK, array( $this, 'run_full' ) );
 		add_action( self::OWN_HOURLY_HOOK, static fn() => ( new OwnSource() )->run_hourly() );
+		add_action(
+			self::GEO_HOOK,
+			static function (): void {
+				CountryDatabase::update();
+			}
+		);
 
 		// Alle 4:00 del sito: dopo le manutenzioni notturne di WP Statistics e Rank Math.
 		if ( ! wp_next_scheduled( self::DAILY_HOOK ) ) {
@@ -73,6 +87,12 @@ final class Scheduler {
 		// Aggregazione oraria della raccolta propria: ieri si chiude entro un'ora dalla mezzanotte, senza aspettare le 4:00.
 		if ( ! wp_next_scheduled( self::OWN_HOURLY_HOOK ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', self::OWN_HOURLY_HOOK );
+		}
+
+		// Database dei paesi: un controllo al giorno, senza richieste di rete se il file è già del mese corrente.
+		// Si pianifica qui e non all'attivazione, perché "wp plugin install --force" non esegue l'hook di attivazione.
+		if ( ! wp_next_scheduled( self::GEO_HOOK ) ) {
+			wp_schedule_event( time() + 5 * MINUTE_IN_SECONDS, 'daily', self::GEO_HOOK );
 		}
 	}
 

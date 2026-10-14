@@ -12,6 +12,7 @@ namespace Mavida\FiveW\Query;
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
+use Mavida\FiveW\Support\Dimensions;
 use Mavida\FiveW\Support\Months;
 use Mavida\FiveW\Support\Origin;
 use Mavida\FiveW\Support\Series;
@@ -108,6 +109,51 @@ final class AudienceQuery {
 				'comparable' => $comparable,
 				'rows'       => $gsc_week ? $this->search->queries( $gsc_week, $gsc_week->previous(), self::LIMIT ) : array(),
 			),
+		);
+	}
+
+	/**
+	 * Paesi, dispositivi, browser e sistemi operativi del periodo (box «Pubblico»).
+	 *
+	 * Una persona conta una volta per ogni giorno di visita (come in `dim_daily`), quindi i visitatori
+	 * sommati su più giorni non sono persone uniche.
+	 *
+	 * @param DateRange $range Intervallo.
+	 * @return array{range:array{from:string,to:string},first_day:?string,dims:array<string,array<string,mixed>>}
+	 */
+	public function dimensions( DateRange $range ): array {
+		global $wpdb;
+
+		$table = Schema::table( 'dim_daily' );
+		$dims  = "'" . implode( "','", Dimensions::DIMS ) . "'";
+
+		// Regola dell'origine: solo righe wps, o own dalla data di passaggio (anche per il primo giorno con dati).
+		$origin = Origin::where( Settings::own_since() );
+
+		// Una sola SELECT per le quattro dimensioni.
+		$rows  = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT dim, value, SUM(visitors) AS visitors FROM {$table} WHERE day BETWEEN %s AND %s AND dim IN ({$dims}) AND {$origin} GROUP BY dim, value",
+				$range->from,
+				$range->to
+			),
+			ARRAY_A
+		);
+		$first = $wpdb->get_var( "SELECT MIN(day) FROM {$table} WHERE dim IN ({$dims}) AND {$origin}" );
+
+		// Valori per dimensione (le quattro chiavi ci sono sempre, anche vuote).
+		$values = array_fill_keys( Dimensions::DIMS, array() );
+		foreach ( $rows as $row ) {
+			$values[ $row['dim'] ][ (string) $row['value'] ] = (int) $row['visitors'];
+		}
+
+		return array(
+			'range'     => array(
+				'from' => $range->from,
+				'to'   => $range->to,
+			),
+			'first_day' => $first ? (string) $first : null,
+			'dims'      => array_map( static fn( array $items ): array => Dimensions::top( $items ), $values ),
 		);
 	}
 
