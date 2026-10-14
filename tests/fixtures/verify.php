@@ -5,7 +5,7 @@
  * Uso: npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php
  *
  * Controlla lo schema v4 e la migrazione da v3, confronta le tabelle wp5w_* con le sorgenti, simula le visite
- * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine e le rotte delle opzioni.
+ * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine, le rotte delle opzioni e il confronto con WP Statistics.
  *
  * @package Mavida\FiveW
  */
@@ -774,7 +774,230 @@ $check( 'cron: wp5w_etl_daily tolto alla disattivazione', false, (bool) wp_next_
 $check( 'cron: wp5w_own_hourly ripianificato', true, (bool) wp_next_scheduled( Mavida\FiveW\Etl\Scheduler::OWN_HOURLY_HOOK ) );
 
 // ---------------------------------------------------------------------------
-// 10. Pulizia finale.
+// 10. Confronto con WP Statistics (GET /wp5w/v1/admin/compare).
+// ---------------------------------------------------------------------------
+// Passo 1: si salvano le righe own, gli scarti e lo stato dell'ETL (le visite simulate delle sezioni 5-9 non servono),
+// poi si inseriscono a mano righe own note. D è oggi e D-n il giorno di n giorni prima.
+$d = array();
+for ( $wp5w_n = 0; $wp5w_n <= 4; $wp5w_n++ ) {
+	$d[ $wp5w_n ] = ( new DateTimeImmutable( $today ) )->modify( "-{$wp5w_n} days" )->format( 'Y-m-d' );
+}
+
+$own_backup = array();
+foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
+	$own_backup[ $wp5w_name ] = $wpdb->get_results( 'SELECT * FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'", ARRAY_A );
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'" );
+}
+$discards_backup = $wpdb->get_results( 'SELECT * FROM ' . Schema::table( 'discards' ), ARRAY_A );
+$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'discards' ) );
+$state_backup = get_option( Importer::STATE_OPTION, false );
+
+// Righe wps di D-4 ... D-1: se il seed non le ha (dump diverso), si inseriscono con valori noti e si tolgono alla fine.
+$wps_inserted = array();
+for ( $wp5w_n = 1; $wp5w_n <= 4; $wp5w_n++ ) {
+	$exists = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'wps' AND day = %s", $d[ $wp5w_n ] ) );
+	if ( ! $exists ) {
+		$wpdb->insert(
+			Schema::table( 'site_daily' ),
+			array(
+				'day'      => $d[ $wp5w_n ],
+				'visitors' => 10,
+				'views'    => 20,
+				'origin'   => 'wps',
+			)
+		);
+		$wps_inserted[] = $d[ $wp5w_n ];
+	}
+}
+
+$post_uri    = '/articolo-' . $post_a . '/';
+$compare_own = array(
+	array( 'site_daily', array( 'day' => $d[4], 'visitors' => 1, 'views' => 1 ) ),
+	array( 'site_daily', array( 'day' => $d[3], 'visitors' => 40, 'views' => 60 ) ),
+	array( 'site_daily', array( 'day' => $d[2], 'visitors' => 50, 'views' => 70 ) ),
+	// Il primo articolo del seed: 30 visualizzazioni in tutto. Un contenuto con 5 visualizzazioni sta sotto la soglia di 10.
+	array( 'object_daily', array( 'day' => $d[3], 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $post_uri, 'views' => 15, 'visitors' => 5 ) ),
+	array( 'object_daily', array( 'day' => $d[2], 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $post_uri, 'views' => 15, 'visitors' => 5 ) ),
+	array( 'object_daily', array( 'day' => $d[3], 'object_type' => 'post', 'object_id' => 999999, 'uri' => '/solo-own/', 'views' => 5, 'visitors' => 2 ) ),
+	array( 'entry_daily', array( 'day' => $d[3], 'object_type' => 'home', 'object_id' => 0, 'channel' => 'direct', 'visitors' => 4 ) ),
+	array( 'dim_daily', array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'direct', 'visitors' => 30 ) ),
+	array( 'dim_daily', array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'search', 'visitors' => 10 ) ),
+);
+foreach ( $compare_own as [ $wp5w_name, $wp5w_row ] ) {
+	$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row + array( 'origin' => 'own' ) );
+}
+$compare_discards = array(
+	array( $d[4], 'bot', 100 ),
+	array( $d[3], 'bot', 5 ),
+	array( $d[3], 'rate', 1 ),
+);
+foreach ( $compare_discards as [ $wp5w_day_value, $wp5w_reason, $wp5w_count ] ) {
+	$wpdb->insert(
+		Schema::table( 'discards' ),
+		array(
+			'day'    => $wp5w_day_value,
+			'reason' => $wp5w_reason,
+			'n'      => $wp5w_count,
+		)
+	);
+}
+
+// L'ultimo ETL è partito adesso, con `to` = oggi: ieri (D-1) è completo per WP Statistics.
+update_option(
+	Importer::STATE_OPTION,
+	array(
+		'mode'    => 'daily',
+		'from'    => $d[4],
+		'to'      => $d[0],
+		'started' => time(),
+		'ok'      => true,
+	),
+	false
+);
+
+// Passo 2: permessi e intestazione.
+$compare_route = '/wp5w/v1/admin/compare';
+$admin_user( 0 );
+$check( 'confronto senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $compare_route )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$compare_response = $rest_call( 'GET', $compare_route );
+$compare          = $compare_response->get_data();
+$check( 'confronto con amministratore: 200', 200, $compare_response->get_status() );
+$check( 'confronto: Cache-Control no-store', 'no-store, max-age=0', $compare_response->get_headers()['Cache-Control'] ?? '' );
+
+// Passo 3: copertura.
+$coverage = $compare['coverage'] ?? array();
+$excluded = array_map( static fn( $item ) => $item['day'] . ':' . $item['reason'], $coverage['excluded'] ?? array() );
+$check( 'confronto: available', true, $compare['available'] ?? false );
+$check( 'confronto: coverage.from = D-3', $d[3], $coverage['from'] ?? '' );
+$check( 'confronto: coverage.to = D-1', $d[1], $coverage['to'] ?? '' );
+$check( 'confronto: days = D-3, D-2', $d[3] . ',' . $d[2], implode( ',', array_column( $compare['days'] ?? array(), 'day' ) ) );
+$check( 'confronto: coverage.days = 2', 2, $coverage['days'] ?? '' );
+$check( 'confronto: D-4 escluso come partial', true, in_array( $d[4] . ':partial', $excluded, true ) );
+$check( 'confronto: D-1 escluso come no_own', true, in_array( $d[1] . ':no_own', $excluded, true ) );
+$check( 'confronto: oggi escluso come today', true, in_array( $d[0] . ':today', $excluded, true ) );
+$check( 'confronto: own_first_day = D-4', $d[4], $coverage['own_first_day'] ?? '' );
+$check( 'confronto: etl_ok', true, $coverage['etl_ok'] ?? false );
+
+// Passo 4: giorni, differenze e segnalazione.
+$own_expected = array(
+	$d[3] => array( 40, 60 ),
+	$d[2] => array( 50, 70 ),
+);
+foreach ( $compare['days'] ?? array() as $wp5w_row ) {
+	$wps = $wpdb->get_row( $wpdb->prepare( 'SELECT visitors, views FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'wps' AND day = %s", $wp5w_row['day'] ) );
+	$check( "confronto {$wp5w_row['day']}: wps", ( $wps->visitors ?? '' ) . '|' . ( $wps->views ?? '' ), $wp5w_row['wps']['visitors'] . '|' . $wp5w_row['wps']['views'] );
+	$check( "confronto {$wp5w_row['day']}: own", implode( '|', $own_expected[ $wp5w_row['day'] ] ), $wp5w_row['own']['visitors'] . '|' . $wp5w_row['own']['views'] );
+	$wp5w_diff = Mavida\FiveW\Support\Metrics::change( $wp5w_row['own']['visitors'], $wp5w_row['wps']['visitors'] );
+	$check( "confronto {$wp5w_row['day']}: diff.visitors", $wp5w_diff, $wp5w_row['diff']['visitors'] );
+	$check(
+		"confronto {$wp5w_row['day']}: flagged",
+		Mavida\FiveW\Support\Comparison::flagged( $wp5w_diff, Mavida\FiveW\Support\Metrics::change( $wp5w_row['own']['views'], $wp5w_row['wps']['views'] ) ),
+		$wp5w_row['flagged']
+	);
+}
+
+// Passo 5: totali (senza D-4, che è parziale).
+$check( 'confronto: totals.own visitatori', 90, $compare['totals']['own']['visitors'] ?? '' );
+$check( 'confronto: totals.own visualizzazioni', 130, $compare['totals']['own']['views'] ?? '' );
+
+// Passo 6: scarti (i 100 di D-4 non contano).
+$check( 'confronto: scarti bot = 5, non 105', 5, $compare['discards']['reasons']['bot']['n'] ?? '' );
+$check( 'confronto: scarti rate = 1', 1, $compare['discards']['reasons']['rate']['n'] ?? '' );
+$check( 'confronto: quota bot', round( 5 / ( 130 + 6 ) * 100, 1 ), $compare['discards']['reasons']['bot']['share'] ?? '' );
+$check( 'confronto: scarti totali', 6, $compare['discards']['total'] ?? '' );
+
+// Passo 7: gruppo sospetto e canali.
+$channels_own = array_column( $compare['channels'] ?? array(), 'own', 'channel' );
+$check( 'confronto: home_direct.own = 4', 4, $compare['home_direct']['own'] ?? '' );
+$check( 'confronto: canale direct own = 30', 30, $channels_own['direct'] ?? '' );
+
+// Passo 8: classifica.
+$top_rows = $compare['top'] ?? array();
+$top_own  = array_column( $top_rows, 'own_views', 'id' );
+$check( 'confronto: il primo articolo è in top con 30 visualizzazioni', 30, $top_own[ $post_a ] ?? '' );
+$check( 'confronto: il contenuto con 5 visualizzazioni non è in top', false, isset( $top_own[999999] ) );
+$check( 'confronto: top al massimo 10 righe', true, count( $top_rows ) <= 10 );
+$diff_abs = array_column( $top_rows, 'diff_abs' );
+$sorted   = $diff_abs;
+rsort( $sorted );
+$check( 'confronto: top ordinata per differenza assoluta', implode( ',', $sorted ), implode( ',', $diff_abs ) );
+
+// Passo 9: ETL non ancora passato oggi (partito ieri a mezzogiorno): D-1 è in attesa e la finestra finisce a D-2.
+update_option(
+	Importer::STATE_OPTION,
+	array(
+		'mode'    => 'daily',
+		'from'    => $d[4],
+		'to'      => $d[1],
+		'started' => ( new DateTimeImmutable( 'yesterday noon', wp_timezone() ) )->getTimestamp(),
+		'ok'      => true,
+	),
+	false
+);
+$pending = $rest_call( 'GET', $compare_route )->get_data()['coverage'] ?? array();
+$check( 'confronto con ETL di ieri: coverage.to = D-2', $d[2], $pending['to'] ?? '' );
+$check(
+	'confronto con ETL di ieri: D-1 in etl_pending',
+	true,
+	in_array( $d[1] . ':etl_pending', array_map( static fn( $item ) => $item['day'] . ':' . $item['reason'], $pending['excluded'] ?? array() ), true )
+);
+
+// Passo 10: la rotta non scrive nulla.
+$compare_queries = array();
+$compare_capture = static function ( $query ) use ( &$compare_queries ) {
+	$compare_queries[] = (string) $query;
+	return $query;
+};
+add_filter( 'query', $compare_capture );
+$rest_call( 'GET', $compare_route );
+remove_filter( 'query', $compare_capture );
+$check( 'confronto: nessuna INSERT, UPDATE, DELETE o REPLACE', 0, count( array_filter( $compare_queries, static fn( $q ) => 1 === preg_match( '/^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i', $q ) ) ) );
+
+// Passo 11: con wp5w_own_since vuota l'interfaccia resta identica anche con queste righe own.
+// L'istantanea di partenza è senza utente (edit_url dipende dai permessi), quindi si confronta senza utente.
+$admin_user( 0 );
+$ui_compare = $ui_snapshot();
+$admin_user( $admin_id );
+foreach ( $ui_before as $wp5w_label => $wp5w_json ) {
+	$check( "confronto, non regressione: {$wp5w_label}", md5( $wp5w_json ), md5( $ui_compare[ $wp5w_label ] ) );
+}
+
+// Passo 12: senza righe own la rotta risponde con available falso.
+foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'" );
+}
+$check( 'confronto senza righe own: available falso', false, $rest_call( 'GET', $compare_route )->get_data()['available'] ?? true );
+
+// Passo 13: si rimette tutto come prima della sezione.
+foreach ( $own_backup as $wp5w_name => $wp5w_rows ) {
+	foreach ( $wp5w_rows as $wp5w_row ) {
+		$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row );
+	}
+}
+$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'discards' ) );
+foreach ( $discards_backup as $wp5w_row ) {
+	$wpdb->insert( Schema::table( 'discards' ), $wp5w_row );
+}
+foreach ( $wps_inserted as $wp5w_day_value ) {
+	$wpdb->delete(
+		Schema::table( 'site_daily' ),
+		array(
+			'day'    => $wp5w_day_value,
+			'origin' => 'wps',
+		)
+	);
+}
+if ( false === $state_backup ) {
+	delete_option( Importer::STATE_OPTION );
+} else {
+	update_option( Importer::STATE_OPTION, $state_backup, false );
+}
+$check( 'confronto: righe own ripristinate', md5( $own_digest ), md5( $rows_digest( 'own' ) ) );
+$admin_user( 0 );
+
+// ---------------------------------------------------------------------------
+// 11. Pulizia finale.
 // ---------------------------------------------------------------------------
 update_option( Settings::OPTION, Settings::defaults() );
 update_option( Settings::OWN_SINCE, '' );
