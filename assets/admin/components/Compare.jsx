@@ -1,8 +1,9 @@
 import { useEffect, useState } from '@wordpress/element';
-import { __ } from '@wordpress/i18n';
+import { __, _n, sprintf } from '@wordpress/i18n';
 import { Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Card from './Card';
+import { LABELS as CHANNEL_LABELS } from './ChannelList';
 
 // Etichette dei motivi per cui un giorno è escluso dal confronto.
 const EXCLUDED = {
@@ -54,7 +55,13 @@ function Coverage( { coverage } ) {
 	return (
 		<p>
 			{ days > 0
-				? `${ formatNumber( days ) } ${ days === 1 ? __( 'giorno completo confrontato', 'wp-5w' ) : __( 'giorni completi confrontati', 'wp-5w' ) }, ${ __( 'dal', 'wp-5w' ) } ${ formatDay( from ) } ${ __( 'al', 'wp-5w' ) } ${ formatDay( to ) }.`
+				? sprintf(
+					/* translators: 1: numero di giorni, 2: primo giorno, 3: ultimo giorno. */
+					_n( '%1$s giorno completo confrontato, dal %2$s al %3$s.', '%1$s giorni completi confrontati, dal %2$s al %3$s.', days, 'wp-5w' ),
+					formatNumber( days ),
+					formatDay( from ),
+					formatDay( to )
+				)
 				: __( 'Nessun giorno completo con entrambe le origini.', 'wp-5w' ) }
 			{ excluded.length > 0 &&
 				` ${ __( 'Esclusi:', 'wp-5w' ) } ${ excluded.map( ( item ) => `${ shortDay( item.day ) } (${ EXCLUDED[ item.reason ] ?? item.reason })` ).join( '; ' ) }.` }
@@ -99,7 +106,11 @@ export default function Compare() {
 				{ hasDays && (
 					<>
 						<p className="wp5w-note wp5w-note--top">
-							{ __( 'La raccolta propria conta un po\' meno, perché esclude bot e amministratori. Una differenza stabile entro il 15% è normale; i giorni oltre la soglia sono evidenziati.', 'wp-5w' ) }
+							{ sprintf(
+								/* translators: %s: soglia di differenza in percentuale. */
+								__( 'La raccolta propria conta un po\' meno, perché esclude bot e amministratori. Una differenza stabile entro il %s è normale; i giorni oltre la soglia sono evidenziati.', 'wp-5w' ),
+								formatNumber( data.threshold, '%' )
+							) }
 						</p>
 						<table className="widefat striped">
 							<thead>
@@ -214,7 +225,7 @@ export default function Compare() {
 							<tbody>
 								{ channels.map( ( row ) => (
 									<tr key={ row.channel }>
-										<td>{ row.channel }</td>
+										<td>{ CHANNEL_LABELS[ row.channel ] ?? row.channel }</td>
 										<td className="num">{ formatNumber( row.wps ) }</td>
 										<td className="num">{ formatNumber( row.own ) }</td>
 										<td className="num">{ formatDiff( row.diff ) }</td>
@@ -273,7 +284,11 @@ export default function Compare() {
 							</tbody>
 						</table>
 						<p className="wp5w-note">
-							{ __( 'Visualizzazioni sui giorni completi; compaiono i contenuti con almeno 10 visualizzazioni in una delle due origini.', 'wp-5w' ) }
+							{ sprintf(
+								/* translators: %s: visualizzazioni minime in una delle due origini. */
+								__( 'Visualizzazioni sui giorni completi; compaiono i contenuti con almeno %s visualizzazioni in una delle due origini.', 'wp-5w' ),
+								formatNumber( data.min_views )
+							) }
 						</p>
 					</Card>
 				</>

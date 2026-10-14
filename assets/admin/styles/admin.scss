@@ -173,6 +173,36 @@
 	background: #fcf0d4;
 }
 
+// «Ricerche interne»: la cella delle ricerche senza risultati, evidenziata se sono tutte (stesso giallo del Confronto).
+.wp5w-table td.is-flagged {
+	background: #fcf0d4;
+}
+
+// «Online adesso»: il numero grande dei visitatori e l'elenco dei contenuti con i visitatori a destra.
+.wp5w-online {
+	&__count {
+		margin: 0 0 8px;
+		font-size: 36px;
+		line-height: 1.1;
+		font-weight: 600;
+	}
+
+	&__list {
+		margin: 0;
+
+		li {
+			display: flex;
+			justify-content: space-between;
+			gap: 16px;
+			margin-bottom: 6px;
+		}
+	}
+
+	&__value {
+		color: #646970;
+	}
+}
+
 .wp5w-actions {
 	display: flex;
 	gap: 8px;
