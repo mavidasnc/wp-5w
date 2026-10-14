@@ -2,6 +2,27 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.9.0] — 2026-10-14
+
+Fase 3 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): paese, dispositivo, browser e sistema operativo (specifica in [docs/fasi/fase-3.md](docs/fasi/fase-3.md)). Lo schema resta alla versione 4 e non ci sono tabelle nuove: le colonne `country`, `device`, `browser` e `os` di `wp5w_hits` esistono dalla 0.7.0.
+
+### Added
+- **Paese delle visite proprie** con il database DB-IP Lite Country (`maxmind-db/reader` `^1.14`, senza prefisso: WP Statistics usa una copia con il prefisso `WP_Statistics\Dependencies`, quindi non c'è conflitto). Il paese si calcola nell'endpoint dopo l'ultimo scarto, senza nessuna query in più; l'IP non si salva.
+- **`Geo\CountryDatabase`:** scarica `dbip-country-lite.mmdb` in `uploads/wp5w/` (con `.htaccess` e `index.php`) con un evento giornaliero `wp5w_geo_update`, che non fa richieste di rete se il file è del mese corrente. Prova il mese corrente e poi il precedente; solo lo stato HTTP 404 vale «non ancora pubblicato». Controlla gzip (CRC e ISIZE), dimensione, metadati e una ricerca di prova prima di sostituire il file con `rename()`; usa solo funzioni PHP e WordPress (sul blog `exec()` è disabilitato). Stato nell'opzione `wp5w_geo`.
+- **Dispositivo, browser e sistema operativo** con la classe pura `Support\UserAgent` (regole essenziali, nomi di device-detector come in WP Statistics: `smartphone`, `Mac`, `GNU/Linux`, `Chrome Mobile`...). Lo user agent non si salva.
+- **Aggregazione:** `OwnSource` scrive in `dim_daily` le dimensioni `country`, `device`, `browser` e `platform` (il sistema operativo) con la prima visita del giorno di ogni visitatore; il valore sconosciuto è `(n/d)`.
+- **Box «Pubblico»** nella scheda Visitatori (paesi, dispositivi, browser e sistemi operativi degli ultimi 7, 30 o 90 giorni, al massimo 10 valori più «Altri») e rotta `GET /wp5w/v1/admin/audience/dimensions`.
+- **Card «Database dei paesi»** nella scheda Stato e attribuzione «IP Geolocation by DB-IP» (CC BY 4.0) in fondo alla pagina.
+- `Support\GeoDb` e `Support\Dimensions` (classi pure) con `UserAgentTest` (31 user agent reali), `GeoDbTest` e `DimensionsTest`.
+- `verify.php`: voce `pubblico` nell'istantanea e nuova sezione 11 (box, download reale, guasti simulati, lock, database assente, visite con paese e user agent, nessuna query in più, privacy, aggregazione); la pulizia finale diventa la 12.
+
+### Changed
+- La disattivazione toglie anche l'evento `wp5w_geo_update`; la disinstallazione cancella sempre l'evento, l'opzione `wp5w_geo` e la cartella `uploads/wp5w/`.
+- Lo zip esclude da `vendor/maxmind-db/reader` i sorgenti C (`ext/`), la documentazione e i file di tooling, e tiene `src/`, `autoload.php`, `composer.json` e `LICENSE`.
+
+### Fixed
+- **`Support\Origin::where()`:** con la forma `( origin = 'wps' AND day < X ) OR ( origin = 'own' AND day >= X )` l'ottimizzatore di MariaDB (10.11 del blog e 12.3 di wp-env) scartava le righe `own` delle tabelle con chiave primaria composta (`dim_daily`...) quando il periodo comprendeva la data di passaggio. Ora la condizione è `origin = IF( day < X, 'wps', 'own' )`, equivalente e corretta. Con `wp5w_own_since` vuota nulla cambia (la regola resta `origin = 'wps'`).
+
 ## [0.8.0] — 2026-10-14
 
 Fase 2 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): confronto in parallelo con WP Statistics, senza cambiare nessun numero delle altre schede (specifica in [docs/fasi/fase-2.md](docs/fasi/fase-2.md)). Nessuna tabella, opzione o cron nuovi: lo schema resta alla versione 4.
