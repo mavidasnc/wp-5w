@@ -13,6 +13,8 @@ use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Query\CompareQuery;
+use Mavida\FiveW\Query\OnlineQuery;
+use Mavida\FiveW\Query\OperationsQuery;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
@@ -33,13 +35,15 @@ final class AdminController extends RestController {
 	/**
 	 * Costruttore.
 	 *
-	 * @param Importer      $importer Importer.
-	 * @param OverviewQuery $overview Interrogazioni della Panoramica.
-	 * @param PostsQuery    $posts    Interrogazioni della scheda Articoli e del dettaglio.
-	 * @param SearchQuery   $search   Interrogazioni di Search Console (pagine e opportunità).
-	 * @param AudienceQuery $audience Interrogazioni della scheda Visitatori.
-	 * @param TrendQuery    $trend    Indicatore di trend del sito e dei contenuti.
-	 * @param CompareQuery  $compare  Confronto tra la raccolta propria e WP Statistics.
+	 * @param Importer        $importer   Importer.
+	 * @param OverviewQuery   $overview   Interrogazioni della Panoramica.
+	 * @param PostsQuery      $posts      Interrogazioni della scheda Articoli e del dettaglio.
+	 * @param SearchQuery     $search     Interrogazioni di Search Console (pagine e opportunità).
+	 * @param AudienceQuery   $audience   Interrogazioni della scheda Visitatori.
+	 * @param TrendQuery      $trend      Indicatore di trend del sito e dei contenuti.
+	 * @param CompareQuery    $compare    Confronto tra la raccolta propria e WP Statistics.
+	 * @param OnlineQuery     $online     «Online adesso».
+	 * @param OperationsQuery $operations Pagine non trovate e ricerche interne.
 	 */
 	public function __construct(
 		private readonly Importer $importer,
@@ -48,7 +52,9 @@ final class AdminController extends RestController {
 		private readonly SearchQuery $search,
 		private readonly AudienceQuery $audience,
 		private readonly TrendQuery $trend,
-		private readonly CompareQuery $compare
+		private readonly CompareQuery $compare,
+		private readonly OnlineQuery $online,
+		private readonly OperationsQuery $operations
 	) {}
 
 	/**
@@ -162,6 +168,52 @@ final class AdminController extends RestController {
 			)
 		);
 
+		// Box «Campagne»: campagne, sorgenti e mezzi UTM degli ultimi N giorni (solo raccolta propria).
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/audience/campaigns',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->audience->campaigns( DateRange::last_days( (int) $request->get_param( 'days' ), wp_date( 'Y-m-d' ) ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::days_args(),
+			)
+		);
+
+		// «Online adesso»: nessun parametro, la finestra è di 5 minuti.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/online',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn() => $this->respond( $this->online->get() ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+			)
+		);
+
+		// Pagine non trovate e ricerche interne degli ultimi N giorni (scheda Articoli).
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/notfound',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->operations->not_found( DateRange::last_days( (int) $request->get_param( 'days' ), wp_date( 'Y-m-d' ) ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::days_args(),
+			)
+		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/searches',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->operations->searches( DateRange::last_days( (int) $request->get_param( 'days' ), wp_date( 'Y-m-d' ) ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::days_args(),
+			)
+		);
+
 		// Confronto con WP Statistics: nessun parametro, la finestra dei giorni la calcola il server.
 		register_rest_route(
 			self::API_NAMESPACE,
@@ -249,6 +301,21 @@ final class AdminController extends RestController {
 				'permission_callback' => array( $this, 'check_admin_permission' ),
 				'args'                => self::range_args(),
 			)
+		);
+	}
+
+	/**
+	 * Parametro days (7, 30 o 90, predefinito 30) delle rotte «ultimi N giorni» della fase 4.
+	 *
+	 * @return array<string,array<string,mixed>>
+	 */
+	private static function days_args(): array {
+		return array(
+			'days' => array(
+				'type'    => 'integer',
+				'enum'    => array( 7, 30, 90 ),
+				'default' => 30,
+			),
 		);
 	}
 

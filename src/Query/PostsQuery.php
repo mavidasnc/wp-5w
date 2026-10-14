@@ -14,6 +14,7 @@ use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Metrics;
 use Mavida\FiveW\Support\Origin;
+use Mavida\FiveW\Support\Referrers;
 use Mavida\FiveW\Support\Series;
 
 defined( 'ABSPATH' ) || exit;
@@ -275,12 +276,78 @@ final class PostsQuery {
 			'referrers' => array_map(
 				static fn( array $row ): array => array(
 					'referrer' => (string) $row['referrer'],
+					'label'    => Referrers::label( (string) $row['referrer'] ),
 					'channel'  => (string) $row['channel'],
 					'source'   => (string) $row['source'],
 					'visitors' => (int) $row['visitors'],
 				),
 				$referrers
 			),
+		);
+	}
+
+	/**
+	 * Visualizzazioni per contenuto nell'intervallo (colonna «Visite (30 g)» e barra di amministrazione).
+	 *
+	 * Una sola SELECT per l'intera lista di ID, con la regola dell'origine. Gli ID senza righe non compaiono nel risultato.
+	 *
+	 * @param string         $type  Tipo di oggetto (`post` o `page`, vedi object_type()).
+	 * @param array<int,int> $ids   ID dei contenuti.
+	 * @param DateRange      $range Intervallo.
+	 * @return array<int,int> ID => visualizzazioni.
+	 */
+	public function views_by_ids( string $type, array $ids, DateRange $range ): array {
+		global $wpdb;
+
+		// Senza ID non si interroga: IN () sarebbe un errore SQL.
+		$ids = array_values( array_unique( array_map( 'intval', $ids ) ) );
+		if ( ! $ids ) {
+			return array();
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$origin       = Origin::where( Settings::own_since() ); // Regola dell'origine.
+		$rows         = $wpdb->get_results(
+			$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Segnaposto %d generati per ogni id.
+				'SELECT object_id, SUM(views) AS views FROM ' . Schema::table( 'object_daily' ) . "
+				WHERE object_type = %s AND object_id IN ({$placeholders}) AND day BETWEEN %s AND %s AND {$origin}
+				GROUP BY object_id",
+				array_merge( array( $type ), $ids, array( $range->from, $range->to ) )
+			),
+			ARRAY_A
+		);
+
+		$views = array();
+		foreach ( $rows as $row ) {
+			$views[ (int) $row['object_id'] ] = (int) $row['views'];
+		}
+		return $views;
+	}
+
+	/**
+	 * Clausole per ordinare un elenco di articoli o pagine per visualizzazioni (colonna ordinabile di `PostViews`).
+	 *
+	 * Un LEFT JOIN su una tabella derivata che somma le visualizzazioni del periodo: i contenuti senza righe hanno
+	 * `wp5w.wp5w_views` nullo, quindi chi usa `field` lo racchiude in COALESCE.
+	 *
+	 * @param string    $type  Tipo di oggetto (`post` o `page`, vedi object_type()).
+	 * @param DateRange $range Intervallo.
+	 * @return array{join:string,field:string}
+	 */
+	public function views_order_clauses( string $type, DateRange $range ): array {
+		global $wpdb;
+
+		$origin = Origin::where( Settings::own_since() ); // Regola dell'origine.
+
+		return array(
+			'join'  => $wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Il join si aggiunge alle clausole di WP_Query.
+				' LEFT JOIN ( SELECT object_id, SUM(views) AS wp5w_views FROM ' . Schema::table( 'object_daily' ) . "
+				WHERE object_type = %s AND day BETWEEN %s AND %s AND {$origin} GROUP BY object_id ) wp5w ON wp5w.object_id = {$wpdb->posts}.ID",
+				$type,
+				$range->from,
+				$range->to
+			),
+			'field' => 'COALESCE(wp5w.wp5w_views, 0)',
 		);
 	}
 

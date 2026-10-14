@@ -10,12 +10,15 @@ declare(strict_types=1);
 namespace Mavida\FiveW;
 
 use Mavida\FiveW\Admin\AdminMenu;
+use Mavida\FiveW\Admin\PostViews;
 use Mavida\FiveW\Cli\Command;
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Front\Tracker;
 use Mavida\FiveW\Query\CompareQuery;
+use Mavida\FiveW\Query\OnlineQuery;
+use Mavida\FiveW\Query\OperationsQuery;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
@@ -107,7 +110,11 @@ final class Plugin {
 		// Le risposte REST del plugin non devono mai finire nelle cache di pagina.
 		add_filter( 'rest_post_dispatch', array( RestController::class, 'no_cache' ), 10, 3 );
 		$search = new SearchQuery();
-		( new AdminController( $importer, new OverviewQuery(), new PostsQuery(), $search, new AudienceQuery( $search ), new TrendQuery(), new CompareQuery() ) )->register();
+		$posts  = new PostsQuery();
+		( new AdminController( $importer, new OverviewQuery(), $posts, $search, new AudienceQuery( $search ), new TrendQuery(), new CompareQuery(), new OnlineQuery(), new OperationsQuery() ) )->register();
+
+		// Visite degli ultimi 30 giorni nell'elenco di articoli e pagine e nella barra di amministrazione (anche nel frontend).
+		( new PostViews( $posts ) )->register();
 
 		// Raccolta propria: endpoint pubblico delle visite e tracker nel frontend.
 		( new HitController() )->register();
