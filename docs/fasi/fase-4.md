@@ -605,10 +605,10 @@ Va dopo la sezione 11, e la pulizia finale diventa la sezione 13. Si usano `$che
 11. **Visite nell'admin:**
     - `views_by_ids( 'post', $seed_posts, 30 giorni )` coincide, per ogni ID, con `SUM(views)` di `object_daily` `wps` sugli stessi giorni;
     - con `$GLOBALS['wp_query']->posts` impostato sui post del seed e l'amministratore, il rendering della colonna per tutte le righe (con `ob_start()`) esegue **una sola** query su `object_daily` (filtro `query`) e stampa link con `detail=<ID>`;
-    - `posts_clauses` con `orderby=wp5w_views&order=DESC` su una `WP_Query` di `post` restituisce gli ID ordinati come le somme;
+    - **ordinamento:** in `wp eval-file` `is_admin()` è falso e una `WP_Query` nuova non è la query principale, quindi la guardia del filtro di `PostViews` non scatterebbe. Si prova il costruttore delle clausole: un filtro `posts_clauses` di prova (aggiunto e poi tolto in verify) applica `views_order_clauses( 'post', 30 giorni )` a una `WP_Query` di `post`, e gli ID tornano ordinati come le somme, in modo decrescente e crescente. La guardia si prova a parte chiamando il callback di `PostViews` con una query che non è la principale: le clausole non cambiano;
     - un utente senza `manage_options` non riceve la colonna;
     - nella barra di amministrazione (`WP_Admin_Bar` con `admin_bar_menu` lanciato su un articolo singolo simulato) c'è il nodo `wp5w-views` con il numero e il link `detail`.
-12. **Modale da URL:** con `$_GET['detail']` = un articolo del seed, i dati localizzati da `AdminMenu` (letti con `wp_scripts()->get_data( 'wp5w-admin', 'data' )` dopo `enqueue_assets( 'toplevel_page_wp5w' )`) contengono `detail` con `id`, `title` e `date`. Con un ID inesistente, o con un ID di un tipo diverso da `post` e `page`, `detail` non c'è.
+12. **Modale da URL:** con `$_GET['detail']` = un articolo del seed, i dati localizzati da `AdminMenu` (letti con `wp_scripts()->get_data( 'wp5w-admin', 'data' )` dopo `enqueue_assets( 'toplevel_page_wp5w' )`, che richiede `build/admin/index.asset.php`, presente in wp-env dopo `npm run build`) contengono `detail` con `id`, `title` e `date`. Con un ID inesistente, o con un ID di un tipo diverso da `post` e `page`, `detail` non c'è.
 
 ### Sezione 13 (pulizia finale)
 
@@ -681,7 +681,7 @@ Si fanno **prima di ogni altro passo** se la data del deploy è il **2026-10-15 
    $WP db query "SELECT location, COUNT(*) n FROM maurizio_statistics_visitor WHERE first_view >= '2026-10-14 22:50:00' GROUP BY location ORDER BY n DESC LIMIT 5"
    ```
 
-   Se `new_hits` è 0 mentre WP Statistics ha visitatori, il deploy non procede (raccolta ferma). Il segnale di proxy di 9.11 si tratta come «proxy sospetto»: ci si ferma e si avvisa Maurizio.
+   Se `new_hits` è 0 mentre WP Statistics ha visitatori, il deploy non procede (raccolta ferma). Il segnale sul paese di 9.11 resta **solo un avviso**, come deciso nella fase 3: si avvisa Maurizio e si prosegue. WP Statistics accetta circa 110 visitatori automatici al giorno (il raddoppio in esame), che ne spostano la distribuzione dei paesi, quindi da solo non prova un proxy. Bloccano il deploy soltanto «proxy sospetto» e «raccolta ferma o parziale» del punto 1, e la raccolta ferma di questo punto e del punto 4.
 6. **Log:** `grep -n "wp5w\|wp_delete_file" ~/logs/maurizio-debug.log | tail -20`. Si annota se le 2 righe informative di `wp_delete_file()` per `open_basedir` (pulizia dei temporanei del database dei paesi) si sono ripetute con il cron `wp5w_geo_update`. Non blocca.
 
 Se la data è ancora il 2026-10-14, i punti 1-4 si saltano e restano nella nota come «ancora da fare».
@@ -844,12 +844,14 @@ $WP db query "SELECT object_id, SUM(views) FROM maurizio_wp5w_object_daily WHERE
 
 ### 10.9 Gate dei tempi dell'endpoint (da ripetere: la fase 4 cambia il percorso di `/hit`)
 
+**Limite di frequenza:** l'endpoint scarta oltre 30 visite al minuto dallo stesso hash, e tutte le richieste di prova hanno lo stesso IP e lo stesso user agent. Una visita scartata segue un percorso più corto, che falserebbe i tempi. Quindi si aspettano **almeno 60 secondi** dopo 10.6 prima di iniziare, e altri 60 secondi prima di un'eventuale ripetizione.
+
 Si usa lo stesso metodo di [fase-1.md, 8.7](fase-1.md), dal PC locale: 7 coppie alternate, ciascuna con una visita valida all'articolo (`u=/wp5w-smoke-test/`) e una `POST` a vuoto a `/wp-json/wp-statistics/v2/hit`. Si confrontano le mediane di `time_total`.
 
 - **Esito:** la mediana di `hit` non deve superare di oltre il **20%** quella di `wps`. Nella fase 1 la differenza era +9,4%, nella fase 3 +12,3% (0,420 s contro 0,374 s).
 - **Da riportare, senza gate:** 7 visite di ricerca (`t=search`, `q=wp5w gate`, `n=1`), alternate con altrettante `POST` a vuoto a WP Statistics, con la loro mediana. Fanno una query in più. Se superano il +30%, lo si scrive nella nota e si avvisa Maurizio, senza rollback.
 - **Verifica:** `SELECT COUNT(*) FROM maurizio_wp5w_hits WHERE uri = '/wp5w-smoke-test/'` dà 16 (1 + 1 di 10.6, più 7 + 7 del gate), e `SELECT searches FROM maurizio_wp5w_search_daily WHERE term = 'wp5w gate'` dà 7.
-- **Se si supera il 20%:** si ripete una volta con 15 coppie, per escludere il rumore di rete. Se si supera ancora, si va al rollback (10.12) e si avvisa Maurizio.
+- **Se si supera il 20%:** dopo 60 secondi si ripete una volta con 15 coppie di sole visite all'articolo (15 visite in circa 15 secondi, sotto il limite), per escludere il rumore di rete. Il conteggio atteso diventa 31, e `SELECT COUNT(*) FROM maurizio_wp5w_discards WHERE day = CURDATE() AND reason = 'rate'` non deve essere aumentato durante le prove. Se si supera ancora il 20%, si va al rollback (10.12) e si avvisa Maurizio.
 - **Pulizia:**
 
   ```bash
@@ -897,7 +899,7 @@ Si fa se un passo bloccante tra 10.2 e 10.9 fallisce.
 $WP plugin install https://github.com/mavidasnc/wp-5w/releases/download/v0.9.0/wp-5w-0.9.0.zip --force
 $WP plugin get wp-5w --field=version                  # 0.9.0
 $WP option get wp5w_db_version                         # 4 (la 0.9.0 riporta la versione al suo valore; le due tabelle nuove restano, non usate)
-$WP 5w etl --from="$WPS_FROM"                          # canali e sorgenti tornano quelli della 0.9.0 sulle due origini; le righe utm_* restano ma nessuno le legge
+$WP 5w etl --from="$WPS_FROM"                          # canali e sorgenti tornano quelli della 0.9.0 sulle due origini; replace_by_month riscrive le righe own, quindi spariscono anche le utm_*
 $WP litespeed-purge all                                # le pagine in cache hanno il tracker della 0.10.0
 ```
 
@@ -964,3 +966,14 @@ Questi controlli restano a Maurizio dopo il deploy, perché richiedono una sessi
 - Pulizia degli aggregati di 404 e ricerche, conservazione di `wp5w_hits`, testo per la privacy policy (che dovrà citare ricerche e 404) e impostazione di `wp5w_own_since`: fase 5.
 - Ottimizzazione dell'endpoint con `SHORTINIT` (rimandata dagli scostamenti della roadmap).
 - Screenshot della fase 2 da rigenerare (finding 5 della review, facoltativo).
+
+---
+
+## 12. Domande aperte per Maurizio
+
+Non bloccano l'implementazione: la specifica applica la scelta indicata tra parentesi finché Maurizio non decide diversamente.
+
+1. **Immagini storiche rotte.** Le richieste di immagini mancanti ricevono un `404` statico dal server, senza passare da WordPress, quindi il tracker non le vede e non compariranno tra le «Pagine non trovate» (1.3). Serve una soluzione lato server in una fase successiva (per esempio dai log di accesso, oppure facendo passare a WordPress i `404` di `uploads`)? (Per ora: no, e il box lo dichiara.)
+2. **Canale AI anche sullo storico.** Con l'ETL di 10.3, 7 visitatori di WP Statistics (ChatGPT 6, Perplexity 1) passano da «Motori di ricerca» ad «Assistenti AI», e 1 (Claude) da «Non assegnato». Cambiano di poco i canali della Panoramica e «Ingressi da ricerca» del dettaglio e delle opportunità. Va bene? (Per ora: sì, per avere lo stesso canale su tutto lo storico.)
+3. **App di LinkedIn.** I 42 visitatori dell'app (180 giorni) sono `social` nella raccolta propria e `(n/d)` in WP Statistics, e la differenza resta visibile nel Confronto. Si allinea la raccolta propria a WP Statistics, o si tiene `social`, che è più corretto? (Per ora: si tiene `social`, e le etichette cambiano solo in presentazione.)
+4. **Ricerche con pochissimo traffico.** Sul blog ci sono circa 9 ricerche in 180 giorni. In un giorno con una sola ricerca, la riga di `wp5w_search_daily` e la visita di tipo `search` in `wp5w_hits` (con l'hash del giorno, conservata 30 giorni) permettono di collegare il termine al percorso di quel visitatore in quel giorno, anche senza IP e senza orario. È accettabile, oppure le ricerche vanno aggregate per settimana o con una soglia minima prima di mostrarle? (Per ora: aggregati giornalieri, come chiede la roadmap.)
