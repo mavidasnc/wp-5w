@@ -11,6 +11,7 @@ namespace Mavida\FiveW\REST;
 
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
+use Mavida\FiveW\Query\CompareQuery;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
@@ -37,6 +38,7 @@ final class AdminController extends RestController {
 	 * @param SearchQuery   $search   Interrogazioni di Search Console (pagine e opportunità).
 	 * @param AudienceQuery $audience Interrogazioni della scheda Visitatori.
 	 * @param TrendQuery    $trend    Indicatore di trend del sito e dei contenuti.
+	 * @param CompareQuery  $compare  Confronto tra la raccolta propria e WP Statistics.
 	 */
 	public function __construct(
 		private readonly Importer $importer,
@@ -44,7 +46,8 @@ final class AdminController extends RestController {
 		private readonly PostsQuery $posts,
 		private readonly SearchQuery $search,
 		private readonly AudienceQuery $audience,
-		private readonly TrendQuery $trend
+		private readonly TrendQuery $trend,
+		private readonly CompareQuery $compare
 	) {}
 
 	/**
@@ -136,6 +139,17 @@ final class AdminController extends RestController {
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => fn() => $this->respond( $this->audience->get() ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+			)
+		);
+
+		// Confronto con WP Statistics: nessun parametro, la finestra dei giorni la calcola il server.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/compare',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn() => $this->respond( $this->compare->get() ),
 				'permission_callback' => array( $this, 'check_admin_permission' ),
 			)
 		);

@@ -19,7 +19,7 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
   - **Dettaglio in un modale** (clic sul titolo): KPI, andamento, ricerche su Google, canali e siti di provenienza, con periodo selezionabile.
   - **Visitatori:** ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), provenienze e keyword degli ultimi 7 giorni.
   - I box a riga intera si riducono con un toggle, che resta memorizzato nel browser.
-  - **Stato:** sorgenti, copertura delle tabelle, ultimo import, avvio manuale.
+  - **Stato:** confronto della raccolta propria con WP Statistics (giorni completi, differenze, scarti, contenuti), sorgenti, copertura delle tabelle, ultimo import, avvio manuale.
 - **Raccolta propria (dalla 0.7.0):**
   - **Tracker** di meno di 1,5 KB, in `defer`, che funziona anche con le pagine in cache: invia la visita a `POST /wp5w/v1/hit` con `sendBeacon`. Nessun cookie, nessun `localStorage`, nessun IP o user agent salvato (il visitatore è un hash che cambia ogni giorno).
   - **Esclusioni:** bot e crawler, browser automatici, Do Not Track, amministratori (o tutti gli utenti collegati), IP e intervalli CIDR, oltre 30 visite al minuto per visitatore. Gli scarti si contano per giorno e motivo.

@@ -3,6 +3,7 @@ import { __ } from '@wordpress/i18n';
 import { Button, Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Card from '../components/Card';
+import Compare from '../components/Compare';
 
 // Descrizione delle tabelle wp5w_*.
 const TABLES = {
@@ -65,6 +66,8 @@ export default function StatusPage() {
 					{ notice.text }
 				</Notice>
 			) }
+
+			<Compare />
 
 			<Card id="status-sources" title={ __( 'Sorgenti', 'wp-5w' ) }>
 				<table className="widefat striped">
