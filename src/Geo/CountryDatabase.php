@@ -15,8 +15,6 @@ use MaxMind\Db\Reader;
 
 defined( 'ABSPATH' ) || exit;
 
-// phpcs:disable WordPress.DB.DirectDatabaseQuery -- Solo GET_LOCK e RELEASE_LOCK, senza tabelle.
-
 /**
  * Il file `.mmdb` sta in `uploads/wp5w/`. Il paese si calcola nell'endpoint delle visite e l'IP non si salva mai.
  * L'aggiornamento usa solo funzioni PHP e WordPress (sul blog le funzioni di esecuzione dei comandi sono disabilitate).
@@ -120,6 +118,7 @@ final class CountryDatabase {
 		global $wpdb;
 
 		// Passo 1: lock contro gli aggiornamenti simultanei (se è occupato non si tocca nemmeno l'opzione).
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- GET_LOCK, nessuna tabella.
 		if ( 1 !== (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, 0 )', self::LOCK ) ) ) {
 			return array(
 				'ok'      => false,
@@ -132,7 +131,7 @@ final class CountryDatabase {
 			return self::run_update();
 		} finally {
 			// Il lock si rilascia sempre.
-			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', self::LOCK ) );
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', self::LOCK ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- RELEASE_LOCK, nessuna tabella.
 		}
 	}
 
@@ -329,12 +328,10 @@ final class CountryDatabase {
 		}
 		try {
 			// Proprietà dei metadati della libreria MaxMind (camelCase).
-			// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 			$meta  = $reader->metadata();
-			$type  = (string) $meta->databaseType;
-			$ipver = (int) $meta->ipVersion;
-			$built = (int) $meta->buildEpoch;
-			// phpcs:enable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			$type  = (string) $meta->databaseType; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Proprietà della libreria MaxMind.
+			$ipver = (int) $meta->ipVersion; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Proprietà della libreria MaxMind.
+			$built = (int) $meta->buildEpoch; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Proprietà della libreria MaxMind.
 			if ( ! GeoDb::metadata_ok( $type, $ipver, $built, time() ) ) {
 				throw new \RuntimeException( 'metadati del database non validi' );
 			}

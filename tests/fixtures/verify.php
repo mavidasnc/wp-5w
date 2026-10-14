@@ -1078,9 +1078,7 @@ $check( 'geo: index.php presente', true, file_exists( $geo_dir . '/index.php' ) 
 if ( ( $geo_now['month'] ?? '' ) === $geo_this_month ) {
 	$geo_http_calls  = 0;
 	$geo_count_calls = static function ( $pre, $args, $url ) use ( &$geo_http_calls ) {
-		if ( str_contains( (string) $url, 'download.db-ip.com' ) ) {
-			++$geo_http_calls;
-		}
+		++$geo_http_calls;
 		return $pre;
 	};
 	add_filter( 'pre_http_request', $geo_count_calls, 10, 3 );
