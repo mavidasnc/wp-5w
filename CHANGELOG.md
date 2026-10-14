@@ -2,6 +2,27 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.10.0] — 2026-10-14
+
+Fase 4 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): canali, tempo reale e dati operativi (specifica in [docs/fasi/fase-4.md](docs/fasi/fase-4.md)). Lo schema passa alla **versione 5**, con due tabelle nuove e nessuna migrazione delle chiavi; nessun evento cron nuovo.
+
+### Added
+- **Canale «ai» (Assistenti AI)** per ChatGPT, Perplexity, Gemini, Copilot, Claude, DeepSeek, Mistral, Grok e Meta AI (elenco `Channels::AI`). Lo producono `OwnSource` e `WpStatisticsSource` in aggregazione (`entry_daily`, `referrer_daily` e `dim_daily`) con lo stesso frammento SQL `Channels::ai_sql()`, che guarda host del referrer (anche `android-app://pacchetto/`), `utm_source` (solo raccolta propria) e `source_name` (solo WP Statistics). `wp5w_hits`, `Channels::classify()` e l'elenco dei motori di ricerca non cambiano; le somme dei visitatori restano identiche.
+- **Etichette dei referrer delle app** con `Support\Referrers` (`android-app://com.linkedin.android/` e `com.linkedin.android` diventano «LinkedIn (app)»): solo presentazione, i dati non cambiano.
+- **Campagne UTM:** dimensioni `utm_campaign`, `utm_source` e `utm_medium` in `dim_daily` (solo righe `own`, senza `(n/d)`) e box «Campagne» nella scheda Visitatori, con la rotta `GET /wp5w/v1/admin/audience/campaigns`.
+- **«Online adesso»** in cima alla scheda Visitatori (`GET /wp5w/v1/admin/online`): visitatori distinti degli ultimi 5 minuti sul contenuto dell'ultima visita, aggiornato ogni 30 secondi solo mentre la scheda del browser è visibile. La risposta non contiene identificativi.
+- **Pagine non trovate** e **Ricerche interne** nella scheda Articoli (rotte `GET /wp5w/v1/admin/notfound` e `/admin/searches`), alimentate dalle nuove tabelle `wp5w_notfound_daily` e `wp5w_search_daily` (solo aggregati giornalieri, senza visitatore né orario per le ricerche). Il tracker invia termine e numero di risultati (`q`, `n`, non firmati) e li decide `Support\SearchTerm` nell'endpoint: normalizzazione, `(filtrato)` per email e numeri lunghi, solo la prima pagina dei risultati.
+- **Visite nell'admin:** colonna ordinabile «Visite (30 g)» in Articoli e Pagine, nodo «5W: N visite (30 g)» nella barra di amministrazione (`Admin\PostViews`) e modale di dettaglio aperto da `admin.php?page=wp5w&tab=posts&detail=<ID>`.
+- `Support\ObjectType` e test `ReferrersTest`, `SearchTermTest`, `ObjectTypeTest` e nuovi casi di `ChannelsTest`.
+- `verify.php`: nuova sezione 12 «Fase 4» (la pulizia finale diventa la 13), migrazione da v4 a v5 e controlli aggiornati; il seed aggiunge 6 visitatori da assistenti AI e app.
+
+### Changed
+- `Schema::DB_VERSION` passa a `5`. Il tracker passa da 669 a 706 byte (limite 1.536).
+- Nel Confronto un canale non assegnato è una sola riga (prima `(n/d)` di WP Statistics e `unassigned` della raccolta propria erano due), con etichette italiane (compresa «Assistenti AI»); soglia e minimo di visualizzazioni arrivano dalla risposta e le frasi usano `sprintf()` e `_n()`.
+- `CompareQuery` usa `ObjectType::is_post()` (titolo e link solo per `post`, `page`, `home` e `post_type_*` con ID maggiore di zero) e il suo `phpcs:disable` è ristretto a quello delle altre classi `Query`.
+- Ordine deterministico a parità di visitatori nei referrer del dettaglio (`PostsQuery`) e a parità di click e impression nelle query (`SearchQuery`).
+- La regola dell'origine ha ora due eccezioni documentate: `CompareQuery` e `AudienceQuery::campaigns()` (solo `utm_*`).
+
 ## [0.9.0] — 2026-10-14
 
 Fase 3 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): paese, dispositivo, browser e sistema operativo (specifica in [docs/fasi/fase-3.md](docs/fasi/fase-3.md)). Lo schema resta alla versione 4 e non ci sono tabelle nuove: le colonne `country`, `device`, `browser` e `os` di `wp5w_hits` esistono dalla 0.7.0.
