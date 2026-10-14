@@ -2,6 +2,17 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.2.0] — 2026-10-14
+
+### Added
+- Scheda **Articoli**: ultimi 10 articoli pubblicati (settimana e totale dalla pubblicazione) e 10 più visti nella settimana o nel mese, ciascuno con il grafico delle visite giornaliere degli ultimi 7 giorni.
+- **Dettaglio di un contenuto in un modale** (dalla scheda Articoli e dalla classifica della Panoramica), con periodo selezionabile, KPI, andamento, ricerche su Google (query, click, impression, CTR, posizione), canali di ingresso e siti di provenienza.
+- Visitatori unici per contenuto e giorno (`wp5w_object_daily.visitors`, da `statistics_visitor_relationships`).
+- Tabella `wp5w_referrer_daily`, con i siti di provenienza di chi entra da un contenuto.
+
+### Changed
+- Schema del database alla versione 2: l'aggiornamento è automatico, ma per popolare i nuovi dati serve `wp 5w etl --full` oppure «Reimporta tutto lo storico».
+
 ## [0.1.0] — 2026-10-14
 
 ### Added

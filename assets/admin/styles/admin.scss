@@ -161,3 +161,46 @@
 	display: flex;
 	gap: 8px;
 }
+
+// Scheda Articoli e dettaglio.
+.wp5w-card__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+
+	h2 {
+		margin: 0;
+	}
+}
+
+.wp5w-card__subtitle {
+	margin-top: 20px !important;
+}
+
+.wp5w-switch {
+	display: flex;
+	gap: 4px;
+}
+
+.wp5w-posts {
+	td {
+		vertical-align: middle;
+	}
+
+	.components-button.is-link {
+		text-align: left;
+	}
+}
+
+.wp5w-spark {
+	display: block;
+}
+
+.wp5w-modal {
+	width: min(1200px, 92vw);
+
+	.wp5w-kpi__value {
+		font-size: 20px;
+	}
+}

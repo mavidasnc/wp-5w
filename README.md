@@ -14,6 +14,8 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 - **Controllo dello schema delle sorgenti:** se un aggiornamento cambia le tabelle, la sorgente viene saltata e il motivo compare nella pagina Stato.
 - **Pagina 5W in wp-admin:**
   - **Panoramica:** KPI con confronto rispetto al periodo precedente, andamento di traffico e Search Console, canali, contenuti più visti con click, impression, CTR e posizione media pesata.
+  - **Articoli:** ultimi 10 pubblicati e 10 più visti (settimana o mese), con il grafico delle visite degli ultimi 7 giorni.
+  - **Dettaglio in un modale** (clic sul titolo): KPI, andamento, ricerche su Google, canali e siti di provenienza, con periodo selezionabile.
   - **Stato:** sorgenti, copertura delle tabelle, ultimo import, avvio manuale.
 - **Comandi WP-CLI:** `wp 5w status` e `wp 5w etl [--full] [--from=] [--to=]`.
 - **Aggiornamenti automatici** dalle release di GitHub.
@@ -23,8 +25,9 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 | Tabella | Contenuto | Sorgente |
 |---|---|---|
 | `wp5w_site_daily` | Visitatori e visualizzazioni del sito per giorno | `statistics_summary_totals`, completato con il dettaglio per i giorni non ancora riassunti |
-| `wp5w_object_daily` | Visualizzazioni per contenuto (post, pagina, allegato, home…) | `statistics_pages` |
+| `wp5w_object_daily` | Visualizzazioni e visitatori unici per contenuto (post, pagina, allegato, home…) | `statistics_pages` e `statistics_visitor_relationships` |
 | `wp5w_entry_daily` | Visitatori entrati da un contenuto, per canale | `statistics_visitor.first_page` → `statistics_pages` |
+| `wp5w_referrer_daily` | Siti di provenienza (host) di chi entra da un contenuto | `statistics_visitor.referred` |
 | `wp5w_dim_daily` | Visitatori per paese, device, browser, sistema, canale e sorgente | `statistics_visitor` |
 | `wp5w_gsc_daily` | Click, impression e posizione per giorno, pagina e query | `rank_math_analytics_gsc`, collegata ai contenuti tramite `rank_math_analytics_objects` o `url_to_postid()` |
 

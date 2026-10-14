@@ -28,8 +28,8 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 
 - `src/Sources/`: `Source` (controllo dello schema, `replace_by_month`), `WpStatisticsSource`, `RankMathSource`.
 - `src/Etl/`: `Importer` (lock, stato in `wp5w_etl_state`) e `Scheduler` (cron `wp5w_etl_daily` alle 4:00, `wp5w_etl_full` dopo l'attivazione).
-- `src/Query/OverviewQuery.php`: legge solo le tabelle `wp5w_*`.
-- `src/Support/`: `DateRange`, `Metrics` e `SchemaCheck` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
+- `src/Query/`: `OverviewQuery` (Panoramica) e `PostsQuery` (elenchi Articoli e dettaglio del modale) leggono solo le tabelle `wp5w_*`.
+- `src/Support/`: `DateRange`, `Metrics`, `Series` e `SchemaCheck` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
 - `assets/admin/`: app React (`@wordpress/components` + Chart.js con react-chartjs-2).
 
 ## Punti da ricordare
@@ -39,5 +39,8 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 - **`DATE(created)` dipende dal fuso della sessione MySQL.** Sul blog è +02:00, in wp-env UTC: un dump caricato in wp-env sposta i giorni GSC di uno.
 - **`statistics_summary_totals` ha giorni a zero** (2017-2022 sul blog), che sono buchi di raccolta: non vanno importati.
 - **`statistics_visitor.first_page` → `statistics_pages.page_id`:** verificato sul blog (10.614 su 10.616).
+- **Visitatori sommati su più giorni:** una persona conta una volta per ogni giorno di visita (l'hash IP di WP Statistics cambia ogni giorno).
+- **`statistics_visitor.referred` contiene solo l'host:** il referrer vale per la pagina d'ingresso.
+- **Dettaglio:** `PostsQuery::detail()` accorcia il periodo al primo giorno con dati, così «dalla pubblicazione» su post vecchi non genera anni di zeri.
 - **Su Windows con Git Bash** usa `MSYS_NO_PATHCONV=1` per gli argomenti che iniziano con `/` (per esempio `wp rewrite structure`) e scrivi i JSON con backslash usando l'editor, non gli heredoc.
 - **Blog di produzione** (`maurizio.mavida.com`): WP-CLI richiede `--url=https://maurizio.mavida.com`.

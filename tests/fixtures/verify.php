@@ -71,6 +71,21 @@ $check(
 	$wpdb->get_var( 'SELECT SUM(visitors) FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel'" )
 );
 
+// Visitatori unici per contenuto e referrer per pagina d'ingresso.
+$check(
+	'object_daily.visitors = visitatori distinti per pagina e giorno',
+	$wpdb->get_var(
+		"SELECT COALESCE(SUM(n), 0) FROM ( SELECT COUNT(DISTINCT r.visitor_id) AS n FROM {$p}statistics_visitor_relationships r
+		JOIN {$p}statistics_pages p ON p.page_id = r.page_id GROUP BY DATE(r.date), p.type, p.id ) t"
+	),
+	$wpdb->get_var( 'SELECT SUM(visitors) FROM ' . Schema::table( 'object_daily' ) )
+);
+$check(
+	'referrer_daily.visitors = visitatori con referrer',
+	$wpdb->get_var( "SELECT COUNT(*) FROM {$p}statistics_visitor v JOIN {$p}statistics_pages p ON p.page_id = v.first_page WHERE v.referred <> ''" ),
+	$wpdb->get_var( 'SELECT SUM(visitors) FROM ' . Schema::table( 'referrer_daily' ) )
+);
+
 // Search Console: righe uniche e click senza duplicati.
 $check(
 	'gsc_daily righe = terne uniche',

@@ -1,4 +1,5 @@
 import { __ } from '@wordpress/i18n';
+import { Button } from '@wordpress/components';
 import { formatNumber } from '../api';
 
 // Etichette dei tipi di contenuto registrati da WP Statistics.
@@ -12,9 +13,11 @@ const TYPES = {
  * Classifica dei contenuti: traffico di WP Statistics e Search Console di Rank Math sulla stessa riga.
  *
  * @param {Object} props
- * @param {Array}  props.rows Contenuti restituiti da /admin/overview.
+ * @param {Object}   props
+ * @param {Array}    props.rows   Contenuti restituiti da /admin/overview.
+ * @param {Function} props.onOpen Apertura del dettaglio di un contenuto.
  */
-export default function TopPostsTable( { rows } ) {
+export default function TopPostsTable( { rows, onOpen } ) {
 	if ( ! rows.length ) {
 		return <p>{ __( 'Nessun dato nel periodo.', 'wp-5w' ) }</p>;
 	}
@@ -37,10 +40,13 @@ export default function TopPostsTable( { rows } ) {
 				{ rows.map( ( row ) => (
 					<tr key={ `${ row.type }-${ row.id }` }>
 						<td>
-							<a href={ row.url } target="_blank" rel="noreferrer">
+							<Button variant="link" onClick={ () => onOpen( { id: row.id, title: row.title } ) }>
 								{ row.title }
-							</a>
+							</Button>
 							<span className="wp5w-type">{ TYPES[ row.type ] ?? row.type }</span>
+							<a className="wp5w-edit" href={ row.url } target="_blank" rel="noreferrer">
+								{ __( 'Apri', 'wp-5w' ) }
+							</a>
 							{ row.edit_url && (
 								<a className="wp5w-edit" href={ row.edit_url }>
 									{ __( 'Modifica', 'wp-5w' ) }

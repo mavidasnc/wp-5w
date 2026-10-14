@@ -28,22 +28,36 @@ $wp_rewrite->flush_rules( true );
 $wpdb->query( "CREATE TABLE IF NOT EXISTS {$p}statistics_summary_totals ( ID bigint unsigned NOT NULL AUTO_INCREMENT, date date NOT NULL, visitors bigint unsigned NOT NULL, views bigint unsigned NOT NULL, PRIMARY KEY (ID) )" );
 $wpdb->query( "CREATE TABLE IF NOT EXISTS {$p}statistics_pages ( page_id bigint NOT NULL AUTO_INCREMENT, uri varchar(190) NOT NULL, date date NOT NULL, count int NOT NULL, id int NOT NULL, type varchar(180) NOT NULL, PRIMARY KEY (page_id) )" );
 $wpdb->query( "CREATE TABLE IF NOT EXISTS {$p}statistics_visitor ( ID bigint NOT NULL AUTO_INCREMENT, last_counter date NOT NULL, referred mediumtext NOT NULL, agent varchar(180) NOT NULL, platform varchar(180), version varchar(180), UAString varchar(190), ip varchar(60) NOT NULL, location varchar(10), hits int, honeypot int, device varchar(180), model varchar(180), user_id bigint NOT NULL DEFAULT 0, city varchar(100), region varchar(100), continent varchar(50), source_channel varchar(50), source_name varchar(100), first_page bigint unsigned, first_view datetime, last_page bigint unsigned, last_view datetime, PRIMARY KEY (ID) )" );
+$wpdb->query( "CREATE TABLE IF NOT EXISTS {$p}statistics_visitor_relationships ( ID bigint NOT NULL AUTO_INCREMENT, visitor_id bigint NOT NULL, page_id bigint NOT NULL, date datetime NOT NULL, PRIMARY KEY (ID) )" );
 $wpdb->query( "CREATE TABLE IF NOT EXISTS {$p}rank_math_analytics_gsc ( id bigint unsigned NOT NULL AUTO_INCREMENT, created timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(), query varchar(1000) NOT NULL, page varchar(500) NOT NULL, clicks mediumint NOT NULL, impressions mediumint NOT NULL, position double NOT NULL, ctr double NOT NULL, PRIMARY KEY (id) )" );
 $wpdb->query( "CREATE TABLE IF NOT EXISTS {$p}rank_math_analytics_objects ( id bigint unsigned NOT NULL AUTO_INCREMENT, created timestamp NOT NULL DEFAULT current_timestamp(), title text NOT NULL, page varchar(500) NOT NULL, object_type varchar(100) NOT NULL, object_subtype varchar(100) NOT NULL, object_id bigint unsigned NOT NULL, primary_key varchar(255) NOT NULL DEFAULT '', PRIMARY KEY (id) )" );
 
-foreach ( array( 'statistics_summary_totals', 'statistics_pages', 'statistics_visitor', 'rank_math_analytics_gsc', 'rank_math_analytics_objects' ) as $wp5w_t ) {
+foreach ( array( 'statistics_summary_totals', 'statistics_pages', 'statistics_visitor', 'statistics_visitor_relationships', 'rank_math_analytics_gsc', 'rank_math_analytics_objects' ) as $wp5w_t ) {
 	$wpdb->query( "TRUNCATE TABLE {$p}{$wp5w_t}" );
 }
 
 // Tre articoli con slug stabili.
 $wp5w_posts = array();
-foreach ( array( 'calendario-2006', 'blocksy-tema', 'php-solutions' ) as $wp5w_slug ) {
+// L'ultimo è pubblicato oggi: deve comparire primo tra gli ultimi articoli.
+foreach ( array( 'calendario-2006', 'blocksy-tema', 'php-solutions', 'uscito-oggi' ) as $wp5w_slug ) {
 	$wp5w_existing = get_page_by_path( $wp5w_slug, OBJECT, 'post' );
 	$wp5w_posts[]  = $wp5w_existing ? $wp5w_existing->ID : wp_insert_post(
 		array(
 			'post_title'  => ucwords( str_replace( '-', ' ', $wp5w_slug ) ),
 			'post_name'   => $wp5w_slug,
 			'post_status' => 'publish',
+		)
+	);
+}
+
+// I primi tre post sono di un anno fa (il totale dalla pubblicazione parte dal primo giorno con dati).
+foreach ( $wp5w_posts as $wp5w_n => $wp5w_post ) {
+	$wp5w_date = 3 === $wp5w_n ? current_time( 'mysql' ) : wp_date( 'Y-m-d 09:00:00', strtotime( '-1 year' ) );
+	wp_update_post(
+		array(
+			'ID'            => $wp5w_post,
+			'post_date'     => $wp5w_date,
+			'post_date_gmt' => get_gmt_from_date( $wp5w_date ),
 		)
 	);
 }
@@ -85,13 +99,14 @@ for ( $wp5w_i = 59; $wp5w_i >= 0; $wp5w_i-- ) {
 		$wp5w_page_ids[] = $wpdb->insert_id;
 	}
 
-	// Quattro visitatori al giorno, uno per canale (l'ultimo senza canale).
+	// Quattro visitatori al giorno, uno per canale (l'ultimo senza canale), con referrer per search e social.
+	$wp5w_referrers = array( 'google.com', '', 'lm.facebook.com', '' );
 	foreach ( $wp5w_channels as $wp5w_c => $wp5w_channel ) {
 		$wpdb->insert(
 			"{$p}statistics_visitor",
 			array(
 				'last_counter'   => $wp5w_day,
-				'referred'       => '',
+				'referred'       => $wp5w_referrers[ $wp5w_c ],
 				'agent'          => 'Chrome',
 				'platform'       => 'Android',
 				'ip'             => '#hash#' . md5( $wp5w_day . $wp5w_c ),
@@ -102,6 +117,19 @@ for ( $wp5w_i = 59; $wp5w_i >= 0; $wp5w_i-- ) {
 				'first_page'     => $wp5w_page_ids[ $wp5w_c ],
 			)
 		);
+
+		// Ogni visitatore vede la pagina d'ingresso due volte (va contato una volta) e il primo articolo.
+		$wp5w_visitor = $wpdb->insert_id;
+		foreach ( array( $wp5w_page_ids[ $wp5w_c ], $wp5w_page_ids[ $wp5w_c ], $wp5w_page_ids[1] ) as $wp5w_page_id ) {
+			$wpdb->insert(
+				"{$p}statistics_visitor_relationships",
+				array(
+					'visitor_id' => $wp5w_visitor,
+					'page_id'    => $wp5w_page_id,
+					'date'       => "{$wp5w_day} 10:00:00",
+				)
+			);
+		}
 	}
 
 	// Totali riassunti solo fino a ieri: oggi deve arrivare dal dettaglio.

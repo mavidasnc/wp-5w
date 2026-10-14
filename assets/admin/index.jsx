@@ -2,11 +2,13 @@ import { createRoot } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { TabPanel } from '@wordpress/components';
 import OverviewPage from './pages/OverviewPage';
+import PostsPage from './pages/PostsPage';
 import StatusPage from './pages/StatusPage';
 import './styles/admin.scss';
 
 const TABS = [
 	{ name: 'overview', title: __( 'Panoramica', 'wp-5w' ) },
+	{ name: 'posts', title: __( 'Articoli', 'wp-5w' ) },
 	{ name: 'status', title: __( 'Stato', 'wp-5w' ) },
 ];
 
@@ -27,7 +29,12 @@ function App() {
 				</p>
 			</header>
 			<TabPanel tabs={ TABS } initialTabName={ initial }>
-				{ ( tab ) => ( tab.name === 'status' ? <StatusPage /> : <OverviewPage /> ) }
+				{ ( tab ) => {
+					if ( tab.name === 'status' ) {
+						return <StatusPage />;
+					}
+					return tab.name === 'posts' ? <PostsPage /> : <OverviewPage />;
+				} }
 			</TabPanel>
 		</div>
 	);

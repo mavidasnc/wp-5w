@@ -59,8 +59,9 @@ const mondayOf = ( day ) => {
  *
  * @param {Object} props
  * @param {Array}  props.series Punti giornalieri { day, visitors, views, clicks, impressions }.
+ * @param {Array}  props.keys   Serie da mostrare (predefinito: tutte).
  */
-export default function TrendChart( { series } ) {
+export default function TrendChart( { series, keys = null } ) {
 	const { points, unit } = useMemo( () => {
 		if ( series.length >= MONTHLY_FROM ) {
 			return { points: group( series, ( day ) => day.slice( 0, 7 ) ), unit: 'month' };
@@ -75,7 +76,7 @@ export default function TrendChart( { series } ) {
 
 	const data = {
 		labels: points.map( ( point ) => label( point.day ) ),
-		datasets: SERIES.map( ( serie ) => ( {
+		datasets: SERIES.filter( ( serie ) => ! keys || keys.includes( serie.key ) ).map( ( serie ) => ( {
 			label: serie.label,
 			data: points.map( ( point ) => point[ serie.key ] ),
 			borderColor: serie.color,

@@ -15,6 +15,7 @@ use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Query\OverviewQuery;
+use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\REST\AdminController;
 use Mavida\FiveW\REST\RestController;
 use Mavida\FiveW\Sources\RankMathSource;
@@ -95,7 +96,7 @@ final class Plugin {
 
 		// Le risposte REST del plugin non devono mai finire nelle cache di pagina.
 		add_filter( 'rest_post_dispatch', array( RestController::class, 'no_cache' ), 10, 3 );
-		( new AdminController( $importer, new OverviewQuery() ) )->register();
+		( new AdminController( $importer, new OverviewQuery(), new PostsQuery() ) )->register();
 
 		if ( is_admin() ) {
 			( new AdminMenu() )->register();

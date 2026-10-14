@@ -6,6 +6,7 @@ import KpiCard from '../components/KpiCard';
 import TrendChart from '../components/TrendChart';
 import TopPostsTable from '../components/TopPostsTable';
 import ChannelList from '../components/ChannelList';
+import PostDetailModal from '../components/PostDetailModal';
 
 // Preset del periodo: giorni fino a oggi, oppure tutto lo storico del sito.
 const PERIODS = [
@@ -43,6 +44,7 @@ export default function OverviewPage() {
 	const [ period, setPeriod ] = useState( '30' );
 	const [ data, setData ] = useState( null );
 	const [ error, setError ] = useState( null );
+	const [ detail, setDetail ] = useState( null );
 
 	useEffect( () => {
 		const { from, to } = rangeFor( period );
@@ -100,10 +102,12 @@ export default function OverviewPage() {
 
 					<section className="wp5w-card">
 						<h2>{ __( 'Contenuti più visti', 'wp-5w' ) }</h2>
-						<TopPostsTable rows={ data.top } />
+						<TopPostsTable rows={ data.top } onOpen={ setDetail } />
 					</section>
 				</>
 			) }
+
+			{ detail && <PostDetailModal post={ detail } initialPeriod="30" onClose={ () => setDetail( null ) } /> }
 		</div>
 	);
 }

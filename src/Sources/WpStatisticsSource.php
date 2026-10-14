@@ -67,9 +67,10 @@ final class WpStatisticsSource extends Source {
 	 */
 	protected function required(): array {
 		return array(
-			'statistics_summary_totals' => array( 'date', 'visitors', 'views' ),
-			'statistics_pages'          => array( 'page_id', 'uri', 'date', 'count', 'id', 'type' ),
-			'statistics_visitor'        => array_merge( array( 'last_counter', 'first_page' ), array_values( self::DIMENSIONS ) ),
+			'statistics_summary_totals'        => array( 'date', 'visitors', 'views' ),
+			'statistics_pages'                 => array( 'page_id', 'uri', 'date', 'count', 'id', 'type' ),
+			'statistics_visitor'               => array_merge( array( 'last_counter', 'first_page', 'referred' ), array_values( self::DIMENSIONS ) ),
+			'statistics_visitor_relationships' => array( 'visitor_id', 'page_id', 'date' ),
 		);
 	}
 
@@ -81,10 +82,11 @@ final class WpStatisticsSource extends Source {
 	 */
 	public function import( DateRange $range ): array {
 		return array(
-			'site_daily'   => $this->import_site( $range ),
-			'object_daily' => $this->import_objects( $range ),
-			'entry_daily'  => $this->import_entries( $range ),
-			'dim_daily'    => $this->import_dimensions( $range ),
+			'site_daily'     => $this->import_site( $range ),
+			'object_daily'   => $this->import_objects( $range ),
+			'entry_daily'    => $this->import_entries( $range ),
+			'referrer_daily' => $this->import_referrers( $range ),
+			'dim_daily'      => $this->import_dimensions( $range ),
 		);
 	}
 
@@ -152,16 +154,53 @@ final class WpStatisticsSource extends Source {
 	 * @return int
 	 */
 	private function import_objects( DateRange $range ): int {
-		$pages = $this->table( 'statistics_pages' );
+		$pages     = $this->table( 'statistics_pages' );
+		$relations = $this->table( 'statistics_visitor_relationships' );
 
+		// Visualizzazioni da statistics_pages; visitatori unici dalle relazioni visitatore-pagina
+		// (la stessa persona può comparire più volte nello stesso giorno: COUNT DISTINCT).
 		return $this->replace_by_month(
 			'object_daily',
 			$range,
 			$this->data_range( 'statistics_pages', 'date' ),
-			"SELECT date, LEFT(type, 40), id, MIN(uri), SUM(count)
-			FROM {$pages} WHERE date BETWEEN %s AND %s
-			GROUP BY date, type, id",
-			'day, object_type, object_id, uri, views'
+			"SELECT a.day, a.object_type, a.object_id, a.uri, a.views, COALESCE(b.visitors, 0)
+			FROM (
+				SELECT date AS day, LEFT(type, 40) AS object_type, id AS object_id, MIN(uri) AS uri, SUM(count) AS views
+				FROM {$pages} WHERE date BETWEEN %s AND %s
+				GROUP BY date, type, id
+			) a
+			LEFT JOIN (
+				SELECT DATE(r.date) AS day, LEFT(p.type, 40) AS object_type, p.id AS object_id, COUNT(DISTINCT r.visitor_id) AS visitors
+				FROM {$relations} r JOIN {$pages} p ON p.page_id = r.page_id
+				WHERE r.date >= %s AND r.date < DATE_ADD(%s, INTERVAL 1 DAY)
+				GROUP BY DATE(r.date), p.type, p.id
+			) b ON b.day = a.day AND b.object_type = a.object_type AND b.object_id = a.object_id",
+			'day, object_type, object_id, uri, views, visitors'
+		);
+	}
+
+	/**
+	 * Siti di provenienza di chi entra da un contenuto.
+	 *
+	 * WP Statistics salva in referred solo l'host (es. google.com, lm.facebook.com).
+	 *
+	 * @param DateRange $range Intervallo richiesto.
+	 * @return int
+	 */
+	private function import_referrers( DateRange $range ): int {
+		$pages   = $this->table( 'statistics_pages' );
+		$visitor = $this->table( 'statistics_visitor' );
+
+		return $this->replace_by_month(
+			'referrer_daily',
+			$range,
+			$this->data_range( 'statistics_visitor', 'last_counter' ),
+			"SELECT v.last_counter, LEFT(p.type, 40), p.id, LEFT(v.referred, 190),
+				COALESCE(MAX(v.source_channel), ''), COALESCE(MAX(v.source_name), ''), COUNT(*)
+			FROM {$visitor} v JOIN {$pages} p ON p.page_id = v.first_page
+			WHERE v.last_counter BETWEEN %s AND %s AND v.referred <> ''
+			GROUP BY v.last_counter, p.type, p.id, 4",
+			'day, object_type, object_id, referrer, channel, source, visitors'
 		);
 	}
 

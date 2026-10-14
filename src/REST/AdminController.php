@@ -12,6 +12,7 @@ namespace Mavida\FiveW\REST;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Query\OverviewQuery;
+use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Updater;
 
@@ -27,10 +28,12 @@ final class AdminController extends RestController {
 	 *
 	 * @param Importer      $importer Importer.
 	 * @param OverviewQuery $overview Interrogazioni della Panoramica.
+	 * @param PostsQuery    $posts    Interrogazioni della scheda Articoli e del dettaglio.
 	 */
 	public function __construct(
 		private readonly Importer $importer,
-		private readonly OverviewQuery $overview
+		private readonly OverviewQuery $overview,
+		private readonly PostsQuery $posts
 	) {}
 
 	/**
@@ -70,20 +73,78 @@ final class AdminController extends RestController {
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => array( $this, 'overview' ),
 				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::range_args(),
+			)
+		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/posts/latest',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn() => $this->respond( $this->posts->latest() ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+			)
+		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/posts/top',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->posts->top( (int) $request->get_param( 'days' ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
 				'args'                => array(
-					'from' => array(
-						'type'              => 'string',
-						'required'          => true,
-						'validate_callback' => array( DateRange::class, 'is_valid' ),
-					),
-					'to'   => array(
-						'type'              => 'string',
-						'required'          => true,
-						'validate_callback' => array( DateRange::class, 'is_valid' ),
+					'days' => array(
+						'type'    => 'integer',
+						'enum'    => array( 7, 30 ),
+						'default' => 7,
 					),
 				),
 			)
 		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/posts/(?P<id>\d+)',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'post_detail' ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::range_args(),
+			)
+		);
+	}
+
+	/**
+	 * Parametri from e to (Y-m-d) comuni alle rotte con un periodo.
+	 *
+	 * @return array<string,array<string,mixed>>
+	 */
+	private static function range_args(): array {
+		$date = array(
+			'type'              => 'string',
+			'required'          => true,
+			'validate_callback' => array( DateRange::class, 'is_valid' ),
+		);
+		return array(
+			'from' => $date,
+			'to'   => $date,
+		);
+	}
+
+	/**
+	 * Periodo dai parametri della richiesta.
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return DateRange|\WP_Error
+	 */
+	private static function range_from( \WP_REST_Request $request ): DateRange|\WP_Error {
+		try {
+			return new DateRange( (string) $request->get_param( 'from' ), (string) $request->get_param( 'to' ) );
+		} catch ( \InvalidArgumentException $e ) {
+			return new \WP_Error( 'wp5w_invalid_range', $e->getMessage(), array( 'status' => 400 ) );
+		}
 	}
 
 	/**
@@ -128,12 +189,26 @@ final class AdminController extends RestController {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function overview( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
-		try {
-			$range = new DateRange( (string) $request->get_param( 'from' ), (string) $request->get_param( 'to' ) );
-		} catch ( \InvalidArgumentException $e ) {
-			return new \WP_Error( 'wp5w_invalid_range', $e->getMessage(), array( 'status' => 400 ) );
+		$range = self::range_from( $request );
+		return $range instanceof DateRange ? $this->respond( $this->overview->get( $range ) ) : $range;
+	}
+
+	/**
+	 * Dettaglio di un contenuto nel periodo.
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function post_detail( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$range = self::range_from( $request );
+		if ( ! $range instanceof DateRange ) {
+			return $range;
 		}
 
-		return $this->respond( $this->overview->get( $range ) );
+		$detail = $this->posts->detail( (int) $request->get_param( 'id' ), $range );
+		if ( null === $detail ) {
+			return new \WP_Error( 'wp5w_not_found', __( 'Contenuto non trovato.', 'wp-5w' ), array( 'status' => 404 ) );
+		}
+		return $this->respond( $detail );
 	}
 }

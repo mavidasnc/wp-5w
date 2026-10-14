@@ -12,6 +12,7 @@ namespace Mavida\FiveW\Query;
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Metrics;
+use Mavida\FiveW\Support\Series;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -121,23 +122,16 @@ final class OverviewQuery {
 			OBJECT_K
 		);
 
-		// Un punto per ogni giorno, anche senza dati, così il grafico non salta i buchi.
-		$points = array();
-		$day    = new \DateTimeImmutable( $range->from );
-		$end    = new \DateTimeImmutable( $range->to );
-		while ( $day <= $end ) {
-			$key      = $day->format( 'Y-m-d' );
-			$points[] = array(
-				'day'         => $key,
-				'visitors'    => isset( $site[ $key ] ) ? (int) $site[ $key ]->visitors : 0,
-				'views'       => isset( $site[ $key ] ) ? (int) $site[ $key ]->views : 0,
-				'clicks'      => isset( $gsc[ $key ] ) ? (int) $gsc[ $key ]->clicks : 0,
-				'impressions' => isset( $gsc[ $key ] ) ? (int) $gsc[ $key ]->impressions : 0,
-			);
-			$day      = $day->modify( '+1 day' );
+		// Traffico e Search Console sulla stessa riga del giorno.
+		$rows = array();
+		foreach ( $site as $day => $row ) {
+			$rows[ $day ] = (array) $row;
+		}
+		foreach ( $gsc as $day => $row ) {
+			$rows[ $day ] = ( $rows[ $day ] ?? array() ) + (array) $row;
 		}
 
-		return $points;
+		return Series::fill( $range, $rows, array( 'visitors', 'views', 'clicks', 'impressions' ) );
 	}
 
 	/**

@@ -23,14 +23,14 @@ final class Schema {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '1';
+	public const DB_VERSION = '2';
 
 	/**
 	 * Nomi brevi delle tabelle, nell'ordine in cui compaiono nella pagina Stato.
 	 *
 	 * @var array<int,string>
 	 */
-	public const TABLES = array( 'site_daily', 'object_daily', 'entry_daily', 'dim_daily', 'gsc_daily' );
+	public const TABLES = array( 'site_daily', 'object_daily', 'entry_daily', 'referrer_daily', 'dim_daily', 'gsc_daily' );
 
 	/**
 	 * Nome completo di una tabella del plugin.
@@ -77,6 +77,7 @@ final class Schema {
 		$site    = self::table( 'site_daily' );
 		$object  = self::table( 'object_daily' );
 		$entry   = self::table( 'entry_daily' );
+		$ref     = self::table( 'referrer_daily' );
 		$dim     = self::table( 'dim_daily' );
 		$gsc     = self::table( 'gsc_daily' );
 
@@ -90,7 +91,7 @@ final class Schema {
 		) {$charset};"
 		);
 
-		// Visualizzazioni per contenuto e giorno (post, pagine, allegati, home, archivi...).
+		// Visualizzazioni e visitatori unici per contenuto e giorno (post, pagine, allegati, home, archivi...).
 		dbDelta(
 			"CREATE TABLE {$object} (
 			day date NOT NULL,
@@ -98,6 +99,7 @@ final class Schema {
 			object_id bigint(20) unsigned NOT NULL DEFAULT 0,
 			uri varchar(190) NOT NULL DEFAULT '',
 			views int(10) unsigned NOT NULL DEFAULT 0,
+			visitors int(10) unsigned NOT NULL DEFAULT 0,
 			PRIMARY KEY  (day,object_type,object_id),
 			KEY object (object_type,object_id,day)
 		) {$charset};"
@@ -112,6 +114,21 @@ final class Schema {
 			channel varchar(50) NOT NULL,
 			visitors int(10) unsigned NOT NULL DEFAULT 0,
 			PRIMARY KEY  (day,object_type,object_id,channel),
+			KEY object (object_type,object_id,day)
+		) {$charset};"
+		);
+
+		// Siti di provenienza (solo host, come li salva WP Statistics) di chi entra da un contenuto.
+		dbDelta(
+			"CREATE TABLE {$ref} (
+			day date NOT NULL,
+			object_type varchar(40) NOT NULL,
+			object_id bigint(20) unsigned NOT NULL DEFAULT 0,
+			referrer varchar(190) NOT NULL,
+			channel varchar(50) NOT NULL DEFAULT '',
+			source varchar(100) NOT NULL DEFAULT '',
+			visitors int(10) unsigned NOT NULL DEFAULT 0,
+			PRIMARY KEY  (day,object_type,object_id,referrer),
 			KEY object (object_type,object_id,day)
 		) {$charset};"
 		);
