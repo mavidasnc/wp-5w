@@ -290,7 +290,7 @@ final class Schema {
 		);
 
 		// Visite grezze della raccolta propria: nessun IP e nessuno user agent, solo l'hash del giorno (md5 grezzo, 16 byte).
-		// ts è in UTC, day è il giorno del sito. country, device, browser e os restano vuoti fino alla fase 3.
+		// ts è in UTC, day è il giorno del sito. country (ISO a 2 lettere), device, browser e os (nomi di WP Statistics) sono vuoti se non riconosciuti o se il database dei paesi manca.
 		dbDelta(
 			"CREATE TABLE {$hits} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
