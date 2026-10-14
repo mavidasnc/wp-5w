@@ -378,7 +378,7 @@ Ciascuno deve comparire nella checklist della PR con l'esito.
 17. Il cron `wp5w_own_hourly` è pianificato dopo l'attivazione e tolto alla disattivazione; `wp 5w etl` e il pulsante «Aggiorna gli ultimi 7 giorni» aggregano anche la raccolta propria, e lo stato mostra le righe `own:*` senza sovrascrivere quelle di WP Statistics.
 18. La scheda Stato elenca la sorgente «Raccolta propria» e, per il resto, mostra gli stessi numeri della versione 0.6.0 sugli stessi dati.
 19. `CHANGELOG.md` (0.7.0) e `CLAUDE.md` sono aggiornati; `uninstall.php` e `Deactivator` coprono le nuove tabelle, opzioni e hook.
-20. Dopo il deploy sul blog, tutti i passi del runbook qui sotto sono verdi, compreso il gate dei tempi: la mediana dell'endpoint non supera di oltre il 20% quella di `/wp-json/`.
+20. Dopo il deploy sul blog, tutti i passi del runbook qui sotto sono verdi, compreso il gate dei tempi: la mediana dell'endpoint non supera di oltre il 20% quella di una `POST` a vuoto all'endpoint di WP Statistics (stesso bootstrap REST, non in cache).
 
 ---
 
@@ -488,19 +488,24 @@ curl -s "$POST_URL" | grep -o 'id="wp5w-hit"[^<]*\|build/tracker/tracker[^"]*'  
    Risponde `204`, nessuna riga, `bot` aumentato di 1.
 4. **Scheda Opzioni:** in wp-admin, 5W, Opzioni, ci sono i valori predefiniti; «Salva» senza modifiche dà l'avviso di successo.
 
-### 8.7 Gate dei tempi (scostamento della roadmap)
+### 8.7 Gate dei tempi (scostamento della roadmap, riferimento corretto il 2026-10-14)
 
-Dal PC locale, 7 coppie alternate. Ogni coppia è una visita valida (UA di un browser, firma valida, URI marcato) e una `GET /wp-json/`. Si confrontano le mediane:
+Il primo riferimento, `GET /wp-json/`, era sbagliato: viene servita dalla cache di LiteSpeed (circa 0,12-0,18 s), mentre ogni `POST` REST non è cacheabile e costa il bootstrap completo di WordPress (circa 0,41-0,45 s sul blog). Il riferimento equivalente è una `POST` a vuoto all'endpoint di WP Statistics, che viene rifiutata subito e non scrive nulla.
+
+Dal PC locale, 7 coppie alternate. Ogni coppia è una visita valida (UA di un browser, firma valida, URI marcato) e una `POST` a vuoto a WP Statistics. Si confrontano le mediane di `time_total`:
 
 ```bash
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36"
 for i in 1 2 3 4 5 6 7; do
-  curl -s -o /dev/null -w "hit %{time_total}\n" -A "$UA" -d "t=post&id=<ID>&s=<SIG>&u=/wp5w-smoke-test/" https://maurizio.mavida.com/wp-json/wp5w/v1/hit
-  curl -s -o /dev/null -w "json %{time_total}\n" -A "$UA" https://maurizio.mavida.com/wp-json/
+  curl -s -o /dev/null -w "hit %{time_total}
+" -A "$UA" -d "t=post&id=<ID>&s=<SIG>&u=/wp5w-smoke-test/" https://maurizio.mavida.com/wp-json/wp5w/v1/hit
+  curl -s -o /dev/null -w "wps %{time_total}
+" -A "$UA" -X POST -H 'Content-Type: application/json' -d '{}' https://maurizio.mavida.com/wp-json/wp-statistics/v2/hit
 done
 ```
 
-- **Esito:** la mediana di `hit` non deve superare di oltre il 20% quella di `json`. Le 7 visite restano sotto il limite di frequenza, quindi si misura il percorso completo, con `SELECT` e `INSERT`.
+- **Esito:** la mediana di `hit` non deve superare di oltre il 20% quella di `wps`. Le 7 visite restano sotto il limite di frequenza, quindi si misura il percorso completo, con `SELECT` e `INSERT`.
+- **Da riportare, senza gate:** la mediana di un file statico (per esempio `/wp-includes/images/blank.gif`, circa 0,19 s: è il costo di rete e TLS) e la mediana di `GET /wp-json/`. La differenza tra `hit` e il file statico è il costo del bootstrap di WordPress, su cui il plugin non può intervenire senza `SHORTINIT` (vedi la valutazione in `CHANGELOG.md` o nella PR #1).
 - **Verifica:** `SELECT COUNT(*) FROM maurizio_wp5w_hits WHERE uri = '/wp5w-smoke-test/'` deve dare 7, cioè sono state registrate davvero.
 - **Pulizia:** `DELETE FROM maurizio_wp5w_hits WHERE uri = '/wp5w-smoke-test/'`.
 

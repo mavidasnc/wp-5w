@@ -39,7 +39,7 @@ Ogni fase segue lo stesso ciclo, orchestrato da un Workflow di Claude Code (uno 
 
 ### Scostamenti rispetto al testo delle fasi (decisi il 2026-10-14)
 
-- **Tempo dell'endpoint:** la REST del blog impiega circa 150 ms a caldo già per `GET /wp-json/`, quindi il limite di 50 ms non è realistico. Il gate è relativo: la mediana di 5 richieste a `/wp5w/v1/hit` non deve superare di oltre il 20% quella di `/wp-json/`.
+- **Tempo dell'endpoint:** sul blog ogni `POST` REST costa circa 0,41-0,45 s (rete e TLS circa 0,19 s, bootstrap di WordPress il resto), quindi il limite di 50 ms non è realistico. Il gate è relativo: la mediana di `/wp5w/v1/hit` non deve superare di oltre il 20% quella di una `POST` a vuoto all'endpoint di WP Statistics (`GET /wp-json/` non va bene come riferimento, perché LiteSpeed la serve dalla cache). Ottimizzazione con `SHORTINIT`: valutata il 2026-10-14, rimandata finché il traffico non la giustifica.
 - **Prova della cache LiteSpeed:** si fa sul blog dopo il deploy (pagina con `x-litespeed-cache: hit`, beacon `204` da Chrome, riga in `wp5w_hits`), perché wp-env gira su Apache.
 - **Regola dell'origine nelle query:** entra già nella fase 1, in tutte le classi `Query`, altrimenti le righe `own` raddoppierebbero i numeri. Con `wp5w_own_since` vuota le query leggono solo `wps`.
 - **Migrazione dello schema alla versione 4:** `ALTER TABLE` esplicito e idempotente sulle chiavi primarie (`dbDelta` non le cambia), con lock contro le esecuzioni concorrenti.
