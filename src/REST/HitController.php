@@ -95,7 +95,7 @@ final class HitController extends RestController {
 		$ua = sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) );
 
 		// Passo 2: Do Not Track (parametro del tracker oppure header DNT).
-		$dnt_param  = '1' === (string) $request->get_param( 'dnt' );
+		$dnt_param  = '1' === $this->param( $request, 'dnt' );
 		$dnt_header = '1' === sanitize_text_field( wp_unslash( $_SERVER['HTTP_DNT'] ?? '' ) );
 		if ( $settings['respect_dnt'] && ( $dnt_param || $dnt_header ) ) {
 			$this->discard( 'dnt' );
@@ -113,9 +113,9 @@ final class HitController extends RestController {
 		}
 
 		// Passo 4: tipo, ID e firma (un payload malformato conta come firma errata).
-		$type = (string) $request->get_param( 't' );
-		$id   = (string) $request->get_param( 'id' );
-		if ( 1 !== preg_match( '/^[a-z0-9_]{1,40}$/', $type ) || 1 !== preg_match( '/^\d{1,18}$/', $id ) || ! Visit::check_signature( $type, (int) $id, (string) $request->get_param( 's' ), wp_salt( 'auth' ) ) ) {
+		$type = $this->param( $request, 't' );
+		$id   = $this->param( $request, 'id' );
+		if ( 1 !== preg_match( '/^[a-z0-9_]{1,40}$/', $type ) || 1 !== preg_match( '/^\d{1,18}$/', $id ) || ! Visit::check_signature( $type, (int) $id, $this->param( $request, 's' ), wp_salt( 'auth' ) ) ) {
 			$this->discard( 'signature' );
 			return;
 		}
@@ -151,7 +151,7 @@ final class HitController extends RestController {
 
 		// Passo 9: referrer, canale, sorgente e ingresso.
 		$site_host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
-		$referrer  = Channels::host( substr( (string) $request->get_param( 'r' ), 0, 2000 ), $site_host );
+		$referrer  = Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), $site_host );
 		$utm       = array(
 			'source'   => $this->text( $request->get_param( 'us' ), 100 ),
 			'medium'   => $this->text( $request->get_param( 'um' ), 100 ),
@@ -170,7 +170,7 @@ final class HitController extends RestController {
 				$hash,
 				$type,
 				(int) $id,
-				$this->relative_uri( (string) $request->get_param( 'u' ) ),
+				$this->relative_uri( $this->param( $request, 'u' ) ),
 				substr( $referrer, 0, 190 ),
 				$channel['channel'],
 				$this->text( $channel['source'], 100 ),
@@ -239,10 +239,13 @@ final class HitController extends RestController {
 			return substr( $stored, strlen( $today ) + 1 );
 		}
 
-		// Passo 2: nuova chiave. Se l'opzione non esiste la si crea, altrimenti si sostituisce solo il vecchio valore letto.
+		// Passo 2: nuova chiave. Se l'opzione non esiste la si crea con INSERT IGNORE (add_option() fa ON DUPLICATE KEY UPDATE
+		// e lascerebbe vincere due richieste simultanee), altrimenti si sostituisce solo il vecchio valore letto.
 		$new = $today . '|' . bin2hex( random_bytes( 32 ) );
 		if ( false === $stored ) {
-			$won = add_option( self::SALT_OPTION, $new, '', true );
+			$won = 1 === $wpdb->query(
+				$wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'on')", self::SALT_OPTION, $new )
+			);
 		} else {
 			$won = 1 === $wpdb->query(
 				$wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $new, self::SALT_OPTION, (string) $stored )
@@ -278,6 +281,21 @@ final class HitController extends RestController {
 		}
 
 		return $this->text( '' === $uri ? '/' : $uri, 190 );
+	}
+
+	/**
+	 * Parametro della richiesta come stringa: vuota se manca o non è scalare (t[]=x, id[]=1...).
+	 *
+	 * Il cast diretto di un array a stringa genera un PHP Warning, che sulla rotta pubblica
+	 * chiunque potrebbe provocare a ogni richiesta.
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @param string           $key     Nome del parametro.
+	 * @return string
+	 */
+	private function param( \WP_REST_Request $request, string $key ): string {
+		$value = $request->get_param( $key );
+		return is_scalar( $value ) ? (string) $value : '';
 	}
 
 	/**

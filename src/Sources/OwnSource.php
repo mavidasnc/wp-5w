@@ -163,6 +163,12 @@ final class OwnSource extends Source {
 	 */
 	public function run_hourly(): void {
 		try {
+			// Chiave del giorno scaduta: con poche visite non ruota da sola, quindi si cancella qui (nessuna chiave di ieri resta salvata).
+			$salt = get_option( 'wp5w_daily_salt', false );
+			if ( false !== $salt && ( ! is_string( $salt ) || ! str_starts_with( $salt, wp_date( 'Y-m-d' ) . '|' ) ) ) {
+				delete_option( 'wp5w_daily_salt' );
+			}
+
 			if ( ! $this->detect()['ok'] ) {
 				return;
 			}

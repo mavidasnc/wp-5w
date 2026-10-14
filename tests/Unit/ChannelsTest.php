@@ -39,6 +39,15 @@ final class ChannelsTest extends TestCase {
 		$this->assertSame( '', Channels::host( 'not a url', 'maurizio.mavida.com' ) );
 	}
 
+	public function test_host_with_invalid_characters_is_empty(): void {
+		$this->assertSame( '', Channels::host( 'http://<img src=x>.com/', 'maurizio.mavida.com' ) );
+		$this->assertSame( '', Channels::host( 'https://ex ample.com/', 'maurizio.mavida.com' ) );
+	}
+
+	public function test_host_longer_than_190_characters_is_empty(): void {
+		$this->assertSame( '', Channels::host( 'https://' . str_repeat( 'a', 191 ) . '.com/', 'maurizio.mavida.com' ) );
+	}
+
 	/**
 	 * Canale e sorgente attesi per un host, senza UTM.
 	 *

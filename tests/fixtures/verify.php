@@ -451,6 +451,34 @@ $check( 'tipo non valido: 204', 204, $send_hit( $payload( $post_a, array( 't' =>
 $check( 'firma e tipo: nessuna riga', $before[0], $count_hits() );
 $check( 'firma e tipo: scarti +2', $before[1] + 2, $discarded( 'signature' ) );
 
+// Parametri non scalari (t[]=post&id[]=4...): 204, uno scarto signature, nessuna riga e nessun warning PHP.
+$before   = array( $count_hits(), $discarded( 'signature' ) );
+$warnings = array();
+// Cattura di ogni errore PHP generato durante la richiesta (quello atteso è "Array to string conversion").
+set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.prevent_path_disclosure_set_error_handler -- Prova isolata, il gestore viene tolto subito dopo.
+	static function ( int $errno, string $errstr ) use ( &$warnings ): bool {
+		$warnings[] = $errstr;
+		return true;
+	}
+);
+$array_status = $send_hit(
+	array(
+		't'   => array( 'post' ),
+		'id'  => array( $post_a ),
+		's'   => array( 'x' ),
+		'r'   => array( 'x' ),
+		'u'   => array( 'x' ),
+		'dnt' => array( '1' ),
+	),
+	'198.51.100.6',
+	$chrome
+);
+restore_error_handler();
+$check( 'parametri array: 204', 204, $array_status );
+$check( 'parametri array: nessuna riga', $before[0], $count_hits() );
+$check( 'parametri array: scarto signature +1', $before[1] + 1, $discarded( 'signature' ) );
+$check( 'parametri array: nessun warning', '', implode( ' | ', $warnings ) );
+
 // IP escluso con una regola CIDR.
 update_option( Settings::OPTION, array( 'excluded_ips' => array( '203.0.113.0/24' ) ) + Settings::defaults() );
 $before = array( $count_hits(), $discarded( 'ip' ) );
@@ -594,7 +622,14 @@ wp_set_current_user( 0 );
 // ---------------------------------------------------------------------------
 // 6. Aggregazione oraria.
 // ---------------------------------------------------------------------------
+// Chiave di ieri e nessuna visita: il passaggio orario la cancella; quella di oggi invece resta (e si ripristina).
+$today_key = get_option( 'wp5w_daily_salt', false );
+update_option( 'wp5w_daily_salt', $yesterday_key );
 ( new OwnSource() )->run_hourly();
+$check( 'chiave di ieri: cancellata da run_hourly()', false, get_option( 'wp5w_daily_salt', false ) );
+update_option( 'wp5w_daily_salt', $today_key );
+( new OwnSource() )->run_hourly();
+$check( 'chiave di oggi: resta dopo run_hourly()', $today_key, get_option( 'wp5w_daily_salt', false ) );
 $own_table = static fn( string $name ): string => Schema::table( $name );
 $own_site  = $wpdb->get_row( $wpdb->prepare( 'SELECT visitors, views FROM ' . $own_table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) );
 $check( 'own site_daily.visitors', $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(DISTINCT visitor) FROM {$hits_table} WHERE day = %s", $today ) ), $own_site->visitors ?? 'nessuna riga' );

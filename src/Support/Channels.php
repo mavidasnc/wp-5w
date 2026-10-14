@@ -73,7 +73,12 @@ final class Channels {
 		// Passo 2: normalizzazione (minuscolo e senza www.).
 		$host = self::strip_www( $host );
 
-		// Passo 3: un referrer del sito stesso non è una provenienza.
+		// Passo 3: host non valido (spazi, tag, caratteri strani) = referrer spam, si scarta.
+		if ( 1 !== preg_match( '/^[a-z0-9.-]{1,190}$/', $host ) ) {
+			return '';
+		}
+
+		// Passo 4: un referrer del sito stesso non è una provenienza.
 		return $host === self::strip_www( $site_host ) ? '' : $host;
 	}
 
