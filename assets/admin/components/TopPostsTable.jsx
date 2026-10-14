@@ -1,6 +1,7 @@
 import { __ } from '@wordpress/i18n';
 import { Button } from '@wordpress/components';
 import { formatNumber } from '../api';
+import { TrendBadge } from './Trend';
 
 // Etichette dei tipi di contenuto registrati da WP Statistics.
 const TYPES = {
@@ -26,6 +27,9 @@ export default function TopPostsTable( { rows, onOpen } ) {
 			<thead>
 				<tr>
 					<th>{ __( 'Contenuto', 'wp-5w' ) }</th>
+					<th className="num" title={ __( 'Ultime 4 settimane complete contro le 4 precedenti', 'wp-5w' ) }>
+						{ __( 'Trend', 'wp-5w' ) }
+					</th>
 					<th className="num">{ __( 'Visualizzazioni', 'wp-5w' ) }</th>
 					<th className="num">{ __( 'Ingressi', 'wp-5w' ) }</th>
 					<th className="num">{ __( 'Di cui da ricerca', 'wp-5w' ) }</th>
@@ -51,6 +55,9 @@ export default function TopPostsTable( { rows, onOpen } ) {
 									{ __( 'Modifica', 'wp-5w' ) }
 								</a>
 							) }
+						</td>
+						<td className="num">
+							<TrendBadge trend={ row.trend } />
 						</td>
 						<td className="num">{ formatNumber( row.views ) }</td>
 						<td className="num">{ formatNumber( row.entries ) }</td>

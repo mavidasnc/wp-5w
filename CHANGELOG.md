@@ -2,6 +2,14 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.6.0] — 2026-10-14
+
+### Added
+- **Indicatore di trend** da -100 a +100: ultime 4 settimane complete contro le 4 precedenti, ponderato su visitatori (50%), visibilità su Google (25%: pagine con impression per il sito, query con impression per un contenuto) e posizione media (25%).
+  - Ogni variazione è compressa con tanh, così un picco isolato non domina; le componenti senza dati si escludono e i pesi si ridistribuiscono.
+  - Oltre ±10 è «in miglioramento» o «in calo», altrimenti «stabile»; «n.d.» sotto i 20 visitatori in entrambi i periodi, «nuovo» per i contenuti pubblicati da meno di 8 settimane.
+  - Panoramica: card del trend del sito con le tre componenti e i periodi confrontati. Colonna «Trend» nella classifica dei contenuti e nelle tabelle della scheda Articoli, con il dettaglio nel tooltip.
+
 ## [0.5.0] — 2026-10-14
 
 ### Changed

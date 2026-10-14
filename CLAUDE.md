@@ -37,8 +37,8 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 
 - `src/Sources/`: `Source` (controllo dello schema, `replace_by_month`), `WpStatisticsSource`, `RankMathSource`.
 - `src/Etl/`: `Importer` (lock, stato in `wp5w_etl_state`) e `Scheduler` (cron `wp5w_etl_daily` alle 4:00, `wp5w_etl_full` dopo l'attivazione).
-- `src/Query/`: `OverviewQuery` (Panoramica), `PostsQuery` (elenchi Articoli e dettaglio del modale), `SearchQuery` (opportunità e pagine della Panoramica sugli ultimi N giorni disponibili, query delle keyword) e `AudienceQuery` (Visitatori) leggono solo le tabelle `wp5w_*`.
-- `src/Support/`: `DateRange`, `Metrics`, `Series`, `Months` e `SchemaCheck` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
+- `src/Query/`: `OverviewQuery` (Panoramica), `PostsQuery` (elenchi Articoli e dettaglio del modale), `SearchQuery` (opportunità e pagine della Panoramica sugli ultimi N giorni disponibili, query delle keyword), `TrendQuery` (trend del sito e dei contenuti; `AdminController` lo aggiunge alle risposte con `attach()`) e `AudienceQuery` (Visitatori) leggono solo le tabelle `wp5w_*`.
+- `src/Support/`: `DateRange`, `Metrics`, `Series`, `Months`, `Trend` e `SchemaCheck` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
 - `assets/admin/`: app React (`@wordpress/components` + Chart.js con react-chartjs-2). I box a riga intera usano `components/Card.jsx` (riducibile, stato in `localStorage` con chiave `wp5w-card-<id>`).
 
 ## Punti da ricordare
@@ -53,6 +53,7 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 - **Dettaglio:** `PostsQuery::detail()` accorcia il periodo al primo giorno con dati, così «dalla pubblicazione» su post vecchi non genera anni di zeri.
 - **Origine delle righe GSC:** i giorni importati dall'API (`origin = 'api'`) hanno circa il doppio delle query di Rank Math; l'ETL di Rank Math li salta e cancella solo righe `rankmath` dei giorni che possiede (`replace_by_month` con il parametro `$delete`).
 - **Collation diverse:** le tabelle di Rank Math sono `utf8mb4_general_ci`, quelle del plugin `utf8mb4_unicode_520_ci`. Niente JOIN su colonne di testo tra le due: si confronta in PHP o con gli hash MD5.
+- **Trend:** finestre di settimane complete (lunedì-domenica): il traffico fino a ieri, Search Console fino all'ultimo giorno disponibile, quindi le due finestre possono differire. Formula, pesi e soglie sono in `Support\Trend` (coperta da `TrendTest`).
 - **Confronti con il periodo precedente:** vanno mostrati solo se quel periodo è coperto dai dati (`SearchQuery` restituisce `comparable`), altrimenti escono variazioni del +9000%.
 - **Su Windows con Git Bash** usa `MSYS_NO_PATHCONV=1` per gli argomenti che iniziano con `/` (per esempio `wp rewrite structure`) e scrivi i JSON con backslash usando l'editor, non gli heredoc.
 - **Blog di produzione** (`maurizio.mavida.com`): WP-CLI richiede `--url=https://maurizio.mavida.com`.

@@ -14,6 +14,7 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 - **Controllo dello schema delle sorgenti:** se un aggiornamento cambia le tabelle, la sorgente viene saltata e il motivo compare nella pagina Stato.
 - **Pagina 5W in wp-admin:**
   - **Panoramica:** KPI con confronto rispetto al periodo precedente, andamento di traffico e Search Console, canali, contenuti più visti con click, impression, CTR e posizione media pesata, opportunità di Search Console in un'unica tabella (quasi in prima pagina, poco cliccate) e pagine su Google, ciascuna con il proprio periodo (ultimi 7, 28, 90 o 180 giorni disponibili).
+  - **Trend:** punteggio da -100 a +100 sulle ultime 4 settimane complete contro le 4 precedenti (visitatori 50%, visibilità su Google 25%, posizione media 25%), per il sito nella Panoramica e per ogni contenuto nelle tabelle.
   - **Articoli:** ultimi 10 pubblicati e 10 più visti (settimana o mese), con il grafico delle visite degli ultimi 7 giorni.
   - **Dettaglio in un modale** (clic sul titolo): KPI, andamento, ricerche su Google, canali e siti di provenienza, con periodo selezionabile.
   - **Visitatori:** ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), provenienze e keyword degli ultimi 7 giorni.

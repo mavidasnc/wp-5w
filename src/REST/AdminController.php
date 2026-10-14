@@ -15,6 +15,7 @@ use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
+use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Updater;
 
@@ -33,13 +34,15 @@ final class AdminController extends RestController {
 	 * @param PostsQuery    $posts    Interrogazioni della scheda Articoli e del dettaglio.
 	 * @param SearchQuery   $search   Interrogazioni di Search Console (pagine e opportunità).
 	 * @param AudienceQuery $audience Interrogazioni della scheda Visitatori.
+	 * @param TrendQuery    $trend    Indicatore di trend del sito e dei contenuti.
 	 */
 	public function __construct(
 		private readonly Importer $importer,
 		private readonly OverviewQuery $overview,
 		private readonly PostsQuery $posts,
 		private readonly SearchQuery $search,
-		private readonly AudienceQuery $audience
+		private readonly AudienceQuery $audience,
+		private readonly TrendQuery $trend
 	) {}
 
 	/**
@@ -140,7 +143,7 @@ final class AdminController extends RestController {
 			'/admin/posts/latest',
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
-				'callback'            => fn() => $this->respond( $this->posts->latest() ),
+				'callback'            => fn() => $this->respond( $this->trend->attach( $this->posts->latest() ) ),
 				'permission_callback' => array( $this, 'check_admin_permission' ),
 			)
 		);
@@ -150,7 +153,7 @@ final class AdminController extends RestController {
 			'/admin/posts/top',
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
-				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->posts->top( (int) $request->get_param( 'days' ) ) ),
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->trend->attach( $this->posts->top( (int) $request->get_param( 'days' ) ) ) ),
 				'permission_callback' => array( $this, 'check_admin_permission' ),
 				'args'                => array(
 					'days' => array(
@@ -248,7 +251,8 @@ final class AdminController extends RestController {
 	 */
 	public function overview( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
 		$range = self::range_from( $request );
-		return $range instanceof DateRange ? $this->respond( $this->overview->get( $range ) ) : $range;
+		// Il trend non dipende dal periodo scelto: confronta sempre le ultime 4 settimane complete con le 4 precedenti.
+		return $range instanceof DateRange ? $this->respond( $this->overview->get( $range ) + array( 'trend' => $this->trend->site() ) ) : $range;
 	}
 
 	/**
@@ -262,7 +266,7 @@ final class AdminController extends RestController {
 		if ( ! $range instanceof DateRange ) {
 			return $range;
 		}
-		return $this->respond( $this->overview->top( $range, (string) $request->get_param( 'type' ), (int) $request->get_param( 'limit' ) ) );
+		return $this->respond( $this->trend->attach( $this->overview->top( $range, (string) $request->get_param( 'type' ), (int) $request->get_param( 'limit' ) ) ) );
 	}
 
 	/**

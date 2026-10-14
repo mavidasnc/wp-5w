@@ -18,6 +18,7 @@ use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
+use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\REST\AdminController;
 use Mavida\FiveW\REST\RestController;
 use Mavida\FiveW\Sources\RankMathSource;
@@ -99,7 +100,7 @@ final class Plugin {
 		// Le risposte REST del plugin non devono mai finire nelle cache di pagina.
 		add_filter( 'rest_post_dispatch', array( RestController::class, 'no_cache' ), 10, 3 );
 		$search = new SearchQuery();
-		( new AdminController( $importer, new OverviewQuery(), new PostsQuery(), $search, new AudienceQuery( $search ) ) )->register();
+		( new AdminController( $importer, new OverviewQuery(), new PostsQuery(), $search, new AudienceQuery( $search ), new TrendQuery() ) )->register();
 
 		if ( is_admin() ) {
 			( new AdminMenu() )->register();

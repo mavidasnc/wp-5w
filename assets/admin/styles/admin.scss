@@ -319,3 +319,62 @@
 .wp5w-legend {
 	margin-right: 12px;
 }
+
+// Indicatore di trend (v0.6).
+.wp5w-trend-badge {
+	white-space: nowrap;
+	color: #646970;
+
+	&.is-up {
+		color: #00a32a;
+	}
+
+	&.is-down {
+		color: #d63638;
+	}
+}
+
+.wp5w-trend {
+	display: grid;
+	grid-template-columns: 220px 1fr;
+	gap: 8px 24px;
+	align-items: center;
+
+	@media (max-width: 900px) {
+		grid-template-columns: 1fr;
+	}
+
+	&__score {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	&__components {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 12px;
+		margin: 0;
+
+		li {
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			margin: 0;
+			padding-left: 10px;
+			border-left: 3px solid #dcdcde;
+
+			&.is-good {
+				border-color: #00a32a;
+			}
+
+			&.is-bad {
+				border-color: #d63638;
+			}
+		}
+	}
+
+	&__note {
+		grid-column: 1 / -1;
+	}
+}

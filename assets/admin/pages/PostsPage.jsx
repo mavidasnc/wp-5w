@@ -5,6 +5,7 @@ import { api, formatDay, formatNumber } from '../api';
 import Sparkline from '../components/Sparkline';
 import PostDetailModal from '../components/PostDetailModal';
 import Card from '../components/Card';
+import { TrendBadge } from '../components/Trend';
 
 /**
  * Dati di un endpoint, con stato di caricamento ed errore.
@@ -49,6 +50,9 @@ function PostsTable( { state, columns, onOpen, showDate = false } ) {
 					<th>{ __( 'Articolo', 'wp-5w' ) }</th>
 					{ showDate && <th>{ __( 'Pubblicato', 'wp-5w' ) }</th> }
 					<th>{ __( 'Ultimi 7 giorni', 'wp-5w' ) }</th>
+					<th className="num" title={ __( 'Ultime 4 settimane complete contro le 4 precedenti', 'wp-5w' ) }>
+						{ __( 'Trend', 'wp-5w' ) }
+					</th>
 					{ columns.map( ( column ) => (
 						<th key={ column.label } className="num">
 							{ column.label }
@@ -67,6 +71,9 @@ function PostsTable( { state, columns, onOpen, showDate = false } ) {
 						{ showDate && <td>{ formatDay( row.date ) }</td> }
 						<td>
 							<Sparkline points={ row.spark } />
+						</td>
+						<td className="num">
+							<TrendBadge trend={ row.trend } />
 						</td>
 						{ columns.map( ( column ) => (
 							<td key={ column.label } className="num">

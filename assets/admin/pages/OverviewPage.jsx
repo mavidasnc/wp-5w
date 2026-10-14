@@ -8,6 +8,7 @@ import TopContents from '../components/TopContents';
 import SearchContent from '../components/SearchContent';
 import ChannelList from '../components/ChannelList';
 import PostDetailModal from '../components/PostDetailModal';
+import { TrendCard } from '../components/Trend';
 
 // Preset del periodo: giorni fino a oggi, oppure tutto lo storico del sito.
 const PERIODS = [
@@ -84,6 +85,8 @@ export default function OverviewPage() {
 							<KpiCard key={ key } { ...kpi } data={ data.kpis[ key ] } />
 						) ) }
 					</div>
+
+					<TrendCard trend={ data.trend } />
 
 					<div className="wp5w-grid">
 						<section className="wp5w-card wp5w-grid__main">
