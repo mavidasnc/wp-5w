@@ -5,6 +5,8 @@ import { api, formatDay, formatNumber } from '../api';
 import Sparkline from '../components/Sparkline';
 import PostDetailModal from '../components/PostDetailModal';
 import Card from '../components/Card';
+import NotFound from '../components/NotFound';
+import SiteSearches from '../components/SiteSearches';
 import { TrendBadge } from '../components/Trend';
 
 /**
@@ -89,9 +91,22 @@ function PostsTable( { state, columns, onOpen, showDate = false } ) {
 
 export default function PostsPage() {
 	const [ days, setDays ] = useState( 7 );
-	const [ detail, setDetail ] = useState( null );
+	// Modale già aperto se l'URL ha `&detail=<ID>` (colonna «Visite (30 g)» e barra di amministrazione): id, titolo e data li dà il PHP.
+	const [ detail, setDetail ] = useState( () => ( window.wp5wAdmin.detail ? { post: window.wp5wAdmin.detail, period: '30' } : null ) );
 	const latest = useEndpoint( '/admin/posts/latest' );
 	const top = useEndpoint( `/admin/posts/top?days=${ days }` );
+
+	// Alla chiusura si toglie `detail` dall'URL, così ricaricando la pagina il modale non si riapre.
+	const closeDetail = () => {
+		setDetail( null );
+		// Anche il dato iniziale va tolto: cambiando scheda PostsPage si rimonta e rileggerebbe `detail`, riaprendo il modale.
+		delete window.wp5wAdmin.detail;
+		const url = new URL( window.location.href );
+		if ( url.searchParams.has( 'detail' ) ) {
+			url.searchParams.delete( 'detail' );
+			window.history.replaceState( null, '', url );
+		}
+	};
 
 	// Visualizzazioni con i visitatori tra parentesi.
 	const pair = ( totals ) => `${ formatNumber( totals.views ) } (${ formatNumber( totals.visitors ) })`;
@@ -146,8 +161,12 @@ export default function PostsPage() {
 				/>
 			</Card>
 
+			<NotFound />
+
+			<SiteSearches />
+
 			{ detail && (
-				<PostDetailModal post={ detail.post } initialPeriod={ detail.period } onClose={ () => setDetail( null ) } />
+				<PostDetailModal post={ detail.post } initialPeriod={ detail.period } onClose={ closeDetail } />
 			) }
 		</div>
 	);

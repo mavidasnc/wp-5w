@@ -7,6 +7,9 @@ import QueryTable from '../components/QueryTable';
 import ShowMore from '../components/ShowMore';
 import Card from '../components/Card';
 import AudienceDimensions from '../components/AudienceDimensions';
+import Campaigns from '../components/Campaigns';
+import OnlineNow from '../components/OnlineNow';
+import { LABELS } from '../components/ChannelList';
 
 // Indice 0 = lunedì (getUTCDay() spostato di 6, ISO-8601).
 const WEEKDAYS = [
@@ -64,6 +67,8 @@ export default function AudiencePage() {
 
 	return (
 		<div className="wp5w-audience">
+			<OnlineNow />
+
 			<div className="wp5w-columns">
 				<section className="wp5w-card">
 					<h2>{ __( 'Ultimi 7 giorni', 'wp-5w' ) }</h2>
@@ -146,6 +151,8 @@ export default function AudiencePage() {
 
 			<AudienceDimensions />
 
+			<Campaigns />
+
 			<Card
 				id="referrers"
 				title={
@@ -173,9 +180,9 @@ export default function AudiencePage() {
 								<tbody>
 									{ rows.map( ( row ) => (
 										<tr key={ row.referrer }>
-											<td>{ row.referrer }</td>
+											<td title={ row.referrer }>{ row.label }</td>
 											<td>{ row.source || '–' }</td>
-											<td>{ row.channel || '–' }</td>
+											<td>{ LABELS[ row.channel ] ?? ( row.channel || '–' ) }</td>
 											<td className="num">{ formatNumber( row.visitors ) }</td>
 											<td className="num">{ formatNumber( row.contents ) }</td>
 										</tr>

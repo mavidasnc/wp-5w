@@ -40,7 +40,7 @@ if ( ! defined( 'WP5W_DELETE_DATA' ) || ! WP5W_DELETE_DATA ) {
 global $wpdb;
 
 // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-foreach ( array( 'site_daily', 'object_daily', 'entry_daily', 'referrer_daily', 'dim_daily', 'gsc_daily', 'hits', 'discards' ) as $wp5w_table ) {
+foreach ( array( 'site_daily', 'object_daily', 'entry_daily', 'referrer_daily', 'dim_daily', 'gsc_daily', 'hits', 'discards', 'notfound_daily', 'search_daily' ) as $wp5w_table ) {
 	$wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}wp5w_{$wp5w_table}" );
 }
 

@@ -1,14 +1,15 @@
 import { __ } from '@wordpress/i18n';
 import { formatNumber } from '../api';
 
-// Nomi dei canali di WP Statistics (source_channel).
-const LABELS = {
+// Nomi dei canali di WP Statistics (source_channel) e il canale «ai», che il plugin calcola in aggregazione.
+export const LABELS = {
 	direct: __( 'Diretto', 'wp-5w' ),
 	search: __( 'Motori di ricerca', 'wp-5w' ),
 	social: __( 'Social', 'wp-5w' ),
 	referral: __( 'Siti esterni', 'wp-5w' ),
 	video: __( 'Video', 'wp-5w' ),
 	email: __( 'Email', 'wp-5w' ),
+	ai: __( 'Assistenti AI', 'wp-5w' ),
 	unassigned: __( 'Non assegnato', 'wp-5w' ),
 	'(n/d)': __( 'Non assegnato', 'wp-5w' ),
 };

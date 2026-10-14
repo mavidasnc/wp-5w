@@ -37,9 +37,15 @@
 				p.set( k[ 0 ], q.get( k[ 1 ] ) );
 			}
 		} );
+
+		// 5) Ricerca interna: termine e numero di risultati (solo nella prima pagina dei risultati).
+		if ( d.q ) {
+			p.set( 'q', d.q );
+			p.set( 'n', d.n );
+		}
 	}
 
-	// 5) Invio: sendBeacon, oppure fetch con keepalive se manca o rifiuta la richiesta. Gli errori si ignorano.
+	// 6) Invio: sendBeacon, oppure fetch con keepalive se manca o rifiuta la richiesta. Gli errori si ignorano.
 	if ( ! ( navigator.sendBeacon && navigator.sendBeacon( d.url, p ) ) ) {
 		fetch( d.url, { method: 'POST', body: p, keepalive: true, credentials: 'same-origin' } ).catch( function () {} );
 	}

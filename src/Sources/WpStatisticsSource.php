@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Mavida\FiveW\Sources;
 
 use Mavida\FiveW\Database\Schema;
+use Mavida\FiveW\Support\Channels;
 use Mavida\FiveW\Support\DateRange;
 
 defined( 'ABSPATH' ) || exit;
@@ -42,6 +43,16 @@ final class WpStatisticsSource extends Source {
 		'channel'  => 'source_channel',
 		'source'   => 'source_name',
 	);
+
+	/**
+	 * Nome dell'assistente AI di un visitatore (`''` se non lo è), con la stessa regola della raccolta propria.
+	 * Guarda l'host del referrer (anche nella forma `android-app://pacchetto/`) e `source_name`: statistics_visitor non salva gli UTM.
+	 *
+	 * @return string Frammento SQL (un CASE) per la tabella `statistics_visitor` con alias `v`.
+	 */
+	private static function ai_sql(): string {
+		return Channels::ai_sql( Channels::host_sql( 'v.referred' ), '', 'v.source_name' );
+	}
 
 	/**
 	 * {@inheritDoc}
@@ -193,13 +204,14 @@ final class WpStatisticsSource extends Source {
 	private function import_referrers( DateRange $range ): int {
 		$pages   = $this->table( 'statistics_pages' );
 		$visitor = $this->table( 'statistics_visitor' );
+		$ai      = self::ai_sql();
 
 		return $this->replace_by_month(
 			'referrer_daily',
 			$range,
 			$this->data_range( 'statistics_visitor', 'last_counter' ),
 			"SELECT v.last_counter, LEFT(p.type, 40), p.id, LEFT(v.referred, 190),
-				COALESCE(MAX(v.source_channel), ''), COALESCE(MAX(v.source_name), ''), COUNT(*), 'wps'
+				MAX(IF( {$ai} <> '', 'ai', COALESCE(v.source_channel, '') )), MAX(IF( {$ai} <> '', {$ai}, COALESCE(v.source_name, '') )), COUNT(*), 'wps'
 			FROM {$visitor} v JOIN {$pages} p ON p.page_id = v.first_page
 			WHERE v.last_counter BETWEEN %s AND %s AND v.referred <> ''
 			GROUP BY v.last_counter, p.type, p.id, 4",
@@ -219,12 +231,13 @@ final class WpStatisticsSource extends Source {
 	private function import_entries( DateRange $range ): int {
 		$pages   = $this->table( 'statistics_pages' );
 		$visitor = $this->table( 'statistics_visitor' );
+		$ai      = self::ai_sql();
 
 		return $this->replace_by_month(
 			'entry_daily',
 			$range,
 			$this->data_range( 'statistics_visitor', 'last_counter' ),
-			"SELECT v.last_counter, LEFT(p.type, 40), p.id, COALESCE(NULLIF(v.source_channel, ''), 'unassigned'), COUNT(*), 'wps'
+			"SELECT v.last_counter, LEFT(p.type, 40), p.id, IF( {$ai} <> '', 'ai', COALESCE(NULLIF(v.source_channel, ''), 'unassigned') ), COUNT(*), 'wps'
 			FROM {$visitor} v JOIN {$pages} p ON p.page_id = v.first_page
 			WHERE v.last_counter BETWEEN %s AND %s
 			GROUP BY v.last_counter, p.type, p.id, 4",
@@ -241,12 +254,19 @@ final class WpStatisticsSource extends Source {
 	 */
 	private function import_dimensions( DateRange $range ): int {
 		$visitor = $this->table( 'statistics_visitor' );
+		$ai      = self::ai_sql();
 
 		// Una SELECT per dimensione, unite: così ogni mese si sostituisce in un'unica transazione.
 		$parts = array();
 		foreach ( self::DIMENSIONS as $dim => $column ) {
-			$parts[] = "SELECT last_counter AS day, '{$dim}' AS dim, LEFT(COALESCE(NULLIF({$column}, ''), '(n/d)'), 100) AS value, COUNT(*) AS visitors, 'wps' AS origin
-				FROM {$visitor} WHERE last_counter BETWEEN %s AND %s GROUP BY last_counter, 3";
+			// Canale e sorgente passano dalla regola dell'assistente AI (canale «ai», sorgente con il nome dell'assistente).
+			$expression = match ( $dim ) {
+				'channel' => "IF( {$ai} <> '', 'ai', v.{$column} )",
+				'source'  => "IF( {$ai} <> '', {$ai}, v.{$column} )",
+				default   => "v.{$column}",
+			};
+			$parts[] = "SELECT v.last_counter AS day, '{$dim}' AS dim, LEFT(COALESCE(NULLIF({$expression}, ''), '(n/d)'), 100) AS value, COUNT(*) AS visitors, 'wps' AS origin
+				FROM {$visitor} v WHERE v.last_counter BETWEEN %s AND %s GROUP BY v.last_counter, 3";
 		}
 
 		return $this->replace_by_month(

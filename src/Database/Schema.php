@@ -25,7 +25,7 @@ final class Schema {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '4';
+	public const DB_VERSION = '5';
 
 	/**
 	 * Nomi brevi delle tabelle, nell'ordine in cui compaiono nella pagina Stato.
@@ -93,7 +93,7 @@ final class Schema {
 	}
 
 	/**
-	 * Porta lo schema alla versione corrente: migrazione delle chiavi primarie, poi dbDelta.
+	 * Porta lo schema alla versione corrente: migrazione delle chiavi primarie, poi dbDelta (che crea anche le tabelle nuove della versione 5).
 	 *
 	 * Si esegue sotto un lock MySQL: se un'altra richiesta sta già migrando si esce senza toccare nulla
 	 * (nemmeno wp5w_db_version) e si riprova alla richiesta successiva.
@@ -198,6 +198,8 @@ final class Schema {
 		$gsc      = self::table( 'gsc_daily' );
 		$hits     = self::table( 'hits' );
 		$discards = self::table( 'discards' );
+		$notfound = self::table( 'notfound_daily' );
+		$search   = self::table( 'search_daily' );
 
 		// Le cinque tabelle aggregate hanno la colonna origin ("wps" importata da WP Statistics, "own" raccolta propria),
 		// ultima colonna della chiave primaria: le righe delle due raccolte convivono nello stesso giorno.
@@ -324,6 +326,30 @@ final class Schema {
 			reason varchar(20) NOT NULL,
 			n int(10) unsigned NOT NULL DEFAULT 0,
 			PRIMARY KEY  (day,reason)
+		) {$charset};"
+		);
+
+		// Pagine non trovate per giorno, URI e host del referrer: nessun visitatore, solo conteggi (fase 4).
+		// last_seen è in UTC, come wp5w_hits.ts.
+		dbDelta(
+			"CREATE TABLE {$notfound} (
+			day date NOT NULL,
+			uri varchar(190) NOT NULL,
+			referrer varchar(190) NOT NULL DEFAULT '',
+			hits int(10) unsigned NOT NULL DEFAULT 0,
+			last_seen datetime NOT NULL,
+			PRIMARY KEY  (day,uri,referrer)
+		) {$charset};"
+		);
+
+		// Ricerche interne per giorno e termine normalizzato: nessun orario e nessun visitatore (fase 4).
+		dbDelta(
+			"CREATE TABLE {$search} (
+			day date NOT NULL,
+			term varchar(60) NOT NULL,
+			searches int(10) unsigned NOT NULL DEFAULT 0,
+			empty int(10) unsigned NOT NULL DEFAULT 0,
+			PRIMARY KEY  (day,term)
 		) {$charset};"
 		);
 	}

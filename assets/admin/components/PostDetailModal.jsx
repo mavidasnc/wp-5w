@@ -124,7 +124,7 @@ export default function PostDetailModal( { post, initialPeriod = '30', onClose }
 										{ data.referrers.map( ( row ) => (
 											<tr key={ row.referrer }>
 												<td>
-													{ row.referrer }
+													<span title={ row.referrer }>{ row.label }</span>
 													{ row.source && <span className="wp5w-type">{ row.source }</span> }
 												</td>
 												<td className="num">{ formatNumber( row.visitors ) }</td>

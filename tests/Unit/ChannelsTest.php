@@ -122,4 +122,81 @@ final class ChannelsTest extends TestCase {
 			Channels::classify( '', 'newsletter-ott', '' )
 		);
 	}
+
+	public function test_ai_list_has_only_safe_values_and_no_duplicate_domains(): void {
+		$seen = array();
+		foreach ( Channels::AI as $name => $domains ) {
+			// Niente apici, % o _ nei nomi: finiscono letterali nel frammento SQL.
+			$this->assertMatchesRegularExpression( '/^[A-Za-z0-9 .]+$/', $name );
+			foreach ( $domains as $domain ) {
+				$this->assertMatchesRegularExpression( '/^[a-z0-9.-]+$/', $domain );
+				$this->assertNotContains( $domain, $seen, "Dominio doppio: {$domain}" );
+				$seen[] = $domain;
+			}
+		}
+	}
+
+	public function test_host_sql_normalizes_the_column(): void {
+		$this->assertSame(
+			"TRIM(LEADING 'www.' FROM TRIM(TRAILING '/' FROM REPLACE(LOWER(TRIM(v.referred)), 'android-app://', '')))",
+			Channels::host_sql( 'v.referred' )
+		);
+	}
+
+	public function test_ai_sql_with_all_arguments_covers_every_assistant_and_domain(): void {
+		$sql = Channels::ai_sql( 'h.host', 'h.utm', 'v.name' );
+
+		foreach ( Channels::AI as $name => $domains ) {
+			// Un solo THEN per assistente.
+			$this->assertSame( 1, substr_count( $sql, "THEN '{$name}'" ), $name );
+			foreach ( $domains as $domain ) {
+				// Due confronti esatti (host e utm_source) e un sottodominio (LIKE).
+				$this->assertSame( 2, substr_count( $sql, "= '{$domain}'" ), $domain );
+				$this->assertSame( 1, substr_count( $sql, "LIKE '%.{$domain}'" ), $domain );
+			}
+			$this->assertSame( 1, substr_count( $sql, "v.name = '{$name}'" ), $name );
+		}
+		$this->assertStringEndsWith( "ELSE '' END", $sql );
+	}
+
+	public function test_ai_sql_omits_the_parts_without_argument(): void {
+		$sql = Channels::ai_sql( 'h.host' );
+
+		$this->assertStringNotContainsString( 'utm', $sql );
+		$this->assertStringNotContainsString( 'LOWER(TRIM(', $sql );
+		// Senza nome della sorgente nessun confronto "= 'ChatGPT'": il nome compare solo dopo THEN.
+		$this->assertStringNotContainsString( "= 'ChatGPT'", $sql );
+		$this->assertSame( 1, substr_count( $sql, "THEN 'ChatGPT'" ) );
+	}
+
+	public function test_ai_sql_literals_come_only_from_the_list(): void {
+		$allowed = array( '', 'www.' );
+		foreach ( Channels::AI as $name => $domains ) {
+			$allowed[] = $name;
+			array_push( $allowed, ...$domains );
+		}
+
+		preg_match_all( "/'([^']*)'/", Channels::ai_sql( 'h.host', 'h.utm', 'v.name' ), $found );
+		foreach ( $found[1] as $literal ) {
+			// Il prefisso "%." del LIKE non fa parte del valore.
+			$this->assertContains( preg_replace( '/^%\./', '', $literal ), $allowed, "Valore non previsto: {$literal}" );
+		}
+	}
+
+	public function test_classify_is_not_changed_by_the_ai_channel(): void {
+		$this->assertSame(
+			array(
+				'channel' => 'search',
+				'source'  => 'ChatGPT',
+			),
+			Channels::classify( 'chatgpt.com', '', '' )
+		);
+		$this->assertSame(
+			array(
+				'channel' => 'referral',
+				'source'  => 'claude.ai',
+			),
+			Channels::classify( 'claude.ai', '', '' )
+		);
+	}
 }

@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Mavida\FiveW\Front;
 
 use Mavida\FiveW\Settings;
+use Mavida\FiveW\Support\SearchTerm;
 use Mavida\FiveW\Support\Visit;
 
 defined( 'ABSPATH' ) || exit;
@@ -71,7 +72,7 @@ final class Tracker {
 	}
 
 	/**
-	 * Stampa il blocco JSON con endpoint, contenuto, firma e opzione DNT.
+	 * Stampa il blocco JSON con endpoint, contenuto, firma e opzione DNT (e, in una ricerca, termine e risultati).
 	 *
 	 * @return void
 	 */
@@ -88,6 +89,16 @@ final class Tracker {
 			'sig'  => self::signature( $object['type'], $object['id'] ),
 			'dnt'  => Settings::get()['respect_dnt'],
 		);
+
+		// Ricerca interna (solo prima pagina dei risultati, così le pagine successive non gonfiano i totali): termine normalizzato
+		// e numero di risultati. Non sono firmati: l'endpoint li filtra e decide (vedi SearchTerm).
+		if ( is_search() && ! is_paged() ) {
+			$term = SearchTerm::normalize( get_search_query( false ) );
+			if ( '' !== $term ) {
+				$data['q'] = $term;
+				$data['n'] = (int) $GLOBALS['wp_query']->found_posts;
+			}
+		}
 
 		// Si stampa a mano (non con wp_print_inline_script_tag): con temi senza supporto html5 per gli script
 		// WordPress avvolge il contenuto in un commento CDATA e il JSON non sarebbe più valido.

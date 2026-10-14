@@ -105,15 +105,39 @@ final class AdminMenu {
 		wp_set_script_translations( 'wp5w-admin', 'wp-5w', WP5W_PLUGIN_DIR . 'languages' );
 
 		// Dati per il client JS.
-		wp_localize_script(
-			'wp5w-admin',
-			'wp5wAdmin',
-			array(
-				'nonce'   => wp_create_nonce( 'wp_rest' ),
-				'apiRoot' => esc_url_raw( rest_url( 'wp5w/v1' ) ),
-				'today'   => wp_date( 'Y-m-d' ),
-				'version' => WP5W_VERSION,
-			)
+		$data = array(
+			'nonce'   => wp_create_nonce( 'wp_rest' ),
+			'apiRoot' => esc_url_raw( rest_url( 'wp5w/v1' ) ),
+			'today'   => wp_date( 'Y-m-d' ),
+			'version' => WP5W_VERSION,
+		);
+
+		// Modale di dettaglio aperto dall'URL (`&detail=<ID>`, dalla colonna «Visite (30 g)» e dalla barra di amministrazione):
+		// il PHP conosce già titolo e data, così il client non fa una chiamata REST in più.
+		$detail = $this->detail();
+		if ( null !== $detail ) {
+			$data['detail'] = $detail;
+		}
+
+		wp_localize_script( 'wp5w-admin', 'wp5wAdmin', $data );
+	}
+
+	/**
+	 * Dati del contenuto da aprire nel modale, se l'URL ha `detail` e punta a un articolo o una pagina leggibili.
+	 *
+	 * @return array{id:int,title:string,date:string}|null
+	 */
+	private function detail(): ?array {
+		// Parametro di navigazione in sola lettura, nessuna modifica di stato: niente nonce.
+		$id = isset( $_GET['detail'] ) ? absint( wp_unslash( $_GET['detail'] ) ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Parametro di navigazione in sola lettura.
+		if ( $id < 1 || ! in_array( get_post_type( $id ), array( 'post', 'page' ), true ) || ! current_user_can( 'read_post', $id ) ) {
+			return null;
+		}
+
+		return array(
+			'id'    => $id,
+			'title' => html_entity_decode( get_the_title( $id ), ENT_QUOTES, 'UTF-8' ),
+			'date'  => (string) get_the_date( 'Y-m-d', $id ),
 		);
 	}
 }

@@ -15,6 +15,7 @@ use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Dimensions;
 use Mavida\FiveW\Support\Months;
 use Mavida\FiveW\Support\Origin;
+use Mavida\FiveW\Support\Referrers;
 use Mavida\FiveW\Support\Series;
 
 defined( 'ABSPATH' ) || exit;
@@ -32,6 +33,13 @@ final class AudienceQuery {
 	 * @var int
 	 */
 	private const MONTHS = 6;
+
+	/**
+	 * Dimensioni UTM in `dim_daily` (solo righe own, fuori dalla regola «stessa somma per ogni dimensione»).
+	 *
+	 * @var array<int,string>
+	 */
+	private const UTM_DIMS = array( 'utm_campaign', 'utm_source', 'utm_medium' );
 
 	/**
 	 * Righe delle tabelle referrer e keyword.
@@ -158,6 +166,51 @@ final class AudienceQuery {
 	}
 
 	/**
+	 * Campagne, sorgenti e mezzi UTM del periodo (box «Campagne»).
+	 *
+	 * ECCEZIONE ALLA REGOLA DELL'ORIGINE (come CompareQuery): WP Statistics non salva i parametri UTM, quindi le
+	 * dimensioni utm_* esistono solo nelle righe own e si leggono sempre, qualunque sia wp5w_own_since.
+	 * Per questo il primo giorno di dati è il primo giorno own di `dim_daily` (dimensione `channel`), non il primo
+	 * giorno con UTM: un box vuoto vuol dire «nessuna campagna», non «nessun dato».
+	 * Un visitatore conta una volta per ogni valore e per ogni giorno; chi arriva senza UTM non compare.
+	 *
+	 * @param DateRange $range Intervallo.
+	 * @return array{range:array{from:string,to:string},first_day:?string,dims:array<string,array<string,mixed>>}
+	 */
+	public function campaigns( DateRange $range ): array {
+		global $wpdb;
+
+		$table = Schema::table( 'dim_daily' );
+		$dims  = "'" . implode( "','", self::UTM_DIMS ) . "'";
+
+		// Una sola SELECT per le tre dimensioni, solo righe own.
+		$rows  = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT dim, value, SUM(visitors) AS visitors FROM {$table} WHERE origin = 'own' AND dim IN ({$dims}) AND day BETWEEN %s AND %s GROUP BY dim, value",
+				$range->from,
+				$range->to
+			),
+			ARRAY_A
+		);
+		$first = $wpdb->get_var( "SELECT MIN(day) FROM {$table} WHERE origin = 'own' AND dim = 'channel'" );
+
+		// Valori per dimensione (le tre chiavi ci sono sempre, anche vuote).
+		$values = array_fill_keys( self::UTM_DIMS, array() );
+		foreach ( $rows as $row ) {
+			$values[ $row['dim'] ][ (string) $row['value'] ] = (int) $row['visitors'];
+		}
+
+		return array(
+			'range'     => array(
+				'from' => $range->from,
+				'to'   => $range->to,
+			),
+			'first_day' => $first ? (string) $first : null,
+			'dims'      => array_map( static fn( array $items ): array => Dimensions::top( $items ), $values ),
+		);
+	}
+
+	/**
 	 * Siti di provenienza nel periodo.
 	 *
 	 * @param DateRange $range Intervallo.
@@ -185,6 +238,7 @@ final class AudienceQuery {
 		return array_map(
 			static fn( array $row ): array => array(
 				'referrer' => (string) $row['referrer'],
+				'label'    => Referrers::label( (string) $row['referrer'] ),
 				'source'   => (string) $row['source'],
 				'channel'  => (string) $row['channel'],
 				'visitors' => (int) $row['visitors'],

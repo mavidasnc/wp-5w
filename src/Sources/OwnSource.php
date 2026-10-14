@@ -11,6 +11,7 @@ namespace Mavida\FiveW\Sources;
 
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Settings;
+use Mavida\FiveW\Support\Channels;
 use Mavida\FiveW\Support\DateRange;
 
 defined( 'ABSPATH' ) || exit;
@@ -67,7 +68,7 @@ final class OwnSource extends Source {
 	 */
 	protected function required(): array {
 		return array(
-			'wp5w_hits' => array( 'ts', 'day', 'visitor', 'object_type', 'object_id', 'uri', 'referrer_host', 'channel', 'source', 'is_entry', 'country', 'device', 'browser', 'os' ),
+			'wp5w_hits' => array( 'ts', 'day', 'visitor', 'object_type', 'object_id', 'uri', 'referrer_host', 'channel', 'source', 'utm_source', 'utm_medium', 'utm_campaign', 'is_entry', 'country', 'device', 'browser', 'os' ),
 		);
 	}
 
@@ -91,6 +92,11 @@ final class OwnSource extends Source {
 			$available = $this->data_range( 'wp5w_hits', 'day' );
 			$delete    = " AND origin = 'own'";
 			$rows      = array();
+
+			// Canale «ai»: la regola è la stessa che WpStatisticsSource applica alle righe wps. Si decide qui, in aggregazione,
+			// guardando host del referrer e utm_source: wp5w_hits resta con i canali di WP Statistics (Channels::classify()).
+			$ai     = Channels::ai_sql( 'referrer_host', 'utm_source' );
+			$ai_hit = Channels::ai_sql( 'h.referrer_host', 'h.utm_source' );
 
 			// Totali del sito: visitatori distinti e visualizzazioni per giorno.
 			$rows['own:site_daily'] = $this->replace_by_month(
@@ -118,7 +124,7 @@ final class OwnSource extends Source {
 				'entry_daily',
 				$range,
 				$available,
-				"SELECT day, object_type, object_id, COALESCE(NULLIF(channel, ''), 'unassigned') AS entry_channel, COUNT(DISTINCT visitor), 'own' FROM {$hits}
+				"SELECT day, object_type, object_id, IF( {$ai} <> '', 'ai', COALESCE(NULLIF(channel, ''), 'unassigned') ) AS entry_channel, COUNT(DISTINCT visitor), 'own' FROM {$hits}
 				WHERE is_entry = 1 AND day BETWEEN %s AND %s GROUP BY day, object_type, object_id, entry_channel",
 				'day, object_type, object_id, channel, visitors, origin',
 				$delete
@@ -129,7 +135,7 @@ final class OwnSource extends Source {
 				'referrer_daily',
 				$range,
 				$available,
-				"SELECT day, object_type, object_id, referrer_host, MAX(channel), MAX(source), COUNT(DISTINCT visitor), 'own' FROM {$hits}
+				"SELECT day, object_type, object_id, referrer_host, MAX(IF( {$ai} <> '', 'ai', channel )), MAX(IF( {$ai} <> '', {$ai}, source )), COUNT(DISTINCT visitor), 'own' FROM {$hits}
 				WHERE is_entry = 1 AND referrer_host <> '' AND day BETWEEN %s AND %s GROUP BY day, object_type, object_id, referrer_host",
 				'day, object_type, object_id, referrer, channel, source, visitors, origin',
 				$delete
@@ -137,14 +143,16 @@ final class OwnSource extends Source {
 
 			// Dimensioni (canale, sorgente, paese, dispositivo, browser e sistema): un visitatore per giorno, con la prima visita del giorno,
 			// così la somma dei visitatori è uguale per tutte le dimensioni. Il sistema operativo si chiama "platform" (come in WP Statistics).
+			// Le dimensioni utm_campaign, utm_source e utm_medium sono fuori da questa regola: contano i visitatori distinti del giorno che hanno
+			// quel valore (uno può averne zero o più di uno) e le visite senza UTM non generano righe.
 			$first                 = "SELECT MIN(id) AS id FROM {$hits} WHERE day BETWEEN %s AND %s GROUP BY day, visitor";
 			$rows['own:dim_daily'] = $this->replace_by_month(
 				'dim_daily',
 				$range,
 				$available,
-				"SELECT h.day, 'channel', h.channel, COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, h.channel
+				"SELECT h.day, 'channel', IF( {$ai_hit} <> '', 'ai', h.channel ), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
 				UNION ALL
-				SELECT h.day, 'source', COALESCE(NULLIF(h.source, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
+				SELECT h.day, 'source', COALESCE(NULLIF(IF( {$ai_hit} <> '', {$ai_hit}, h.source ), ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
 				UNION ALL
 				SELECT h.day, 'country', COALESCE(NULLIF(h.country, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
 				UNION ALL
@@ -152,7 +160,13 @@ final class OwnSource extends Source {
 				UNION ALL
 				SELECT h.day, 'browser', COALESCE(NULLIF(h.browser, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
 				UNION ALL
-				SELECT h.day, 'platform', COALESCE(NULLIF(h.os, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3",
+				SELECT h.day, 'platform', COALESCE(NULLIF(h.os, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
+				UNION ALL
+				SELECT day, 'utm_campaign', LEFT(utm_campaign, 100), COUNT(DISTINCT visitor), 'own' FROM {$hits} WHERE utm_campaign <> '' AND day BETWEEN %s AND %s GROUP BY day, 3
+				UNION ALL
+				SELECT day, 'utm_source', LEFT(utm_source, 100), COUNT(DISTINCT visitor), 'own' FROM {$hits} WHERE utm_source <> '' AND day BETWEEN %s AND %s GROUP BY day, 3
+				UNION ALL
+				SELECT day, 'utm_medium', LEFT(utm_medium, 100), COUNT(DISTINCT visitor), 'own' FROM {$hits} WHERE utm_medium <> '' AND day BETWEEN %s AND %s GROUP BY day, 3",
 				'day, dim, value, visitors, origin',
 				$delete
 			);

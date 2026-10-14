@@ -1,18 +1,10 @@
 import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Button, Notice, Spinner } from '@wordpress/components';
-import { api, formatDay, formatNumber } from '../api';
+import { Notice, Spinner } from '@wordpress/components';
+import { api, formatDay } from '../api';
 import Card from './Card';
-
-// Periodi selezionabili (ultimi N giorni, compreso oggi).
-const PERIODS = [
-	{ days: 7, label: __( '7 giorni', 'wp-5w' ) },
-	{ days: 30, label: __( '30 giorni', 'wp-5w' ) },
-	{ days: 90, label: __( '90 giorni', 'wp-5w' ) },
-];
-
-// Valore non riconosciuto: stesso testo in tutti gli elenchi.
-const UNKNOWN = '(n/d)';
+import DimensionList from './DimensionList';
+import PeriodSwitch from './PeriodSwitch';
 
 // Etichette dei valori di WP Statistics (device-detector) che hanno un nome più chiaro; gli altri restano come sono.
 const DEVICES = {
@@ -47,42 +39,6 @@ const LISTS = [
 ];
 
 /**
- * Un elenco con barra proporzionale (stesse classi di ChannelList).
- *
- * @param {Object}   props
- * @param {string}   props.title Titolo dell'elenco.
- * @param {Object}   props.dim   { total, rows, other }.
- * @param {Function} props.label Etichetta di un valore.
- */
-function DimensionList( { title, dim, label } ) {
-	const share = ( visitors ) => Math.round( ( visitors / dim.total ) * 1000 ) / 10;
-	const rows = dim.other > 0 ? [ ...dim.rows, { value: null, visitors: dim.other } ] : dim.rows;
-
-	return (
-		<div>
-			<h3>{ title }</h3>
-			{ dim.total > 0 ? (
-				<ul className="wp5w-channels">
-					{ rows.map( ( row ) => (
-						<li key={ row.value ?? 'other' }>
-							<div className="wp5w-channels__row">
-								<span>{ row.value === null ? __( 'Altri', 'wp-5w' ) : row.value === UNKNOWN ? __( 'Non riconosciuto', 'wp-5w' ) : label( row.value ) }</span>
-								<span className="wp5w-channels__value">
-									{ formatNumber( row.visitors ) } ({ formatNumber( share( row.visitors ), '%' ) })
-								</span>
-							</div>
-							<span className="wp5w-channels__bar" style={ { width: `${ share( row.visitors ) }%` } } />
-						</li>
-					) ) }
-				</ul>
-			) : (
-				<p>{ __( 'Nessun dato nel periodo.', 'wp-5w' ) }</p>
-			) }
-		</div>
-	);
-}
-
-/**
  * Box «Pubblico»: paesi, dispositivi, browser e sistemi operativi degli ultimi N giorni; carica da /admin/audience/dimensions.
  */
 export default function AudienceDimensions() {
@@ -113,15 +69,7 @@ export default function AudienceDimensions() {
 					) }
 				</>
 			}
-			actions={
-				<div className="wp5w-switch">
-					{ PERIODS.map( ( period ) => (
-						<Button key={ period.days } size="compact" variant={ days === period.days ? 'primary' : 'secondary' } onClick={ () => setDays( period.days ) }>
-							{ period.label }
-						</Button>
-					) ) }
-				</div>
-			}
+			actions={ <PeriodSwitch days={ days } onChange={ setDays } /> }
 		>
 			{ error && <Notice status="error" isDismissible={ false }>{ error }</Notice> }
 			{ ! data && ! error && <Spinner /> }

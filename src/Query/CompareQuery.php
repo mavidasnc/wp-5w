@@ -14,10 +14,11 @@ use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\Comparison;
 use Mavida\FiveW\Support\Metrics;
+use Mavida\FiveW\Support\ObjectType;
 
 defined( 'ABSPATH' ) || exit;
 
-// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Tabelle del plugin, nomi costruiti con $wpdb->prefix in Schema::table(); segnaposto generati per ogni giorno.
+// phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- Tabelle del plugin, nomi costruiti con $wpdb->prefix in Schema::table().
 
 /**
  * Confronta la raccolta propria (`own`) con WP Statistics (`wps`) sui giorni completi.
@@ -27,14 +28,6 @@ defined( 'ABSPATH' ) || exit;
  * e non scrive nulla. Le regole (finestra, soglia, quote, classifica) sono in Support\Comparison.
  */
 final class CompareQuery {
-
-	/**
-	 * Tipi di oggetto il cui ID non è quello di un articolo (termini, autori, archivi): titolo e link non si leggono da get_the_title().
-	 * `home` non c'è: i suoi ID sono pagine vere (la home e la pagina degli articoli).
-	 *
-	 * @var array<int,string>
-	 */
-	private const NON_POST_TYPES = array( '404', 'search', 'archive', 'author', 'category', 'post_tag', 'loginpage' );
 
 	/**
 	 * Dati del confronto per la rotta /admin/compare.
@@ -146,6 +139,7 @@ final class CompareQuery {
 		return array(
 			'available'   => true,
 			'threshold'   => (int) Comparison::THRESHOLD,
+			'min_views'   => Comparison::MIN_VIEWS,
 			'coverage'    => $this->coverage( $plan, $own_first, $etl, $last ),
 			'days'        => $day_rows,
 			'totals'      => array(
@@ -219,7 +213,7 @@ final class CompareQuery {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT day, origin, SUM(visitors) AS visitors FROM ' . Schema::table( 'entry_daily' ) . " WHERE object_type = 'home' AND channel = 'direct' AND day IN (" . self::in_days( $days ) . ') GROUP BY day, origin',
+				'SELECT day, origin, SUM(visitors) AS visitors FROM ' . Schema::table( 'entry_daily' ) . " WHERE object_type = 'home' AND channel = 'direct' AND day IN (" . self::in_days( $days ) . ') GROUP BY day, origin', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
 				$days
 			),
 			ARRAY_A
@@ -247,7 +241,7 @@ final class CompareQuery {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT day, reason, n FROM ' . Schema::table( 'discards' ) . ' WHERE day IN (' . self::in_days( $days ) . ') ORDER BY day, reason',
+				'SELECT day, reason, n FROM ' . Schema::table( 'discards' ) . ' WHERE day IN (' . self::in_days( $days ) . ') ORDER BY day, reason', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
 				$days
 			),
 			ARRAY_A
@@ -275,16 +269,20 @@ final class CompareQuery {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT value, origin, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day IN (" . self::in_days( $days ) . ') GROUP BY value, origin',
+				'SELECT value, origin, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day IN (" . self::in_days( $days ) . ') GROUP BY value, origin', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
 				$days
 			),
 			ARRAY_A
 		);
 
-		// Passo 1: una riga per canale con le due origini affiancate.
+		// Passo 1: una riga per canale con le due origini affiancate. WP Statistics scrive «(n/d)» dove la raccolta propria scrive
+		// «unassigned»: sono lo stesso canale, quindi si uniscono prima di raggruppare (e si sommano, se un'origine li ha entrambi).
 		$by_channel = array();
 		foreach ( $rows as $row ) {
-			$by_channel[ (string) $row['value'] ][ (string) $row['origin'] ] = (int) $row['visitors'];
+			$channel = '(n/d)' === $row['value'] ? 'unassigned' : (string) $row['value'];
+			$origin  = (string) $row['origin'];
+
+			$by_channel[ $channel ][ $origin ] = ( $by_channel[ $channel ][ $origin ] ?? 0 ) + (int) $row['visitors'];
 		}
 
 		// Passo 2: differenza e ordine per max( wps, own ) decrescente, poi per nome.
@@ -319,7 +317,7 @@ final class CompareQuery {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT object_type, object_id, origin, MIN(uri) AS uri, SUM(views) AS views FROM ' . Schema::table( 'object_daily' ) . ' WHERE day IN (' . self::in_days( $days ) . ') GROUP BY object_type, object_id, origin',
+				'SELECT object_type, object_id, origin, MIN(uri) AS uri, SUM(views) AS views FROM ' . Schema::table( 'object_daily' ) . ' WHERE day IN (' . self::in_days( $days ) . ') GROUP BY object_type, object_id, origin', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
 				$days
 			),
 			ARRAY_A
@@ -346,7 +344,7 @@ final class CompareQuery {
 			static function ( array $row ): array {
 				// Titolo e link da WordPress solo se l'ID è quello di un articolo o di una pagina; altrimenti l'URI.
 				$id      = $row['id'];
-				$is_post = $id > 0 && ! in_array( $row['type'], self::NON_POST_TYPES, true );
+				$is_post = ObjectType::is_post( $row['type'], $id );
 				$title   = $is_post ? html_entity_decode( get_the_title( $id ), ENT_QUOTES, 'UTF-8' ) : '';
 				$link    = $is_post ? get_permalink( $id ) : false;
 

@@ -99,7 +99,7 @@ final class SearchQuery {
 				"SELECT query_hash, MIN(query) AS query, SUM(clicks) AS clicks, SUM(impressions) AS impressions, SUM(pos_x_impr) AS pos_x_impr,
 					COUNT(DISTINCT page_hash) AS pages
 				FROM {$gsc} WHERE day BETWEEN %s AND %s
-				GROUP BY query_hash ORDER BY clicks DESC, impressions DESC LIMIT %d",
+				GROUP BY query_hash ORDER BY clicks DESC, impressions DESC, query LIMIT %d",
 				$range->from,
 				$range->to,
 				$limit

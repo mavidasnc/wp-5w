@@ -15,9 +15,9 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 - **Pagina 5W in wp-admin:**
   - **Panoramica:** KPI con confronto rispetto al periodo precedente, andamento di traffico e Search Console, canali, contenuti più visti con click, impression, CTR e posizione media pesata, opportunità di Search Console in un'unica tabella (quasi in prima pagina, poco cliccate) e pagine su Google, ciascuna con il proprio periodo (ultimi 7, 28, 90 o 180 giorni disponibili).
   - **Trend:** punteggio da -100 a +100 sulle ultime 4 settimane complete contro le 4 precedenti (visitatori 50%, visibilità su Google 25%, posizione media 25%), per il sito nella Panoramica e per ogni contenuto nelle tabelle.
-  - **Articoli:** ultimi 10 pubblicati e 10 più visti (settimana o mese), con il grafico delle visite degli ultimi 7 giorni.
+  - **Articoli:** ultimi 10 pubblicati e 10 più visti (settimana o mese), con il grafico delle visite degli ultimi 7 giorni; poi «Pagine non trovate» (indirizzi inesistenti visitati, con la provenienza) e «Ricerche interne» (termini cercati sul sito e ricerche senza risultati), entrambi su 7, 30 o 90 giorni.
   - **Dettaglio in un modale** (clic sul titolo): KPI, andamento, ricerche su Google, canali e siti di provenienza, con periodo selezionabile.
-  - **Visitatori:** ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), box «Pubblico» (paesi, dispositivi, browser e sistemi operativi degli ultimi 7, 30 o 90 giorni), provenienze e keyword degli ultimi 7 giorni.
+  - **Visitatori:** «Online adesso» in cima (visitatori degli ultimi 5 minuti e contenuti che guardano, aggiornato ogni 30 secondi solo a scheda visibile), ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), box «Pubblico» (paesi, dispositivi, browser e sistemi operativi degli ultimi 7, 30 o 90 giorni), box «Campagne» (UTM di campagna, sorgente e mezzo), provenienze (con i nomi leggibili delle app, per esempio «LinkedIn (app)») e keyword degli ultimi 7 giorni.
   - I box a riga intera si riducono con un toggle, che resta memorizzato nel browser.
   - **Stato:** confronto della raccolta propria con WP Statistics (giorni completi, differenze, scarti, contenuti), sorgenti, copertura delle tabelle, database dei paesi, ultimo import, avvio manuale.
 - **Raccolta propria (dalla 0.7.0):**
@@ -26,6 +26,9 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
   - **Scheda Opzioni** per raccolta, utenti, IP, DNT, conservazione e data di passaggio (`wp5w_own_since`).
   - Le righe si distinguono con la colonna `origin` (`wps` o `own`) nelle tabelle aggregate.
   - **Paese, dispositivo, browser e sistema operativo (dalla 0.9.0):** il paese si ricava dall'IP con il database DB-IP Lite Country (l'IP non si salva); dispositivo, browser e sistema dallo user agent con regole essenziali, con gli stessi nomi di WP Statistics (`smartphone`, `Mac`, `GNU/Linux`...). Lo user agent non si salva.
+  - **Canale «Assistenti AI» (dalla 0.10.0):** chatgpt.com, perplexity.ai, gemini.google.com, copilot.microsoft.com, claude.ai e simili (elenco `Channels::AI`) hanno un canale a sé, con la stessa regola sulle due origini, applicata in aggregazione (anche allo storico di WP Statistics).
+  - **Visite nell'admin (dalla 0.10.0):** colonna ordinabile «Visite (30 g)» negli elenchi di articoli e pagine e dato «5W: N visite (30 g)» nella barra di amministrazione sui contenuti singoli, con un clic che apre il dettaglio (`admin.php?page=wp5w&tab=posts&detail=<ID>`). Solo per chi ha `manage_options`.
+  - **404 e ricerche interne (dalla 0.10.0):** solo aggregati giornalieri, senza legame con il visitatore; i termini di ricerca si normalizzano e le email e i numeri lunghi si salvano come «(filtrato)». Le immagini mancanti non compaiono: il server risponde senza passare da WordPress.
 - **Comandi WP-CLI:** `wp 5w status`, `wp 5w etl [--full] [--from=] [--to=]` e `wp 5w gsc-import <file.jsonl>`.
 - **Recupero dello storico di Search Console** dall'API (fino a 16 mesi) con `scripts/gsc-backfill.py`: le credenziali Google restano sul computer, sul server arriva solo il file dei dati.
 - **Aggiornamenti automatici** dalle release di GitHub.
@@ -41,9 +44,11 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 | `wp5w_dim_daily` | Visitatori per paese, device, browser, sistema, canale e sorgente | `statistics_visitor` |
 | `wp5w_hits` | Visite grezze della raccolta propria (hash del visitatore, contenuto, URI, referrer, canale, UTM, ingresso, paese, dispositivo, browser e sistema): niente IP né user agent | Tracker del plugin |
 | `wp5w_discards` | Visite scartate per giorno e motivo (`bot`, `user`, `dnt`, `rate`, `signature`, `ip`) | Endpoint `/hit` |
+| `wp5w_notfound_daily` | Pagine non trovate per giorno, URI e host del referrer, con visite e ultima visita (UTC): nessun visitatore | Endpoint `/hit` (visite di tipo `404`) |
+| `wp5w_search_daily` | Ricerche interne per giorno e termine normalizzato, con quante senza risultati: nessun orario né visitatore | Endpoint `/hit` (visite di tipo `search`) |
 | `wp5w_gsc_daily` | Click, impression e posizione per giorno, pagina e query; `origin` rankmath o api | `rank_math_analytics_gsc` oppure l'API di Search Console (backfill), collegata ai contenuti tramite `rank_math_analytics_objects` o `url_to_postid()` |
 
-Le cinque tabelle del traffico hanno la colonna `origin`: `wps` per le righe importate da WP Statistics, `own` per quelle della raccolta propria. Le interrogazioni usano `wps` prima di `wp5w_own_since` e `own` da quel giorno in poi (data vuota: solo `wps`).
+Le dimensioni `utm_campaign`, `utm_source` e `utm_medium` di `wp5w_dim_daily` esistono solo per la raccolta propria (WP Statistics non salva gli UTM). Le cinque tabelle del traffico hanno la colonna `origin`: `wps` per le righe importate da WP Statistics, `own` per quelle della raccolta propria. Le interrogazioni usano `wps` prima di `wp5w_own_since` e `own` da quel giorno in poi (data vuota: solo `wps`).
 
 La posizione media si calcola sempre come `SUM(pos_x_impr) / SUM(impressions)`, cioè pesata sulle impression come in Search Console.
 
