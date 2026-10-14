@@ -16,8 +16,10 @@ use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
+use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Updater;
+use Mavida\FiveW\Support\Visit;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -165,6 +167,46 @@ final class AdminController extends RestController {
 			)
 		);
 
+		// Opzioni della raccolta propria: lettura e salvataggio.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/settings',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => fn() => $this->respond( self::settings_data() ),
+					'permission_callback' => array( $this, 'check_admin_permission' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'save_settings' ),
+					'permission_callback' => array( $this, 'check_admin_permission' ),
+					'args'                => array(
+						'own_tracking'   => array( 'type' => 'boolean' ),
+						'exclude_users'  => array(
+							'type' => 'string',
+							'enum' => Settings::USER_MODES,
+						),
+						'excluded_ips'   => array(
+							'type'              => 'array',
+							'items'             => array( 'type' => 'string' ),
+							'validate_callback' => array( self::class, 'validate_excluded_ips' ),
+						),
+						'respect_dnt'    => array( 'type' => 'boolean' ),
+						'retention_days' => array(
+							'type'    => 'integer',
+							'minimum' => 7,
+							'maximum' => 365,
+						),
+						'own_since'      => array(
+							'type'              => 'string',
+							'validate_callback' => array( self::class, 'validate_own_since' ),
+						),
+					),
+				),
+			)
+		);
+
 		register_rest_route(
 			self::API_NAMESPACE,
 			'/admin/posts/(?P<id>\d+)',
@@ -291,6 +333,91 @@ final class AdminController extends RestController {
 			),
 			'rows'  => 'pages' === $part ? $this->search->pages( $range ) : $this->search->opportunities( $range ),
 		);
+	}
+
+	/**
+	 * Impostazioni, data di passaggio e primo giorno con dati della raccolta propria.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function settings_data(): array {
+		return Settings::get() + array(
+			'own_since'     => Settings::own_since(),
+			'own_first_day' => Settings::own_first_day(),
+		);
+	}
+
+	/**
+	 * Controlla gli IP esclusi: un array di stringhe, ognuna un IP o un intervallo CIDR valido.
+	 *
+	 * @param mixed            $value   Valore ricevuto.
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @param string           $param   Nome del parametro.
+	 * @return true|\WP_Error
+	 */
+	public static function validate_excluded_ips( mixed $value, \WP_REST_Request $request, string $param ): bool|\WP_Error {
+		// Tipo e struttura: con una validate_callback propria WordPress non applica più quella predefinita.
+		$valid = rest_validate_request_arg( $value, $request, $param );
+		if ( true !== $valid ) {
+			return $valid;
+		}
+
+		// Ogni riga deve essere un IP o un CIDR: si elencano quelle errate.
+		$invalid = array();
+		foreach ( (array) $value as $rule ) {
+			if ( ! Visit::is_valid_ip_rule( trim( (string) $rule ) ) ) {
+				$invalid[] = (string) $rule;
+			}
+		}
+		if ( $invalid ) {
+			/* translators: %s: elenco delle righe non valide. */
+			return new \WP_Error( 'wp5w_invalid_ip', sprintf( __( 'Indirizzi IP non validi: %s', 'wp-5w' ), implode( ', ', $invalid ) ), array( 'status' => 400 ) );
+		}
+		return true;
+	}
+
+	/**
+	 * Controlla la data di passaggio (vedi Settings::check_own_since()).
+	 *
+	 * @param mixed $value Valore ricevuto.
+	 * @return true|\WP_Error
+	 */
+	public static function validate_own_since( mixed $value ): bool|\WP_Error {
+		$result = Settings::check_own_since( is_string( $value ) ? $value : '' );
+		return true === $result ? true : new \WP_Error( 'wp5w_invalid_own_since', $result, array( 'status' => 400 ) );
+	}
+
+	/**
+	 * Salva le opzioni ricevute (quelle assenti restano come sono).
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return \WP_REST_Response
+	 */
+	public function save_settings( \WP_REST_Request $request ): \WP_REST_Response {
+		$current = Settings::get();
+		$new     = $current;
+
+		// Passo 1: solo i campi presenti nella richiesta sostituiscono quelli salvati.
+		foreach ( array_keys( $current ) as $key ) {
+			if ( $request->has_param( $key ) ) {
+				$new[ $key ] = $request->get_param( $key );
+			}
+		}
+
+		// Passo 2: update_option passa dal sanitize_callback registrato con register_setting().
+		update_option( Settings::OPTION, $new );
+		if ( $request->has_param( 'own_since' ) ) {
+			update_option( Settings::OWN_SINCE, (string) $request->get_param( 'own_since' ) );
+		}
+
+		// Passo 3: «Raccolta propria» e «Rispetta DNT» finiscono nell'HTML in cache (blocco JSON e dnt): si svuota LiteSpeed.
+		$saved = Settings::get();
+		if ( $saved['own_tracking'] !== $current['own_tracking'] || $saved['respect_dnt'] !== $current['respect_dnt'] ) {
+			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Hook di LiteSpeed Cache.
+			do_action( 'litespeed_purge_all' );
+		}
+
+		return $this->respond( self::settings_data() );
 	}
 
 	/**

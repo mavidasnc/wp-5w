@@ -26,5 +26,6 @@ final class Deactivator {
 	public static function deactivate(): void {
 		wp_clear_scheduled_hook( Scheduler::DAILY_HOOK );
 		wp_clear_scheduled_hook( Scheduler::FULL_HOOK );
+		wp_clear_scheduled_hook( Scheduler::OWN_HOURLY_HOOK );
 	}
 }
