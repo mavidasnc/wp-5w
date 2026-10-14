@@ -23,6 +23,28 @@ const FILES = [ `${ SLUG }.php`, 'uninstall.php' ];
 // Cartelle incluse (ricorsive).
 const DIRS = [ 'src', 'build', 'vendor', 'languages' ];
 
+// Dentro vendor/maxmind-db/reader si tengono src/, autoload.php, composer.json e LICENSE (la licenza Apache va distribuita
+// con il codice): sorgenti C dell'estensione (ext/), documentazione e file di tooling restano fuori dallo zip.
+const MAXMIND_PREFIX = 'maxmind-db/reader/';
+const MAXMIND_EXCLUDED_FILES = /^(?:[^/]*\.md|[^/]*\.toml|mise\.lock|package\.xml)$/;
+
+/**
+ * Filtro dei file di vendor: false esclude il file dallo zip.
+ *
+ * @param {Object} entry Voce di archiver, con il percorso relativo a vendor in `name`.
+ */
+const filterVendor = ( entry ) => {
+	const name = entry.name.replace( /\\/g, '/' );
+	if ( ! name.startsWith( MAXMIND_PREFIX ) ) {
+		return entry;
+	}
+	const inner = name.slice( MAXMIND_PREFIX.length );
+	if ( inner.startsWith( 'ext/' ) || inner === 'ext' || MAXMIND_EXCLUDED_FILES.test( inner ) ) {
+		return false;
+	}
+	return entry;
+};
+
 fs.mkdirSync( ZIP_DIR, { recursive: true } );
 
 const output = fs.createWriteStream( ZIP_OUT );
@@ -41,7 +63,7 @@ FILES.forEach( ( file ) => archive.file( path.join( ROOT, file ), { name: `${ SL
 DIRS.forEach( ( dir ) => {
 	const full = path.join( ROOT, dir );
 	if ( fs.existsSync( full ) ) {
-		archive.directory( full, `${ SLUG }/${ dir }` );
+		archive.directory( full, `${ SLUG }/${ dir }`, 'vendor' === dir ? filterVendor : {} );
 	}
 } );
 
