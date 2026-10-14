@@ -165,7 +165,7 @@ Le regole si applicano nell'ordine; per ogni campo vince la prima che corrispond
 3. **Mesi da provare:** `GeoDb::candidates( $installed, gmdate( 'Y-m-d' ) )`. Se l'elenco è vuoto si aggiorna solo `checked` e si restituisce `ok` vero («già aggiornato»), senza nessuna richiesta di rete.
 4. **Cartella:** `wp_mkdir_p( dir() )`; se mancano, si scrivono `.htaccess` e `index.php` (testi in R7). Se la cartella non è scrivibile: errore.
 5. Per ogni mese, nell'ordine:
-   1. `require_once ABSPATH . 'wp-admin/includes/file.php'` (serve nel cron) e `$gz = download_url( GeoDb::url( $month ), 300 )`. Con un `WP_Error`: se il codice è `http_404` si annota «non ancora pubblicato» e si passa al mese successivo; con altri errori si annota il messaggio e si passa al mese successivo.
+   1. `require_once ABSPATH . 'wp-admin/includes/file.php'` (serve nel cron) e `$gz = download_url( GeoDb::url( $month ), 300 )`. Con un `WP_Error`: se `get_error_data()['code'] === 404` si annota «non ancora pubblicato» e si passa al mese successivo; con qualunque altro errore (anche 403, 429 o 503) si annota il messaggio come errore vero e si passa al mese successivo. **Attenzione:** `download_url()` usa il codice `http_404` per **ogni** risposta diversa da 200 (`wp-admin/includes/file.php`), quindi il codice dell'errore non basta: conta solo lo stato HTTP in `get_error_data()['code']`.
    2. Decompressione in streaming da `$gz` a `dir() . '/' . FILE . '.tmp'`, a blocchi di 64 KB. Un `gzread()` che restituisce `false` è un errore.
    3. Controlli, in quest'ordine: `GeoDb::isize_ok()` (gli ultimi 4 byte di `$gz`, letti con `fopen`/`fseek`/`fread`), `GeoDb::size_ok()`, apertura con `new Reader( $tmp )`, `GeoDb::metadata_ok()` con `databaseType`, `ipVersion` e `buildEpoch`, e `GeoDb::country( $reader->get( PROBE_IP ) ) !== ''`. Poi `$reader->close()`.
    4. Se un controllo fallisce: si cancella il temporaneo, si annota il motivo e si passa al mese successivo.
@@ -216,7 +216,7 @@ public static function top( array $values, int $limit = self::LIMIT ): array // 
 
 - `$values` è `array<string, int>` (valore → visitatori).
 - `''`, `(n/d)` e `UNK` si sommano in `(n/d)`.
-- L'ordine è per visitatori decrescenti, poi per valore crescente (ordine stabile).
+- L'ordine è per visitatori decrescenti, poi per valore crescente **in ordine binario** (`strcmp`), così coincide con `ORDER BY ..., BINARY value` in SQL e non dipende dalla collation `utf8mb4_unicode_520_ci`.
 - `rows` contiene al massimo `$limit` righe, `other` è la somma delle righe escluse e `total` la somma di tutte.
 
 **`AudienceQuery::dimensions( DateRange $range ): array`:**
@@ -370,6 +370,7 @@ Un test in più controlla che ogni valore restituito in tutto il data provider s
 
 - `''` 2, `(n/d)` 3 e `UNK` 1 danno una sola riga `(n/d)` con 6.
 - Ordine per visitatori decrescenti, a parità per valore: (`US` 5, `IT` 5, `DE` 7) dà `DE`, `IT`, `US`.
+- Ordine binario a parità: (`Opera` 2, `opera mini` 2, `Opera Mobile` 2) dà `Opera`, `Opera Mobile`, `opera mini` (le maiuscole prima).
 - 15 valori con limite 10: 10 righe, `other` uguale alla somma delle 5 escluse e `total` uguale alla somma di tutte.
 - Ingresso vuoto: `total` 0, `rows` vuoto, `other` 0.
 
@@ -389,7 +390,7 @@ Si mette dopo la sezione 10 (Confronto), e la pulizia finale diventa la sezione 
 
 1. **Box con i dati `wps`** (`wp5w_own_since` vuota):
    - `GET /admin/audience/dimensions?days=30` senza utente: 401 o 403; con l'amministratore: 200 e `Cache-Control: no-store, max-age=0`; con `days=15`: 400;
-   - per ognuna delle quattro dimensioni, `total` è uguale a `SELECT SUM(visitors) FROM dim_daily WHERE origin = 'wps' AND dim = ... AND day BETWEEN from AND to` (con `from` e `to` presi dalla risposta), e `rows` contiene gli stessi valori e numeri della `SELECT ... GROUP BY value ORDER BY SUM(visitors) DESC, value LIMIT 10`;
+   - per ognuna delle quattro dimensioni, `total` è uguale a `SELECT SUM(visitors) FROM dim_daily WHERE origin = 'wps' AND dim = ... AND day BETWEEN from AND to` (con `from` e `to` presi dalla risposta), e `rows` contiene gli stessi valori e numeri della `SELECT ... GROUP BY value ORDER BY SUM(visitors) DESC, BINARY value LIMIT 10`;
    - con i dati del seed: `country` contiene `IT` e `US`, `device` solo `smartphone`, `browser` solo `Chrome` e `platform` solo `Android`.
 2. **Download reale.** Se il file c'è già ed è del mese corrente lo si tiene, altrimenti `CountryDatabase::update()` deve restituire `ok` vero. Si verifica poi che:
    - il file esista e superi 1 MB;
@@ -397,12 +398,14 @@ Si mette dopo la sezione 10 (Confronto), e la pulizia finale diventa la sezione 
    - `.htaccess` contenga `Require all denied` e `index.php` esista;
    - se `month` è il mese corrente, un secondo `update()` non fa nessuna richiesta HTTP (filtro `pre_http_request` che conta le chiamate: 0).
 3. **Ricerche:** `lookup( '8.8.8.8' )` dà `US`, `lookup( '10.0.0.1' )` dà `''`, `lookup( 'non-un-ip' )` dà `''`, `lookup( '2a00:1450:4002::1' )` dà `IT`.
-4. **Errori di download simulati.** Nei casi 1-4 si forza `month` dell'opzione al mese precedente, così `update()` prova solo il mese corrente; nel caso 5 lo si forza a due mesi prima, così prova il corrente e poi il precedente. Un filtro `pre_http_request` restituisce le risposte, e per i casi con un corpo **scrive il corpo in `$args['filename']`**, altrimenti `download_url()` troverebbe un file vuoto:
+4. **Errori di download simulati.** Nei casi 1-4, 6 e 7 si forza `month` dell'opzione al mese precedente, così `update()` prova solo il mese corrente; nel caso 5 lo si forza a due mesi prima, così prova il corrente e poi il precedente. Un filtro `pre_http_request` restituisce le risposte, e per i casi con un corpo **scrive il corpo in `$args['filename']`**, altrimenti `download_url()` troverebbe un file vuoto:
    1. `404` per tutti i mesi: `ok` vero, il file è identico (MD5), `month` non cambia, `error` vuoto (F6), e in `uploads/wp5w/` non restano file `.tmp`;
    2. corpo che non è un gzip: `ok` falso, il file è identico, `error` non vuoto, nessun `.tmp`;
    3. gzip dei primi 2 MB del database (troncato): `ok` falso, il file è identico;
    4. gzip valido di un file di 2 MB di byte casuali: `ok` falso (metadati non trovati), il file è identico;
-   5. mese corrente `404` e mese precedente uguale al gzip del database installato: `ok` vero e `month` uguale al mese precedente (ripiego).
+   5. mese corrente `404` e mese precedente uguale al gzip del database installato: `ok` vero e `month` uguale al mese precedente (ripiego);
+   6. mese corrente `503`: `ok` falso, `error` non vuoto (non è «non ancora pubblicato»), il file è identico;
+   7. gzip reale del database tagliato a metà (il guasto di rete più realistico, che esercita il ramo di `gzread()` e l'ISIZE): `ok` falso, il file è identico, nessun `.tmp`.
 
    Alla fine si tolgono il filtro e si rimettono l'opzione salvata e il file originale.
 5. **Lock:** con `GET_LOCK( 'wp5w_geo_update', 0 )` preso da una **seconda connessione** (`new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST )`: nella stessa sessione MySQL il lock è rientrante e non bloccherebbe), `update()` restituisce `ok` falso con «già in corso» e l'opzione non cambia. Poi si rilascia il lock e si chiude la connessione.
@@ -412,7 +415,7 @@ Si mette dopo la sezione 10 (Confronto), e la pulizia finale diventa la sezione 
    - da `151.38.1.1`, con l'iPhone Safari (UA 22): `IT`, `smartphone`, `Mobile Safari` e `iOS`;
    - da `198.51.100.30`, con lo user agent Nintendo (UA 30): `country`, `device`, `browser` e `os` vuoti, ed è registrata;
    - un bot (Googlebot) da `8.8.8.8` resta uno scarto `bot`, senza riga.
-8. **Nessuna query in più:** si cattura con il filtro `query` una visita registrata con il database presente, e una con il database rinominato (tutte e due dopo una visita di riscaldamento). Il **numero totale** di query è identico, nessuna contiene `wp5w_geo`, e su `wp5w_hits` restano una `SELECT` e una `INSERT`.
+8. **Nessuna query in più:** dopo una visita di riscaldamento (chiave del giorno già valida, database presente), si cattura con il filtro `query` una visita registrata da `8.8.8.8`. Il **numero totale** di query catturate è uguale al numero di query su `wp5w_hits`, cioè 2 (una `SELECT` e una `INSERT`), e nessuna contiene `wp5w_geo`. Il confronto tra due visite con e senza database non basterebbe, perché `CountryDatabase::path()` (e quindi `wp_upload_dir()`) gira in entrambe. Se WordPress aggiungesse una query fissa estranea al plugin, l'implementatore la misura una volta in 0.8.0 (stesso controllo su `main`) e la registra in `verify.php` come base, con un commento.
 9. **Privacy:** nessuna colonna di `wp5w_hits` contiene `8.8.8.8`, `151.38.1.1` o una parte dello user agent (per esempio `Mozilla`).
 10. **Aggregazione:** `( new OwnSource() )->run_hourly()`. Poi, per oggi:
     - ci sono righe `own` per `country`, `device`, `browser` e `platform`;
@@ -438,8 +441,8 @@ Ogni criterio va nella checklist della PR, con l'esito.
 3. `npm run check` passa, e `git diff main -- assets/tracker webpack.config.js src/Front/Tracker.php` è vuoto.
 4. `seed.php` seguito da `verify.php` termina con «Tutti i controlli superati», comprese la voce `pubblico` dell'istantanea e tutta la sezione 11.
 5. `Support\UserAgent` restituisce solo i nomi di WP Statistics di 1.1 (`smartphone`, `desktop`, `tablet`; `Mac`, `GNU/Linux`, `iPadOS`...) oppure `''`.
-6. Una visita registrata salva `country`, `device`, `browser` e `os`. L'endpoint non fa **nessuna query in più** (verify, punto 8), gli scarti seguono lo stesso ordine di prima, e né l'IP né lo user agent sono salvati (verify, punto 9).
-7. Il database dei paesi si scarica solo con funzioni PHP e WordPress: `grep -nE "\b(exec|shell_exec|system|proc_open|popen|passthru)\s*\(" src uninstall.php` non trova nulla. Il download prova il mese corrente e poi il precedente (F6), controlla integrità e formato (F7) e sostituisce il file con `rename()`. Un fallimento lascia intatto il file esistente (verify, punto 4).
+6. Una visita registrata salva `country`, `device`, `browser` e `os`. L'endpoint non fa **nessuna query in più**: una visita registrata esegue solo la `SELECT` e la `INSERT` su `wp5w_hits` (verify, punto 8), gli scarti seguono lo stesso ordine di prima, e né l'IP né lo user agent sono salvati (verify, punto 9).
+7. Il database dei paesi si scarica solo con funzioni PHP e WordPress: `grep -nE "\b(exec|shell_exec|system|proc_open|popen|passthru)\s*\(" src uninstall.php` non trova nulla. Il download prova il mese corrente e poi il precedente (F6), controlla integrità e formato (F7) e sostituisce il file con `rename()`. Solo uno stato HTTP 404 vale «non ancora pubblicato»; ogni altro errore (503, gzip troncato, formato) è un errore vero e lascia intatto il file esistente (verify, punto 4).
 8. Senza database il paese è vuoto, la visita è registrata e non ci sono warning; la scheda Stato lo dice (verify, punto 6).
 9. `dim_daily` riceve righe `own` per `country`, `device`, `browser` e `platform` con l'invariante di R5. Le righe `wps` non cambiano (verify, punto 10).
 10. `GET /admin/audience/dimensions` risponde 200 solo agli amministratori, con `no-store`, `days` limitato a 7, 30 o 90, e numeri uguali alle `SELECT` dirette su `dim_daily` (verify, punto 1). Tutte le letture usano `Origin::where()`, e il `grep` della regola dell'origine trova come unica eccezione `CompareQuery`.
@@ -608,7 +611,7 @@ Sul blog, per ogni `N`, con `FROM` e `TO` **presi dal `range` della risposta** (
 
 ```bash
 $WP db query "SELECT dim, SUM(visitors) FROM maurizio_wp5w_dim_daily WHERE origin = 'wps' AND day BETWEEN '$FROM' AND '$TO' AND dim IN ('country','device','browser','platform') GROUP BY dim"
-$WP db query "SELECT dim, IF(value IN ('', 'UNK'), '(n/d)', value) v, SUM(visitors) n FROM maurizio_wp5w_dim_daily WHERE origin = 'wps' AND day BETWEEN '$FROM' AND '$TO' AND dim = 'country' GROUP BY dim, v ORDER BY n DESC, v LIMIT 10"
+$WP db query "SELECT dim, IF(value IN ('', 'UNK'), '(n/d)', value) v, SUM(visitors) n FROM maurizio_wp5w_dim_daily WHERE origin = 'wps' AND day BETWEEN '$FROM' AND '$TO' AND dim = 'country' GROUP BY dim, v ORDER BY n DESC, BINARY v LIMIT 10"
 # e la stessa per device, browser e platform
 ```
 
