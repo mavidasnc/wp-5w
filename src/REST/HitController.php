@@ -11,9 +11,11 @@ namespace Mavida\FiveW\REST;
 
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Front\Tracker;
+use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\BotFilter;
 use Mavida\FiveW\Support\Channels;
+use Mavida\FiveW\Support\UserAgent;
 use Mavida\FiveW\Support\Visit;
 
 defined( 'ABSPATH' ) || exit;
@@ -25,6 +27,8 @@ defined( 'ABSPATH' ) || exit;
  *
  * Per una visita registrata esegue una SELECT (frequenza e visite del giorno) e una INSERT:
  * nessun update_option e nessun transient, a parte la rotazione giornaliera della chiave.
+ * Paese (dal database DB-IP, senza query) e dispositivo, browser e sistema (dallo user agent) si calcolano
+ * dopo l'ultimo scarto e si salvano nella riga; né l'IP né lo user agent restano da nessuna parte.
  */
 final class HitController extends RestController {
 
@@ -149,7 +153,8 @@ final class HitController extends RestController {
 			return;
 		}
 
-		// Passo 9: referrer, canale, sorgente e ingresso.
+		// Passo 9: referrer, canale, sorgente, ingresso, paese e user agent (solo per le visite che si registrano:
+		// gli scarti restano veloci e il paese non può mai bloccare una visita). IP e user agent non si salvano.
 		$site_host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
 		$referrer  = Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), $site_host );
 		$utm       = array(
@@ -159,12 +164,14 @@ final class HitController extends RestController {
 		);
 		$channel   = Channels::classify( $referrer, $utm['source'], $utm['medium'] );
 		$is_entry  = Visit::is_entry( (int) ( $row->today ?? 0 ), $referrer );
+		$agent     = UserAgent::parse( $ua );
+		$country   = CountryDatabase::lookup( $ip );
 
 		// Passo 10: scrittura della visita (ts in UTC, day nel fuso del sito).
 		$wpdb->query(
 			$wpdb->prepare(
-				"INSERT INTO {$hits} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, is_entry)
-				VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s, %s, %s, %s, %d)",
+				"INSERT INTO {$hits} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, is_entry, country, device, browser, os)
+				VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s)",
 				gmdate( 'Y-m-d H:i:s' ),
 				wp_date( 'Y-m-d' ),
 				$hash,
@@ -177,7 +184,11 @@ final class HitController extends RestController {
 				$utm['source'],
 				$utm['medium'],
 				$utm['campaign'],
-				$is_entry ? 1 : 0
+				$is_entry ? 1 : 0,
+				substr( $country, 0, 2 ),
+				substr( $agent['device'], 0, 20 ),
+				substr( $agent['browser'], 0, 40 ),
+				substr( $agent['os'], 0, 40 )
 			)
 		);
 	}

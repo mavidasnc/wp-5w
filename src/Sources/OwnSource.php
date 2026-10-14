@@ -67,7 +67,7 @@ final class OwnSource extends Source {
 	 */
 	protected function required(): array {
 		return array(
-			'wp5w_hits' => array( 'ts', 'day', 'visitor', 'object_type', 'object_id', 'uri', 'referrer_host', 'channel', 'source', 'is_entry' ),
+			'wp5w_hits' => array( 'ts', 'day', 'visitor', 'object_type', 'object_id', 'uri', 'referrer_host', 'channel', 'source', 'is_entry', 'country', 'device', 'browser', 'os' ),
 		);
 	}
 
@@ -135,7 +135,8 @@ final class OwnSource extends Source {
 				$delete
 			);
 
-			// Dimensioni (nella fase 1 solo canale e sorgente): un visitatore per giorno, con la prima visita del giorno.
+			// Dimensioni (canale, sorgente, paese, dispositivo, browser e sistema): un visitatore per giorno, con la prima visita del giorno,
+			// così la somma dei visitatori è uguale per tutte le dimensioni. Il sistema operativo si chiama "platform" (come in WP Statistics).
 			$first                 = "SELECT MIN(id) AS id FROM {$hits} WHERE day BETWEEN %s AND %s GROUP BY day, visitor";
 			$rows['own:dim_daily'] = $this->replace_by_month(
 				'dim_daily',
@@ -143,7 +144,15 @@ final class OwnSource extends Source {
 				$available,
 				"SELECT h.day, 'channel', h.channel, COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, h.channel
 				UNION ALL
-				SELECT h.day, 'source', COALESCE(NULLIF(h.source, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3",
+				SELECT h.day, 'source', COALESCE(NULLIF(h.source, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
+				UNION ALL
+				SELECT h.day, 'country', COALESCE(NULLIF(h.country, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
+				UNION ALL
+				SELECT h.day, 'device', COALESCE(NULLIF(h.device, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
+				UNION ALL
+				SELECT h.day, 'browser', COALESCE(NULLIF(h.browser, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
+				UNION ALL
+				SELECT h.day, 'platform', COALESCE(NULLIF(h.os, ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3",
 				'day, dim, value, visitors, origin',
 				$delete
 			);
