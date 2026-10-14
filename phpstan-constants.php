@@ -5,7 +5,7 @@
  * @package Mavida\FiveW
  */
 
-define( 'WP5W_VERSION', '0.9.0' );
+define( 'WP5W_VERSION', '0.10.0' );
 define( 'WP5W_PLUGIN_FILE', '' );
 define( 'WP5W_PLUGIN_DIR', '' );
 define( 'WP5W_PLUGIN_URL', '' );
