@@ -8,7 +8,8 @@
  * - totali giornalieri dal 2023, con un buco a zero (come il blog tra 2017 e 2022);
  * - 60 giorni di dettaglio (pagine e visitatori con pagina d'ingresso e canale);
  * - Search Console con ogni riga triplicata, come dopo un import di Rank Math rilanciato;
- * - una pagina GSC che Rank Math non ha in analytics_objects (va associata con url_to_postid).
+ * - una pagina GSC che Rank Math non ha in analytics_objects (va associata con url_to_postid);
+ * - 6 visitatori di 5 giorni fa da assistenti AI e app (fase 4: canale «ai» e referrer delle app).
  *
  * @package Mavida\FiveW
  */
@@ -127,6 +128,44 @@ for ( $wp5w_i = 59; $wp5w_i >= 0; $wp5w_i-- ) {
 					'visitor_id' => $wp5w_visitor,
 					'page_id'    => $wp5w_page_id,
 					'date'       => "{$wp5w_day} 10:00:00",
+				)
+			);
+		}
+	}
+
+	// Fase 4: 6 visitatori in più, 5 giorni fa (dentro gli ultimi 7 della scheda Visitatori), entrati dal primo articolo. Cinque arrivano da un assistente AI (referrer,
+	// source_name senza referrer e pacchetto Android) e uno da un'app che non lo è: il canale «ai» li sposta, i visitatori restano.
+	if ( 5 === $wp5w_i ) {
+		$wp5w_ai_visitors = array(
+			array( 'chatgpt.com', 'search', 'ChatGPT' ),
+			array( '', 'search', 'ChatGPT' ),
+			array( 'perplexity.ai', 'search', 'Perplexity' ),
+			array( 'claude.ai', null, null ),
+			array( 'android-app://com.openai.chatgpt/', null, null ),
+			array( 'android-app://com.linkedin.android/', null, null ),
+		);
+		foreach ( $wp5w_ai_visitors as $wp5w_a => $wp5w_ai ) {
+			$wpdb->insert(
+				"{$p}statistics_visitor",
+				array(
+					'last_counter'   => $wp5w_day,
+					'referred'       => $wp5w_ai[0],
+					'agent'          => 'Chrome',
+					'platform'       => 'Android',
+					'ip'             => '#hash#' . md5( $wp5w_day . 'ai' . $wp5w_a ),
+					'location'       => 'IT',
+					'device'         => 'smartphone',
+					'source_channel' => $wp5w_ai[1],
+					'source_name'    => $wp5w_ai[2],
+					'first_page'     => $wp5w_page_ids[1],
+				)
+			);
+			$wpdb->insert(
+				"{$p}statistics_visitor_relationships",
+				array(
+					'visitor_id' => $wpdb->insert_id,
+					'page_id'    => $wp5w_page_ids[1],
+					'date'       => "{$wp5w_day} 11:00:00",
 				)
 			);
 		}

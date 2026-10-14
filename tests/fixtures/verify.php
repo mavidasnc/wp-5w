@@ -4,9 +4,11 @@
  *
  * Uso: npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php
  *
- * Controlla lo schema v4 e la migrazione da v3, confronta le tabelle wp5w_* con le sorgenti, simula le visite
+ * Controlla lo schema v5 e le migrazioni da v3 e da v4, confronta le tabelle wp5w_* con le sorgenti, simula le visite
  * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine, le rotte delle opzioni, il confronto con WP Statistics
  * e, dalla fase 3, il box Pubblico, il database dei paesi (download reale e guasti simulati) e paese e user agent delle visite.
+ * La fase 4 aggiunge il canale «ai» sulle due origini, le dimensioni UTM, «Online adesso», le pagine 404, le ricerche interne,
+ * le visite nell'elenco dei contenuti e nella barra di amministrazione e il modale aperto dall'URL (sezione 12).
  *
  * @package Mavida\FiveW
  */
@@ -18,7 +20,11 @@ use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Front\Tracker;
 use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Plugin;
+use Mavida\FiveW\Admin\AdminMenu;
+use Mavida\FiveW\Admin\PostViews;
 use Mavida\FiveW\Query\AudienceQuery;
+use Mavida\FiveW\Query\OnlineQuery;
+use Mavida\FiveW\Query\OperationsQuery;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
@@ -67,7 +73,7 @@ $primary_key = static function ( string $name ) use ( $wpdb ): string {
 	);
 };
 
-// Chiavi primarie attese della versione 4.
+// Chiavi primarie attese delle versioni 4 e 5 (la 5 aggiunge solo due tabelle, vedi $v5_keys).
 $v4_keys = array(
 	'site_daily'     => 'day,origin',
 	'object_daily'   => 'day,object_type,object_id,origin',
@@ -76,11 +82,22 @@ $v4_keys = array(
 	'dim_daily'      => 'day,dim,value,origin',
 );
 
+// Tabelle nuove della versione 5 (fuori da Schema::TABLES e da RAW_TABLES) e loro chiavi primarie.
+$v5_keys = array(
+	'notfound_daily' => 'day,uri,referrer',
+	'search_daily'   => 'day,term',
+);
+
 // ---------------------------------------------------------------------------
-// 1. Schema v4.
+// 1. Schema v5.
 // ---------------------------------------------------------------------------
 $check( 'schema: wp5w_db_version = Schema::DB_VERSION', Schema::DB_VERSION, get_option( 'wp5w_db_version' ) );
-$check( 'schema: versione 4', '4', Schema::DB_VERSION );
+$check( 'schema: versione 5', '5', Schema::DB_VERSION );
+foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
+	$check( "schema: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
+	$check( "schema: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
+}
+$check( 'schema: le due tabelle nuove non sono in TABLES né in RAW_TABLES', 0, count( array_intersect( array_keys( $v5_keys ), array_merge( Schema::TABLES, Schema::RAW_TABLES ) ) ) );
 foreach ( $v4_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "schema: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
 }
@@ -170,16 +187,19 @@ $check( 'migrazione con lock occupato: nessuna colonna origin', 0, count( array_
 $other->query( "SELECT RELEASE_LOCK( 'wp5w_schema_upgrade' )" );
 $other->close();
 Schema::maybe_upgrade();
-$check( 'migrazione: versione 4', '4', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v3: versione 5', '5', get_option( 'wp5w_db_version' ) );
+foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
+	$check( "migrazione da v3: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
+}
 foreach ( $v4_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "migrazione: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
 	$check( "migrazione: righe esistenti di {$wp5w_name} con origin = wps", 1, $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'wps'" ) );
 }
 
 // Idempotenza: con le tabelle già v4 install() non esegue nessun ALTER e non cambia SHOW CREATE TABLE.
-$show_create = static function () use ( $wpdb ): string {
+$show_create = static function () use ( $wpdb, $v5_keys ): string {
 	$out = '';
-	foreach ( array_merge( Schema::TABLES, Schema::RAW_TABLES ) as $name ) {
+	foreach ( array_merge( Schema::TABLES, Schema::RAW_TABLES, array_keys( $v5_keys ) ) as $name ) {
 		$out .= (string) $wpdb->get_var( 'SHOW CREATE TABLE ' . Schema::table( $name ), 1 ) . ';';
 	}
 	return $out;
@@ -199,8 +219,31 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'install() rieseguito: nessun errore', '', $wpdb->last_error );
 $check( 'install() rieseguito: nessun ALTER', 0, $alters );
-$check( 'install() rieseguito: versione 4', '4', get_option( 'wp5w_db_version' ) );
+$check( 'install() rieseguito: versione 5', '5', get_option( 'wp5w_db_version' ) );
 $check( 'install() rieseguito: SHOW CREATE TABLE identico', md5( $create_before ), md5( $show_create() ) );
+
+// Da v4 a v5: schema v4 completo, senza le due tabelle nuove e con la versione 4. install() le crea, non esegue nessun ALTER e salva 5.
+foreach ( array_keys( $v5_keys ) as $wp5w_name ) {
+	$wpdb->query( 'DROP TABLE IF EXISTS ' . Schema::table( $wp5w_name ) );
+}
+update_option( 'wp5w_db_version', '4' );
+$alters = 0;
+add_filter( 'query', $count_alters );
+$wpdb->last_error = '';
+Schema::install();
+remove_filter( 'query', $count_alters );
+$check( 'migrazione da v4: nessun errore', '', $wpdb->last_error );
+$check( 'migrazione da v4: nessun ALTER', 0, $alters );
+$check( 'migrazione da v4: versione 5', '5', get_option( 'wp5w_db_version' ) );
+foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
+	$check( "migrazione da v4: creata wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
+	$check( "migrazione da v4: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
+}
+$create_v5 = $show_create();
+update_option( 'wp5w_db_version', '4' );
+Schema::install();
+$check( 'migrazione da v4 rieseguita: SHOW CREATE TABLE identico', md5( $create_v5 ), md5( $show_create() ) );
+$check( 'migrazione da v4 rieseguita: versione 5', '5', get_option( 'wp5w_db_version' ) );
 
 // ---------------------------------------------------------------------------
 // 3. Controlli esistenti dell'ETL di WP Statistics e Rank Math (somme sulle sole righe wps).
@@ -827,6 +870,8 @@ $compare_own = array(
 	array( 'entry_daily', array( 'day' => $d[3], 'object_type' => 'home', 'object_id' => 0, 'channel' => 'direct', 'visitors' => 4 ) ),
 	array( 'dim_daily', array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'direct', 'visitors' => 30 ) ),
 	array( 'dim_daily', array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'search', 'visitors' => 10 ) ),
+	// La raccolta propria scrive «unassigned» dove WP Statistics scrive «(n/d)»: nel confronto devono essere una sola riga (R10.1).
+	array( 'dim_daily', array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'unassigned', 'visitors' => 3 ) ),
 );
 foreach ( $compare_own as [ $wp5w_name, $wp5w_row ] ) {
 	$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row + array( 'origin' => 'own' ) );
@@ -916,6 +961,15 @@ $check( 'confronto: scarti totali', 6, $compare['discards']['total'] ?? '' );
 $channels_own = array_column( $compare['channels'] ?? array(), 'own', 'channel' );
 $check( 'confronto: home_direct.own = 4', 4, $compare['home_direct']['own'] ?? '' );
 $check( 'confronto: canale direct own = 30', 30, $channels_own['direct'] ?? '' );
+$wps_n_d = (int) $wpdb->get_var(
+	$wpdb->prepare( 'SELECT COALESCE(SUM(visitors), 0) FROM ' . Schema::table( 'dim_daily' ) . " WHERE origin = 'wps' AND dim = 'channel' AND value IN ('(n/d)', 'unassigned') AND day IN (%s, %s)", $d[3], $d[2] )
+);
+$channels_wps = array_column( $compare['channels'] ?? array(), 'wps', 'channel' );
+$check( 'confronto: nessuna riga (n/d) nei canali', false, in_array( '(n/d)', array_keys( $channels_own ), true ) );
+$check( 'confronto: una sola riga unassigned', 1, count( array_filter( array_column( $compare['channels'] ?? array(), 'channel' ), static fn( $channel ) => 'unassigned' === $channel ) ) );
+$check( 'confronto: unassigned con le due origini', $wps_n_d . '|3', ( $channels_wps['unassigned'] ?? 'nessuna riga' ) . '|' . ( $channels_own['unassigned'] ?? 'nessuna riga' ) );
+$check( 'confronto: min_views = 10', 10, $compare['min_views'] ?? '' );
+$check( 'confronto: threshold presente', true, isset( $compare['threshold'] ) );
 
 // Passo 8: classifica.
 $top_rows = $compare['top'] ?? array();
@@ -1284,7 +1338,8 @@ foreach ( $wpdb->get_results( $wpdb->prepare( "SELECT dim, SUM(visitors) AS n FR
 }
 $own_visitors = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT visitors FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) );
 ksort( $own_dims );
-$check( 'aggregazione: dimensioni own', 'browser,channel,country,device,platform,source', implode( ',', array_keys( array_diff_key( $own_dims, array( 'os' => 1 ) ) ) ) );
+// L'invariante «stessa somma per ogni dimensione» vale per queste sei: le dimensioni utm_* ne sono escluse di proposito (F6).
+$check( 'aggregazione: dimensioni own (senza utm_*)', 'browser,channel,country,device,platform,source', implode( ',', array_keys( array_filter( $own_dims, static fn( $dim ) => ! str_starts_with( $dim, 'utm_' ), ARRAY_FILTER_USE_KEY ) ) ) );
 foreach ( array( 'channel', 'source', 'country', 'device', 'browser', 'platform' ) as $wp5w_dim ) {
 	$check( "aggregazione: somma di {$wp5w_dim} = visitatori own del sito", $own_visitors, $own_dims[ $wp5w_dim ] ?? 'nessuna riga' );
 }
@@ -1337,12 +1392,484 @@ $check( 'geo: file come dopo il download', $geo_md5, md5_file( $geo_path ) );
 $check( 'geo: nessun file di prova rimasto', 0, count( (array) glob( $geo_dir . '/*.bak' ) ) + $geo_tmp_files() );
 
 // ---------------------------------------------------------------------------
-// 12. Pulizia finale.
+// 12. Fase 4: canale «ai», etichette, UTM, online adesso, 404, ricerche, visite nell'admin e modale da URL.
+// ---------------------------------------------------------------------------
+// Passo 0: stato pulito. Le righe own (e le visite grezze) delle sezioni precedenti si tolgono, così i conteggi di oggi sono quelli di questa sezione.
+$admin_user( 0 );
+unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+update_option( Settings::OPTION, Settings::defaults() );
+update_option( Settings::OWN_SINCE, '' );
+foreach ( array( 'hits', 'discards', 'notfound_daily', 'search_daily' ) as $wp5w_name ) {
+	$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( $wp5w_name ) );
+}
+foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'" );
+}
+delete_option( 'wp5w_daily_salt' );
+
+$notfound_table = Schema::table( 'notfound_daily' );
+$search_table   = Schema::table( 'search_daily' );
+$object_table   = Schema::table( 'object_daily' );
+$range_30       = DateRange::last_days( 30, $today );
+$seed_day       = wp_date( 'Y-m-d', time() - 5 * DAY_IN_SECONDS );
+$has_seed       = (bool) get_page_by_path( 'calendario-2006', OBJECT, 'post' );
+
+/**
+ * Visitatori delle righe di una tabella aggregata, per origine, giorno, dimensione e valore.
+ *
+ * @param string $origin Origine.
+ * @param string $day    Giorno.
+ * @param string $dim    Dimensione.
+ * @param string $value  Valore.
+ * @return int
+ */
+$dim_value = static function ( string $origin, string $day, string $dim, string $value ) use ( $wpdb, $dim_table ): int {
+	return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = %s AND day = %s AND dim = %s AND value = %s", $origin, $day, $dim, $value ) );
+};
+
+// Passo 1: canale «ai» sulle righe wps (dopo l'import del seed, sezione 3).
+if ( $has_seed ) {
+	$seed_visitors = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$p}statistics_visitor WHERE last_counter = %s", $seed_day ) );
+	$check( 'ai wps: canale ai nel giorno del seed', 5, $dim_value( 'wps', $seed_day, 'channel', 'ai' ) );
+	$check( 'ai wps: sorgente ChatGPT (referrer, source_name senza referrer e pacchetto Android)', 3, $dim_value( 'wps', $seed_day, 'source', 'ChatGPT' ) );
+	$check( 'ai wps: sorgente Perplexity', 1, $dim_value( 'wps', $seed_day, 'source', 'Perplexity' ) );
+	$check( 'ai wps: sorgente Claude', 1, $dim_value( 'wps', $seed_day, 'source', 'Claude' ) );
+	$check( 'ai wps: l\'app di LinkedIn resta (n/d)', 2, $dim_value( 'wps', $seed_day, 'channel', '(n/d)' ) );
+	foreach ( array( 'channel', 'source' ) as $wp5w_dim ) {
+		$check( "ai wps: somma di {$wp5w_dim} = visitatori di statistics_visitor", $seed_visitors, $wpdb->get_var( $wpdb->prepare( "SELECT SUM(visitors) FROM {$dim_table} WHERE origin = 'wps' AND dim = %s AND day = %s", $wp5w_dim, $seed_day ) ) );
+	}
+	$check(
+		'ai wps: entry_daily con 5 visitatori ai sul primo articolo',
+		5,
+		$wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(visitors), 0) FROM ' . Schema::table( 'entry_daily' ) . " WHERE origin = 'wps' AND day = %s AND object_type = 'post' AND object_id = %d AND channel = 'ai'", $seed_day, $post_a ) )
+	);
+	$ref_claude = $wpdb->get_row( $wpdb->prepare( 'SELECT channel, source FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'wps' AND day = %s AND referrer = 'claude.ai'", $seed_day ) );
+	$check( 'ai wps: referrer_daily claude.ai con canale ai e sorgente Claude', 'ai|Claude', ( $ref_claude->channel ?? '' ) . '|' . ( $ref_claude->source ?? '' ) );
+	$ref_linkedin = $wpdb->get_row( $wpdb->prepare( 'SELECT channel FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'wps' AND day = %s AND referrer = 'android-app://com.linkedin.android/'", $seed_day ) );
+	$check( 'ai wps: referrer_daily dell\'app di LinkedIn senza canale', '', $ref_linkedin->channel ?? 'nessuna riga' );
+}
+
+// Passo 2: canale «ai» sulle righe own. Cinque visitatori con IP diversi.
+$ai_visits = array(
+	array( 'https://claude.ai/chat/x', '', 'referral' ),
+	array( '', 'chatgpt.com', 'unassigned' ),
+	array( 'https://www.perplexity.ai/search', '', 'referral' ),
+	array( 'android-app://com.openai.chatgpt/', '', 'referral' ),
+	array( 'https://www.google.com/', '', 'search' ),
+);
+foreach ( $ai_visits as $wp5w_n => $wp5w_visit ) {
+	$send_hit( $payload( $post_a, array( 'r' => $wp5w_visit[0], 'us' => $wp5w_visit[1], 'u' => '/wp5w-v12-ai-' . $wp5w_n . '/' ) ), '192.0.2.' . ( 1 + $wp5w_n ), $chrome );
+}
+$raw_channels = $wpdb->get_col( "SELECT channel FROM {$hits_table} WHERE uri LIKE '/wp5w-v12-ai-%' ORDER BY id" );
+$check( 'ai own: canali grezzi di wp5w_hits invariati', implode( ',', array_column( $ai_visits, 2 ) ), implode( ',', $raw_channels ) );
+( new OwnSource() )->run_hourly();
+$check( 'ai own: canale ai di oggi', 4, $dim_value( 'own', $today, 'channel', 'ai' ) );
+$check( 'ai own: canale search di oggi', 1, $dim_value( 'own', $today, 'channel', 'search' ) );
+$check( 'ai own: sorgente Claude', 1, $dim_value( 'own', $today, 'source', 'Claude' ) );
+$check( 'ai own: sorgente ChatGPT (utm_source e pacchetto Android)', 2, $dim_value( 'own', $today, 'source', 'ChatGPT' ) );
+$check( 'ai own: sorgente Perplexity', 1, $dim_value( 'own', $today, 'source', 'Perplexity' ) );
+$check( 'ai own: entry_daily con visitatori ai', 4, $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(visitors), 0) FROM ' . Schema::table( 'entry_daily' ) . " WHERE origin = 'own' AND day = %s AND channel = 'ai'", $today ) ) );
+$check( 'ai own: referrer_daily con tre siti ai (quello senza referrer non c\'è)', 3, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND channel = 'ai'", $today ) ) );
+$check( 'ai own: referrer_daily claude.ai con sorgente Claude', 'Claude', $wpdb->get_var( $wpdb->prepare( 'SELECT source FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND referrer = 'claude.ai'", $today ) ) );
+
+/**
+ * Controlla che le sei dimensioni dell'invariante (senza le utm_*) abbiano la stessa somma, uguale ai visitatori own del sito.
+ *
+ * @param string $label Prefisso dei controlli.
+ * @return void
+ */
+$check_six_dims = static function ( string $label ) use ( $wpdb, $dim_table, $today, $check ): void {
+	$visitors = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT visitors FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) );
+	foreach ( array( 'channel', 'source', 'country', 'device', 'browser', 'platform' ) as $wp5w_dim ) {
+		$check( "{$label}: somma di {$wp5w_dim} = visitatori own del sito", $visitors, $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = 'own' AND day = %s AND dim = %s", $today, $wp5w_dim ) ) );
+	}
+};
+$check_six_dims( 'ai own' );
+
+// Passo 3: confronto. Giorni con righe ai in entrambe le origini, simulati come nella sezione 10.
+$compare_backup = array();
+foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
+	$compare_backup[ $wp5w_name ] = $wpdb->get_results( 'SELECT * FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'", ARRAY_A );
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'" );
+}
+$state_backup = get_option( Importer::STATE_OPTION, false );
+$wps_ai_days  = array();
+foreach ( array( 4, 3, 2 ) as $wp5w_n ) {
+	// Righe wps del sito: se il seed non le ha, si inseriscono e si tolgono alla fine.
+	if ( ! $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'wps' AND day = %s", $d[ $wp5w_n ] ) ) ) {
+		$wpdb->insert( Schema::table( 'site_daily' ), array( 'day' => $d[ $wp5w_n ], 'visitors' => 10, 'views' => 20, 'origin' => 'wps' ) );
+		$wps_ai_days[] = $d[ $wp5w_n ];
+	}
+	$wpdb->insert( Schema::table( 'site_daily' ), array( 'day' => $d[ $wp5w_n ], 'visitors' => 10, 'views' => 20, 'origin' => 'own' ) );
+}
+$wpdb->insert( $dim_table, array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'ai', 'visitors' => 2, 'origin' => 'own' ) );
+$wpdb->insert( $dim_table, array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'ai', 'visitors' => 1, 'origin' => 'wps' ) );
+update_option( Importer::STATE_OPTION, array( 'mode' => 'daily', 'from' => $d[4], 'to' => $d[0], 'started' => time(), 'ok' => true ), false );
+$admin_user( $admin_id );
+$compare_ai = array_column( $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data()['channels'] ?? array(), null, 'channel' );
+$admin_user( 0 );
+$check( 'ai confronto: riga ai con wps e own', '1|2', ( $compare_ai['ai']['wps'] ?? 'nessuna riga' ) . '|' . ( $compare_ai['ai']['own'] ?? 'nessuna riga' ) );
+$wpdb->delete( $dim_table, array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'ai', 'origin' => 'wps' ) );
+foreach ( $wps_ai_days as $wp5w_day_value ) {
+	$wpdb->delete( Schema::table( 'site_daily' ), array( 'day' => $wp5w_day_value, 'origin' => 'wps' ) );
+}
+foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'" );
+	foreach ( $compare_backup[ $wp5w_name ] as $wp5w_row ) {
+		$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row );
+	}
+}
+if ( false === $state_backup ) {
+	delete_option( Importer::STATE_OPTION );
+} else {
+	update_option( Importer::STATE_OPTION, $state_backup, false );
+}
+
+// Passo 4: etichette delle app (solo presentazione: i dati nelle tabelle non cambiano).
+if ( $has_seed ) {
+	$seed_referrer = static fn( array $rows ): string => (string) ( array_column( $rows, 'label', 'referrer' )['android-app://com.linkedin.android/'] ?? 'nessuna riga' );
+	$check( 'etichette: referrer della scheda Visitatori', 'LinkedIn (app)', $seed_referrer( ( new AudienceQuery( new SearchQuery() ) )->get()['referrers']['rows'] ) );
+	$check( 'etichette: referrer del dettaglio', 'LinkedIn (app)', $seed_referrer( ( new PostsQuery() )->detail( $post_a, DateRange::last_days( 60, $today ) )['referrers'] ?? array() ) );
+	$check( 'etichette: il dato in referrer_daily non cambia', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'wps' AND day = %s AND referrer = 'android-app://com.linkedin.android/'", $seed_day ) ) );
+}
+$send_hit( $payload( $post_a, array( 'r' => 'android-app://com.linkedin.android/', 'u' => '/wp5w-v12-app/' ) ), '192.0.2.9', $chrome );
+( new OwnSource() )->run_hourly();
+$check( 'etichette: referrer own com.linkedin.android', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND referrer = 'com.linkedin.android'", $today ) ) );
+update_option( Settings::OWN_SINCE, $today );
+$own_label = array_column( ( new AudienceQuery( new SearchQuery() ) )->get()['referrers']['rows'], 'label', 'referrer' )['com.linkedin.android'] ?? 'nessuna riga';
+update_option( Settings::OWN_SINCE, '' );
+$check( 'etichette: la riga own ha la stessa etichetta', 'LinkedIn (app)', $own_label );
+
+// Passo 5: UTM. Due visitatori con tre visite (uno due volte) e un terzo senza UTM.
+$utm = array( 'uc' => 'autunno', 'us' => 'linkedin', 'um' => 'social' );
+$send_hit( $payload( $post_a, $utm + array( 'u' => '/wp5w-v12-utm-1/' ) ), '192.0.2.21', $chrome );
+$send_hit( $payload( $post_b, $utm + array( 'u' => '/wp5w-v12-utm-2/' ) ), '192.0.2.21', $chrome );
+$send_hit( $payload( $post_a, $utm + array( 'u' => '/wp5w-v12-utm-3/' ) ), '192.0.2.22', $chrome );
+$send_hit( $payload( $post_a, array( 'u' => '/wp5w-v12-utm-4/' ) ), '192.0.2.23', $chrome );
+( new OwnSource() )->run_hourly();
+$check( 'utm: utm_campaign autunno', 2, $dim_value( 'own', $today, 'utm_campaign', 'autunno' ) );
+$check( 'utm: utm_source linkedin', 2, $dim_value( 'own', $today, 'utm_source', 'linkedin' ) );
+$check( 'utm: utm_medium social', 2, $dim_value( 'own', $today, 'utm_medium', 'social' ) );
+$check( 'utm: nessuna riga utm_* con (n/d) o valore vuoto', 0, $wpdb->get_var( "SELECT COUNT(*) FROM {$dim_table} WHERE dim LIKE 'utm\\_%' AND value IN ('', '(n/d)')" ) );
+$check( 'utm: nessuna riga wps con dimensione utm_*', 0, $wpdb->get_var( "SELECT COUNT(*) FROM {$dim_table} WHERE origin = 'wps' AND dim LIKE 'utm\\_%'" ) );
+$check_six_dims( 'utm, invariante delle sei dimensioni' );
+
+$campaigns_route = '/wp5w/v1/admin/audience/campaigns';
+$check( 'campagne senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $campaigns_route, array( 'days' => 30 ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$campaigns_response = $rest_call( 'GET', $campaigns_route, array( 'days' => 30 ) );
+$check( 'campagne con amministratore: 200', 200, $campaigns_response->get_status() );
+$check( 'campagne: Cache-Control no-store', 'no-store, max-age=0', $campaigns_response->get_headers()['Cache-Control'] ?? '' );
+$check( 'campagne con days=15: 400', 400, $rest_call( 'GET', $campaigns_route, array( 'days' => 15 ) )->get_status() );
+$admin_user( 0 );
+$audience_query = new AudienceQuery( new SearchQuery() );
+$campaigns_empty = $audience_query->campaigns( $range_30 );
+update_option( Settings::OWN_SINCE, $today );
+$campaigns_today = $audience_query->campaigns( $range_30 );
+update_option( Settings::OWN_SINCE, '' );
+$check( 'campagne: stessi numeri con wp5w_own_since vuota e con la data di oggi', md5( (string) wp_json_encode( $campaigns_empty ) ), md5( (string) wp_json_encode( $campaigns_today ) ) );
+$check( 'campagne: utm_campaign autunno = 2', 2, array_column( $campaigns_empty['dims']['utm_campaign']['rows'], 'visitors', 'value' )['autunno'] ?? 'nessuna riga' );
+$check( 'campagne: first_day = primo giorno own di channel', $wpdb->get_var( "SELECT MIN(day) FROM {$dim_table} WHERE origin = 'own' AND dim = 'channel'" ), $campaigns_empty['first_day'] ?? '' );
+$check( 'campagne: le tre dimensioni', 'utm_campaign,utm_source,utm_medium', implode( ',', array_keys( $campaigns_empty['dims'] ) ) );
+
+// Passo 6: online adesso. Visite inserite direttamente (A due visite, B, C a cavallo della mezzanotte, D fuori dalla finestra).
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$online_hashes = array();
+$insert_online = static function ( string $who, int $seconds_ago, string $type, int $id, string $day ) use ( $wpdb, $hits_table, &$online_hashes ): void {
+	$online_hashes[ $who ] = md5( 'wp5w-online-' . $who );
+	$wpdb->query(
+		$wpdb->prepare(
+			"INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri) VALUES (%s, %s, UNHEX(%s), %s, %d, %s)",
+			gmdate( 'Y-m-d H:i:s', time() - $seconds_ago ),
+			$day,
+			$online_hashes[ $who ],
+			$type,
+			$id,
+			'/online-' . $who . '/'
+		)
+	);
+};
+$yesterday = wp_date( 'Y-m-d', time() - DAY_IN_SECONDS );
+$insert_online( 'a', 420, 'post', $post_a, $today );
+$insert_online( 'a', 60, 'post', $post_b, $today );
+$insert_online( 'b', 5, 'post', $post_b, $today );
+$insert_online( 'c', 60, 'home', 0, $yesterday );
+$insert_online( 'd', 360, 'post', $post_a, $today );
+$online      = ( new OnlineQuery() )->get();
+$online_rows = array_column( $online['contents'], null, 'id' );
+$online_json = (string) wp_json_encode( $online );
+$check( 'online: tre visitatori distinti', 3, $online['visitors'] ?? '' );
+$check( 'online: il secondo articolo ha 2 visitatori (A sull\'ultima visita e B)', 2, $online_rows[ $post_b ]['visitors'] ?? 'nessuna riga' );
+$check( 'online: la home ha 1 visitatore (a cavallo della mezzanotte) e il titolo Home', '1|Home', ( $online_rows[0]['visitors'] ?? 'nessuna riga' ) . '|' . ( $online_rows[0]['title'] ?? '' ) );
+$check( 'online: il primo articolo non c\'è (A ha una visita più recente, D è fuori dalla finestra)', false, isset( $online_rows[ $post_a ] ) );
+$check( 'online: nessun altro contenuto', 0, $online['other'] ?? '' );
+$check( 'online: minuti e raccolta attiva', '5|1', ( $online['minutes'] ?? '' ) . '|' . (int) ( $online['tracking'] ?? 0 ) );
+$check( 'online: nessun hash nella risposta', 0, count( array_filter( $online_hashes, static fn( $hash ) => str_contains( $online_json, $hash ) ) ) );
+$check( 'online: nessuna chiave visitor o ts', 0, (int) str_contains( $online_json, '"visitor"' ) + (int) str_contains( $online_json, '"ts"' ) );
+$online_route = '/wp5w/v1/admin/online';
+$check( 'online senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $online_route )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$online_response = $rest_call( 'GET', $online_route );
+$admin_user( 0 );
+$check( 'online con amministratore: 200', 200, $online_response->get_status() );
+$check( 'online: Cache-Control no-store', 'no-store, max-age=0', $online_response->get_headers()['Cache-Control'] ?? '' );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+// Passo 7: pagine 404 (aggregati senza visitatore, solo per le visite registrate).
+$sig_404 = Tracker::signature( '404', 0 );
+$hit_404 = static fn( string $uri, string $referrer, string $ip, string $ua ): int => $send_hit( array( 't' => '404', 'id' => 0, 's' => $sig_404, 'u' => $uri, 'r' => $referrer ), $ip, $ua );
+$nf_row  = static fn( string $uri, string $referrer ) => $wpdb->get_row( $wpdb->prepare( "SELECT hits, last_seen FROM {$notfound_table} WHERE day = %s AND uri = %s AND referrer = %s", $today, $uri, $referrer ) );
+$site_host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+$check( 'notfound: 204', 204, $hit_404( '/manca/', 'https://www.esterno.it/pagina?x=1', '192.0.2.31', $chrome ) );
+$first_seen = $nf_row( '/manca/', 'esterno.it' );
+$check( 'notfound: una riga con host del referrer e hits 1', '1', $first_seen->hits ?? 'nessuna riga' );
+$hit_404( '/manca/', 'https://www.esterno.it/altra', '192.0.2.31', $chrome );
+$second_seen = $nf_row( '/manca/', 'esterno.it' );
+$check( 'notfound: la seconda visita porta hits a 2', '2', $second_seen->hits ?? 'nessuna riga' );
+$check( 'notfound: last_seen non indietreggia', true, ( $second_seen->last_seen ?? '' ) >= ( $first_seen->last_seen ?? 'z' ) );
+$hit_404( '/manca/', get_permalink( $post_a ), '192.0.2.32', $chrome );
+$check( 'notfound: referrer del sito stesso = host del sito', '1', $nf_row( '/manca/', preg_replace( '/^www\./', '', $site_host ) )->hits ?? 'nessuna riga' );
+$hit_404( '/manca-diretta/', '', '192.0.2.33', $chrome );
+$check( 'notfound: referrer vuoto', '1', $nf_row( '/manca-diretta/', '' )->hits ?? 'nessuna riga' );
+$nf_total = static fn(): int => (int) $wpdb->get_var( "SELECT COALESCE(SUM(hits), 0) FROM {$notfound_table}" );
+$before   = $nf_total();
+$hit_404( '/manca/', '', '192.0.2.34', 'Googlebot/2.1 (+http://www.google.com/bot.html)' );
+$check( 'notfound: un 404 da Googlebot non cambia la tabella (scarto bot)', $before, $nf_total() );
+$send_hit( $payload( $post_a, array( 'u' => '/wp5w-v12-articolo/' ) ), '192.0.2.35', $chrome );
+$check( 'notfound: nemmeno una visita a un articolo', $before, $nf_total() );
+
+// Con il filtro query: una 404 registrata fa esattamente 3 query (SELECT e INSERT su wp5w_hits, poi l'INSERT sulle 404).
+$queries = array();
+add_filter( 'query', $capture_query );
+$hit_404( '/manca-query/', 'https://www.esterno.it/', '192.0.2.36', $chrome );
+remove_filter( 'query', $capture_query );
+$check( 'notfound: una 404 fa 3 query', 3, count( $queries ) );
+$check( 'notfound: due query su wp5w_hits', 2, count( array_filter( $queries, static fn( $q ) => str_contains( $q, $hits_table ) ) ) );
+$check( 'notfound: una INSERT ON DUPLICATE KEY UPDATE sulla tabella delle 404', 1, count( array_filter( $queries, static fn( $q ) => str_contains( $q, $notfound_table ) && 0 === stripos( ltrim( $q ), 'INSERT' ) && str_contains( $q, 'ON DUPLICATE KEY UPDATE' ) ) ) );
+
+// Lettura: internal e label.
+$operations = new OperationsQuery();
+$not_found  = $operations->not_found( $range_30 );
+$nf_by_ref  = array();
+foreach ( $not_found['rows'] as $wp5w_row ) {
+	$nf_by_ref[ $wp5w_row['uri'] . '|' . $wp5w_row['referrer'] ] = $wp5w_row;
+}
+$site_key = '/manca/|' . preg_replace( '/^www\./', '', $site_host );
+$check( 'notfound lettura: link esterno non interno, con etichetta', '0|esterno.it', (int) ( $nf_by_ref['/manca/|esterno.it']['internal'] ?? 1 ) . '|' . ( $nf_by_ref['/manca/|esterno.it']['label'] ?? '' ) );
+$check( 'notfound lettura: link interno', 1, (int) ( $nf_by_ref[ $site_key ]['internal'] ?? 0 ) );
+$check( 'notfound lettura: referrer vuoto senza etichetta', '0|', (int) ( $nf_by_ref['/manca-diretta/|']['internal'] ?? 1 ) . '|' . ( $nf_by_ref['/manca-diretta/|']['label'] ?? 'x' ) );
+$check( 'notfound lettura: hits della riga più visitata', 2, $not_found['rows'][0]['hits'] ?? '' );
+$check( 'notfound lettura: totale delle visite', $nf_total(), $not_found['hits'] ?? '' );
+$check( 'notfound lettura: indirizzi distinti', 3, $not_found['uris'] ?? '' );
+foreach ( array( '/wp5w/v1/admin/notfound', '/wp5w/v1/admin/searches' ) as $wp5w_route ) {
+	$check( "{$wp5w_route} senza utente: 401 o 403", true, in_array( $rest_call( 'GET', $wp5w_route, array( 'days' => 30 ) )->get_status(), array( 401, 403 ), true ) );
+	$admin_user( $admin_id );
+	$check( "{$wp5w_route} con amministratore: 200", 200, $rest_call( 'GET', $wp5w_route, array( 'days' => 30 ) )->get_status() );
+	$check( "{$wp5w_route} con days=15: 400", 400, $rest_call( 'GET', $wp5w_route, array( 'days' => 15 ) )->get_status() );
+	$admin_user( 0 );
+}
+
+// Passo 8: ricerche interne.
+$sig_search = Tracker::signature( 'search', 0 );
+$hit_search = static fn( array $extra, string $ip ): int => $send_hit( $extra + array( 't' => 'search', 'id' => 0, 's' => $sig_search, 'u' => '/' ), $ip, $chrome );
+$search_row = static fn( string $term ) => $wpdb->get_row( $wpdb->prepare( "SELECT searches, empty FROM {$search_table} WHERE day = %s AND term = %s", $today, $term ) );
+$check( 'ricerche: 204', 204, $hit_search( array( 'q' => '  WordPress   Plugin ', 'n' => 5 ), '192.0.2.41' ) );
+$row = $search_row( 'wordpress plugin' );
+$check( 'ricerche: termine normalizzato con searches 1 ed empty 0', '1|0', ( $row->searches ?? 'nessuna riga' ) . '|' . ( $row->empty ?? '' ) );
+$hit_search( array( 'q' => 'wordpress plugin', 'n' => 0 ), '192.0.2.42' );
+$row = $search_row( 'wordpress plugin' );
+$check( 'ricerche: con n = 0 empty sale a 1', '2|1', ( $row->searches ?? 'nessuna riga' ) . '|' . ( $row->empty ?? '' ) );
+$hit_search( array( 'q' => 'wordpress plugin' ), '192.0.2.43' );
+$row = $search_row( 'wordpress plugin' );
+$check( 'ricerche: un n mancante conta come risultati sconosciuti (empty invariato)', '3|1', ( $row->searches ?? 'nessuna riga' ) . '|' . ( $row->empty ?? '' ) );
+$hit_search( array( 'q' => 'mario.rossi@example.com', 'n' => 1 ), '192.0.2.44' );
+$hit_search( array( 'q' => '333 1234567', 'n' => 1 ), '192.0.2.45' );
+$check( 'ricerche: email e numero lungo vanno in (filtrato)', 2, $search_row( '(filtrato)' )->searches ?? 'nessuna riga' );
+$check( 'ricerche: l\'email non è salvata', 0, $wpdb->get_var( "SELECT COUNT(*) FROM {$search_table} WHERE term LIKE '%@%' OR term LIKE '%1234567%'" ) );
+$hit_search( array( 'q' => str_repeat( 'a', 100 ), 'n' => 1 ), '192.0.2.46' );
+$check( 'ricerche: un termine di 100 caratteri dà un termine di 60', 1, $search_row( str_repeat( 'a', 60 ) )->searches ?? 'nessuna riga' );
+
+// Termine vuoto o di soli spazi, q con un tipo diverso da search e q array: nessuna riga e nessun warning.
+$search_total = static fn(): int => (int) $wpdb->get_var( "SELECT COALESCE(SUM(searches), 0) FROM {$search_table}" );
+$before       = $search_total();
+$warnings     = array();
+set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.prevent_path_disclosure_set_error_handler -- Prova isolata, il gestore viene tolto subito dopo.
+	static function ( int $errno, string $errstr ) use ( &$warnings ): bool {
+		$warnings[] = $errstr;
+		return true;
+	}
+);
+$hit_search( array( 'q' => '', 'n' => 1 ), '192.0.2.47' );
+$hit_search( array( 'q' => '   ', 'n' => 1 ), '192.0.2.48' );
+$send_hit( $payload( $post_a, array( 'q' => 'solo per le ricerche', 'n' => 1, 'u' => '/wp5w-v12-q-post/' ) ), '192.0.2.49', $chrome );
+$hit_search( array( 'q' => array( 'x' ), 'n' => array( '1' ) ), '192.0.2.50' );
+restore_error_handler();
+$check( 'ricerche: termine vuoto, q con un articolo e q array non scrivono righe', $before, $search_total() );
+$check( 'ricerche: nessun warning con q array', '', implode( ' | ', $warnings ) );
+$queries = array();
+add_filter( 'query', $capture_query );
+$hit_search( array( 'q' => '', 'n' => 1 ), '192.0.2.51' );
+remove_filter( 'query', $capture_query );
+$check( 'ricerche: con il termine vuoto la visita fa 2 query', 2, count( $queries ) );
+$queries = array();
+add_filter( 'query', $capture_query );
+$hit_search( array( 'q' => 'una ricerca valida', 'n' => 3 ), '192.0.2.52' );
+remove_filter( 'query', $capture_query );
+$check( 'ricerche: una ricerca registrata fa 3 query', 3, count( $queries ) );
+$check( 'ricerche: una INSERT ON DUPLICATE KEY UPDATE sulla tabella delle ricerche', 1, count( array_filter( $queries, static fn( $q ) => str_contains( $q, $search_table ) && 0 === stripos( ltrim( $q ), 'INSERT' ) && str_contains( $q, 'ON DUPLICATE KEY UPDATE' ) ) ) );
+
+// Colonne: nessuna colonna del visitatore e nessun orario per le ricerche.
+$check( 'ricerche: colonne di search_daily', 'day,term,searches,empty', implode( ',', $wpdb->get_col( "SHOW COLUMNS FROM {$search_table}" ) ) );
+$check( 'notfound: colonne di notfound_daily', 'day,uri,referrer,hits,last_seen', implode( ',', $wpdb->get_col( "SHOW COLUMNS FROM {$notfound_table}" ) ) );
+
+// Lettura delle ricerche.
+$searches = $operations->searches( $range_30 );
+$check( 'ricerche lettura: totale delle ricerche', $search_total(), $searches['searches'] ?? '' );
+$check( 'ricerche lettura: senza risultati', (int) $wpdb->get_var( "SELECT COALESCE(SUM(empty), 0) FROM {$search_table}" ), $searches['empty'] ?? '' );
+$check( 'ricerche lettura: la prima riga è la più cercata', 'wordpress plugin|3', ( $searches['rows'][0]['term'] ?? '' ) . '|' . ( $searches['rows'][0]['searches'] ?? '' ) );
+
+// Passo 9: il blocco del tracker in una ricerca (query principale simulata).
+$saved_query = $GLOBALS['wp_query'];
+$saved_main  = $GLOBALS['wp_the_query'];
+$print_block = static function ( array $args ): string {
+	$GLOBALS['wp_query'] = $GLOBALS['wp_the_query'] = new WP_Query( $args ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Prova isolata, i valori originali si ripristinano alla fine.
+	ob_start();
+	( new Tracker() )->print_data();
+	return (string) ob_get_clean();
+};
+$block_search = $print_block( array( 's' => 'Calendario' ) );
+$check( 'blocco: tipo search', true, str_contains( $block_search, '"type":"search"' ) );
+$check( 'blocco: termine normalizzato', true, str_contains( $block_search, '"q":"calendario"' ) );
+$check( 'blocco: numero dei risultati', true, 1 === preg_match( '/"n":\d+/', $block_search ) );
+$check( 'blocco: pagina 2 senza q', false, str_contains( $print_block( array( 's' => 'Calendario', 'paged' => 2 ) ), '"q"' ) );
+$check( 'blocco: articolo singolo senza q', false, str_contains( $print_block( array( 'p' => $post_a ) ), '"q"' ) );
+$GLOBALS['wp_query']     = $saved_query; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Ripristino.
+$GLOBALS['wp_the_query'] = $saved_main; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Ripristino.
+
+// Passo 10: una visita normale a un articolo fa ancora 2 query.
+$queries = array();
+add_filter( 'query', $capture_query );
+$send_hit( $payload( $post_a, array( 'u' => '/wp5w-v12-normale/' ) ), '192.0.2.60', $chrome );
+remove_filter( 'query', $capture_query );
+$check( 'visita normale: 2 query', 2, count( $queries ) );
+$check( 'visita normale: tutte su wp5w_hits', 2, count( array_filter( $queries, static fn( $q ) => str_contains( $q, $hits_table ) ) ) );
+
+// Passo 11: visite nell'elenco dei contenuti e nella barra di amministrazione.
+$posts_query = new PostsQuery();
+$views_ids   = $posts_query->views_by_ids( 'post', $seed_posts, $range_30 );
+foreach ( $seed_posts as $wp5w_id ) {
+	$check(
+		"visite 30 g del post {$wp5w_id}: views_by_ids = SUM(views) di object_daily",
+		(int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(views), 0) FROM {$object_table} WHERE origin = 'wps' AND object_type = 'post' AND object_id = %d AND day BETWEEN %s AND %s", $wp5w_id, $range_30->from, $range_30->to ) ),
+		$views_ids[ $wp5w_id ] ?? 0
+	);
+}
+$check( 'visite 30 g: con nessun ID non si interroga', 0, count( $posts_query->views_by_ids( 'post', array(), $range_30 ) ) );
+
+$post_views  = new PostViews( $posts_query );
+$saved_query = $GLOBALS['wp_query'];
+$GLOBALS['wp_query']        = new WP_Query( array( 'post__in' => $seed_posts, 'post_type' => 'post', 'posts_per_page' => -1, 'orderby' => 'ID' ) ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Prova isolata, il valore originale si ripristina.
+$admin_user( $admin_id );
+$check( 'colonna: l\'amministratore la riceve', true, isset( $post_views->add_column( array() )['wp5w_views'] ) );
+$queries = array();
+add_filter( 'query', $capture_query );
+ob_start();
+foreach ( $seed_posts as $wp5w_id ) {
+	$post_views->render_column( 'wp5w_views', $wp5w_id );
+}
+$cells = (string) ob_get_clean();
+remove_filter( 'query', $capture_query );
+$check( 'colonna: una sola query su object_daily per tutta la pagina', 1, count( array_filter( $queries, static fn( $q ) => str_contains( $q, $object_table ) ) ) );
+$check( 'colonna: un link detail per ogni riga', count( $seed_posts ), substr_count( $cells, 'tab=posts&#038;detail=' ) + substr_count( $cells, 'tab=posts&detail=' ) );
+$check( 'colonna: il link del primo articolo', true, str_contains( html_entity_decode( $cells ), 'detail=' . $post_a . '"' ) );
+$check( 'colonna: il numero della prima cella', true, str_contains( $cells, '>' . number_format_i18n( $views_ids[ $post_a ] ?? 0 ) . '</a>' ) );
+$GLOBALS['wp_query'] = $saved_query; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Ripristino.
+
+$subscriber_id = (int) wp_insert_user( array( 'user_login' => 'wp5w_verify_subscriber2', 'user_pass' => wp_generate_password(), 'user_email' => 'wp5w-verify2@example.com', 'role' => 'subscriber' ) );
+wp_set_current_user( $subscriber_id );
+$check( 'colonna: un utente senza manage_options non la riceve', false, isset( $post_views->add_column( array() )['wp5w_views'] ) );
+$admin_user( 0 );
+wp_delete_user( $subscriber_id );
+
+// Ordinamento: la guardia di PostViews non scatta in wp eval-file (is_admin() è falso e la query non è la principale),
+// quindi si prova il costruttore delle clausole con un filtro posts_clauses di prova, in modo crescente e decrescente.
+$order_dir   = 'DESC';
+$order_probe = static function ( array $clauses ) use ( $posts_query, $range_30, &$order_dir, $wpdb ): array {
+	$parts              = $posts_query->views_order_clauses( 'post', $range_30 );
+	$clauses['join']   .= $parts['join'];
+	$clauses['orderby'] = "{$parts['field']} {$order_dir}, {$wpdb->posts}.ID {$order_dir}";
+	return $clauses;
+};
+add_filter( 'posts_clauses', $order_probe );
+foreach ( array( 'DESC', 'ASC' ) as $order_dir ) {
+	$sorted_ids = array_map( 'intval', ( new WP_Query( array( 'post__in' => $seed_posts, 'post_type' => 'post', 'posts_per_page' => -1, 'fields' => 'ids' ) ) )->posts );
+	$expected   = $seed_posts;
+	usort(
+		$expected,
+		static function ( int $a, int $b ) use ( $views_ids, $order_dir ): int {
+			$by_views = ( $views_ids[ $a ] ?? 0 ) <=> ( $views_ids[ $b ] ?? 0 );
+			$result   = 0 !== $by_views ? $by_views : $a <=> $b;
+			return 'DESC' === $order_dir ? -$result : $result;
+		}
+	);
+	$check( "ordinamento per visite ({$order_dir})", implode( ',', $expected ), implode( ',', $sorted_ids ) );
+}
+remove_filter( 'posts_clauses', $order_probe );
+$guard_query = new WP_Query( array( 'post_type' => 'post', 'orderby' => 'wp5w_views', 'fields' => 'ids' ) );
+$admin_user( $admin_id );
+$base_clauses = array( 'join' => '', 'orderby' => 'wp_posts.post_date DESC' );
+$check( 'ordinamento: con una query che non è la principale le clausole non cambiano', md5( (string) wp_json_encode( $base_clauses ) ), md5( (string) wp_json_encode( $post_views->order_by_views( $base_clauses, $guard_query ) ) ) );
+
+// Barra di amministrazione: nodo wp5w-views su un articolo singolo simulato.
+if ( ! class_exists( 'WP_Admin_Bar' ) ) {
+	require_once ABSPATH . WPINC . '/class-wp-admin-bar.php';
+}
+$saved_query = $GLOBALS['wp_query'];
+$saved_main  = $GLOBALS['wp_the_query'];
+$GLOBALS['wp_query'] = $GLOBALS['wp_the_query'] = new WP_Query( array( 'p' => $post_a ) ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Prova isolata, i valori originali si ripristinano.
+$bar = new WP_Admin_Bar();
+$post_views->add_admin_bar_node( $bar );
+$node = $bar->get_node( 'wp5w-views' );
+$check( 'barra: nodo wp5w-views con il numero di visite', true, str_contains( (string) ( $node->title ?? '' ), number_format_i18n( $views_ids[ $post_a ] ?? 0 ) ) );
+$check( 'barra: il link apre il modale', true, str_contains( (string) ( $node->href ?? '' ), 'detail=' . $post_a ) );
+$admin_user( 0 );
+$bar_anon = new WP_Admin_Bar();
+$post_views->add_admin_bar_node( $bar_anon );
+$check( 'barra: senza manage_options il nodo non c\'è', false, (bool) $bar_anon->get_node( 'wp5w-views' ) );
+$GLOBALS['wp_query']     = $saved_query; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Ripristino.
+$GLOBALS['wp_the_query'] = $saved_main; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Ripristino.
+
+// Passo 12: modale aperto dall'URL. I dati localizzati da AdminMenu contengono `detail` solo per un articolo o una pagina leggibili.
+$localized = static function () use ( $admin_id ): array {
+	wp_set_current_user( $admin_id );
+	wp_deregister_script( 'wp5w-admin' );
+	( new AdminMenu() )->enqueue_assets( 'toplevel_page_wp5w' );
+	$data = (string) wp_scripts()->get_data( 'wp5w-admin', 'data' );
+	return 1 === preg_match( '/var wp5wAdmin = (\{.*\});/s', $data, $match ) ? (array) json_decode( $match[1], true ) : array( 'errore' => 'dati non trovati (npm run build?)' );
+};
+$_GET['detail'] = (string) $post_a;
+$with_detail    = $localized();
+$check( 'modale da URL: detail con id, titolo e data', $post_a . '|' . get_the_title( $post_a ) . '|' . get_the_date( 'Y-m-d', $post_a ), ( $with_detail['detail']['id'] ?? '' ) . '|' . ( $with_detail['detail']['title'] ?? '' ) . '|' . ( $with_detail['detail']['date'] ?? '' ) );
+$_GET['detail'] = '99999999';
+$check( 'modale da URL: ID inesistente senza detail', false, isset( $localized()['detail'] ) );
+$other_type_id  = (int) wp_insert_post( array( 'post_type' => 'wp5w_tmp', 'post_title' => 'Tipo di prova', 'post_status' => 'publish' ) );
+$_GET['detail'] = (string) $other_type_id;
+$check( 'modale da URL: tipo diverso da post e page senza detail', false, isset( $localized()['detail'] ) );
+wp_delete_post( $other_type_id, true );
+unset( $_GET['detail'] );
+$check( 'modale da URL: senza il parametro nessun detail', false, isset( $localized()['detail'] ) );
+wp_deregister_script( 'wp5w-admin' );
+$admin_user( 0 );
+
+// ---------------------------------------------------------------------------
+// 13. Pulizia finale.
 // ---------------------------------------------------------------------------
 update_option( Settings::OPTION, Settings::defaults() );
 update_option( Settings::OWN_SINCE, '' );
 $wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'hits' ) );
 $wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'discards' ) );
+$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'notfound_daily' ) );
+$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'search_daily' ) );
 foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
 	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'" );
 }

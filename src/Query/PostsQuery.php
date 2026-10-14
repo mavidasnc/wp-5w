@@ -223,7 +223,7 @@ final class PostsQuery {
 			$wpdb->prepare(
 				"SELECT referrer, MAX(channel) AS channel, MAX(source) AS source, SUM(visitors) AS visitors FROM {$referrer}
 				WHERE object_type = %s AND object_id = %d AND day BETWEEN %s AND %s AND {$origin}
-				GROUP BY referrer ORDER BY visitors DESC LIMIT 30",
+				GROUP BY referrer ORDER BY visitors DESC, referrer LIMIT 30",
 				$type,
 				$id,
 				$range->from,
