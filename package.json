@@ -1,6 +1,6 @@
 {
   "name": "wp-5w",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dashboard di analytics in wp-admin che incrocia WP Statistics e Rank Math (Search Console).",
   "private": true,
   "license": "GPL-2.0-or-later",
