@@ -2,6 +2,16 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.8.0] — 2026-10-14
+
+Fase 2 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): confronto in parallelo con WP Statistics, senza cambiare nessun numero delle altre schede (specifica in [docs/fasi/fase-2.md](docs/fasi/fase-2.md)). Nessuna tabella, opzione o cron nuovi: lo schema resta alla versione 4.
+
+### Added
+- **Sezione «Confronto»** in cima alla scheda Stato, con tre card: confronto per giorno (visitatori e visualizzazioni delle due origini, differenza percentuale, righe oltre la soglia del 15% evidenziate, totali e visualizzazioni per visitatore), «Dove nasce la differenza» (ingressi diretti sulla home, canali, scarti della raccolta propria con la quota sulle richieste) e «Contenuti con la differenza più grande» (almeno 10 visualizzazioni, ordinati per differenza assoluta).
+- **Rotta** `GET /wp5w/v1/admin/compare` (solo amministratori, senza parametri, nessuna scrittura): la finestra la calcola il server e comprende solo giorni completi con entrambe le origini; gli altri sono elencati con il motivo (`partial`, `today`, `etl_pending`, `no_wps`, `no_own`).
+- `Support\Comparison` (finestra, soglia, quote degli scarti, classifica) con `ComparisonTest`, e `Query\CompareQuery`, l'unica classe di `src/Query/` che legge le due origini senza `Origin::where()`.
+- `verify.php`: nuova sezione 10 «Confronto» (la pulizia finale diventa la 11).
+
 ## [0.7.0] — 2026-10-14
 
 Fase 1 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): raccolta propria delle visite, in parallelo a WP Statistics e senza cambiare nessun numero dell'interfaccia (specifica in [docs/fasi/fase-1.md](docs/fasi/fase-1.md)).
