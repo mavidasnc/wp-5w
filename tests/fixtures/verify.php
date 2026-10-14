@@ -819,6 +819,8 @@ $compare_own = array(
 	array( 'object_daily', array( 'day' => $d[3], 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $post_uri, 'views' => 15, 'visitors' => 5 ) ),
 	array( 'object_daily', array( 'day' => $d[2], 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $post_uri, 'views' => 15, 'visitors' => 5 ) ),
 	array( 'object_daily', array( 'day' => $d[3], 'object_type' => 'post', 'object_id' => 999999, 'uri' => '/solo-own/', 'views' => 5, 'visitors' => 2 ) ),
+	// Una categoria con lo stesso ID del primo articolo: il titolo non deve essere quello dell'articolo.
+	array( 'object_daily', array( 'day' => $d[3], 'object_type' => 'category', 'object_id' => $post_a, 'uri' => '/categoria-prova/', 'views' => 12, 'visitors' => 3 ) ),
 	array( 'entry_daily', array( 'day' => $d[3], 'object_type' => 'home', 'object_id' => 0, 'channel' => 'direct', 'visitors' => 4 ) ),
 	array( 'dim_daily', array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'direct', 'visitors' => 30 ) ),
 	array( 'dim_daily', array( 'day' => $d[3], 'dim' => 'channel', 'value' => 'search', 'visitors' => 10 ) ),
@@ -914,8 +916,10 @@ $check( 'confronto: canale direct own = 30', 30, $channels_own['direct'] ?? '' )
 
 // Passo 8: classifica.
 $top_rows = $compare['top'] ?? array();
-$top_own  = array_column( $top_rows, 'own_views', 'id' );
+$top_own  = array_column( array_filter( $top_rows, static fn( $row ) => 'post' === $row['type'] ), 'own_views', 'id' );
 $check( 'confronto: il primo articolo è in top con 30 visualizzazioni', 30, $top_own[ $post_a ] ?? '' );
+$category_row = array_values( array_filter( $top_rows, static fn( $row ) => 'category' === $row['type'] ) )[0] ?? array();
+$check( 'confronto: una categoria in top ha per titolo la sua URI, non l articolo con lo stesso ID', '/categoria-prova/', $category_row['title'] ?? '' );
 $check( 'confronto: il contenuto con 5 visualizzazioni non è in top', false, isset( $top_own[999999] ) );
 $check( 'confronto: top al massimo 10 righe', true, count( $top_rows ) <= 10 );
 $diff_abs = array_column( $top_rows, 'diff_abs' );

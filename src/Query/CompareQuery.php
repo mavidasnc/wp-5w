@@ -29,6 +29,14 @@ defined( 'ABSPATH' ) || exit;
 final class CompareQuery {
 
 	/**
+	 * Tipi di oggetto il cui ID non è quello di un articolo (termini, autori, archivi): titolo e link non si leggono da get_the_title().
+	 * `home` non c'è: i suoi ID sono pagine vere (la home e la pagina degli articoli).
+	 *
+	 * @var array<int,string>
+	 */
+	private const NON_POST_TYPES = array( '404', 'search', 'archive', 'author', 'category', 'post_tag', 'loginpage' );
+
+	/**
 	 * Dati del confronto per la rotta /admin/compare.
 	 *
 	 * @return array<string,mixed>
@@ -52,7 +60,7 @@ final class CompareQuery {
 		if ( null === $own_first ) {
 			return array(
 				'available' => false,
-				'coverage'  => $this->coverage( Comparison::plan( null, $etl, wp_date( 'Y-m-d' ), array(), array() ), null, $etl, $last ),
+				'coverage'  => $this->coverage( Comparison::plan( null, null, wp_date( 'Y-m-d' ), array(), array() ), null, null, null ),
 			);
 		}
 
@@ -336,9 +344,11 @@ final class CompareQuery {
 		// Passo 2: la classifica (soglia minima, ordine, limite) è una regola pura.
 		return array_map(
 			static function ( array $row ): array {
-				$id    = $row['id'];
-				$title = $id > 0 ? html_entity_decode( get_the_title( $id ), ENT_QUOTES, 'UTF-8' ) : '';
-				$link  = $id > 0 ? get_permalink( $id ) : false;
+				// Titolo e link da WordPress solo se l'ID è quello di un articolo o di una pagina; altrimenti l'URI.
+				$id      = $row['id'];
+				$is_post = $id > 0 && ! in_array( $row['type'], self::NON_POST_TYPES, true );
+				$title   = $is_post ? html_entity_decode( get_the_title( $id ), ENT_QUOTES, 'UTF-8' ) : '';
+				$link    = $is_post ? get_permalink( $id ) : false;
 
 				return array(
 					'type'      => $row['type'],
