@@ -118,6 +118,17 @@ final class AdminController extends RestController {
 
 		register_rest_route(
 			self::API_NAMESPACE,
+			'/admin/search/content',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'search_content' ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::range_args(),
+			)
+		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
 			'/admin/audience',
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
@@ -265,6 +276,17 @@ final class AdminController extends RestController {
 	public function search( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
 		$range = self::range_from( $request );
 		return $range instanceof DateRange ? $this->respond( $this->search->get( $range ) ) : $range;
+	}
+
+	/**
+	 * Pagine e opportunità di Search Console (box della Panoramica).
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function search_content( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$range = self::range_from( $request );
+		return $range instanceof DateRange ? $this->respond( $this->search->content( $range ) ) : $range;
 	}
 
 	/**

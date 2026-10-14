@@ -4,6 +4,7 @@ import { Button, Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Sparkline from '../components/Sparkline';
 import PostDetailModal from '../components/PostDetailModal';
+import Card from '../components/Card';
 
 /**
  * Dati di un endpoint, con stato di caricamento ed errore.
@@ -90,8 +91,7 @@ export default function PostsPage() {
 
 	return (
 		<div className="wp5w-posts-page">
-			<section className="wp5w-card">
-				<h2>{ __( 'Ultimi articoli pubblicati', 'wp-5w' ) }</h2>
+			<Card id="posts-latest" title={ __( 'Ultimi articoli pubblicati', 'wp-5w' ) }>
 				<PostsTable
 					state={ latest }
 					showDate
@@ -116,11 +116,12 @@ export default function PostsPage() {
 				<p className="wp5w-note">
 					{ __( 'Visualizzazioni e, tra parentesi, visitatori (una persona conta una volta per ogni giorno di visita).', 'wp-5w' ) }
 				</p>
-			</section>
+			</Card>
 
-			<section className="wp5w-card">
-				<div className="wp5w-card__head">
-					<h2>{ __( 'Articoli più visti', 'wp-5w' ) }</h2>
+			<Card
+				id="posts-top"
+				title={ __( 'Articoli più visti', 'wp-5w' ) }
+				actions={
 					<div className="wp5w-switch">
 						<Button size="compact" variant={ days === 7 ? 'primary' : 'secondary' } onClick={ () => setDays( 7 ) }>
 							{ __( 'Settimana', 'wp-5w' ) }
@@ -129,13 +130,14 @@ export default function PostsPage() {
 							{ __( 'Mese', 'wp-5w' ) }
 						</Button>
 					</div>
-				</div>
+				}
+			>
 				<PostsTable
 					state={ top }
 					onOpen={ ( row ) => setDetail( { post: row, period: String( days ) } ) }
 					columns={ [ { label: days === 7 ? __( 'Settimana', 'wp-5w' ) : __( 'Mese', 'wp-5w' ), value: ( row ) => pair( row.period ) } ] }
 				/>
-			</section>
+			</Card>
 
 			{ detail && (
 				<PostDetailModal post={ detail.post } initialPeriod={ detail.period } onClose={ () => setDetail( null ) } />

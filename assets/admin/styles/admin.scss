@@ -167,7 +167,8 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 12px;
+	gap: 12px;
+	margin-bottom: 8px;
 
 	h2 {
 		margin: 0;
@@ -226,8 +227,9 @@
 }
 
 .wp5w-chart--bars {
-	height: 260px;
-	margin-bottom: 16px;
+	height: 220px;
+	margin-bottom: 12px;
+	padding-bottom: 0;
 }
 
 .wp5w-card__head .components-search-control {
@@ -246,4 +248,41 @@
 
 .wp5w-more {
 	margin-top: 8px;
+}
+
+// Card riducibili e spazi compatti (v0.4).
+.wp5w-card__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	justify-content: flex-end;
+}
+
+.wp5w-card__toggle .dashicons {
+	color: #646970;
+}
+
+.wp5w-card.is-collapsed {
+	padding-top: 10px;
+	padding-bottom: 10px;
+
+	.wp5w-card__head {
+		margin-bottom: 0;
+	}
+}
+
+.wp5w-table {
+	th,
+	td {
+		padding: 6px 10px;
+	}
+}
+
+.wp5w-note--top {
+	margin: 0 0 8px;
+}
+
+.wp5w-nowrap {
+	white-space: nowrap;
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { Button, Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
+import Card from '../components/Card';
 
 // Descrizione delle tabelle wp5w_*.
 const TABLES = {
@@ -65,8 +66,7 @@ export default function StatusPage() {
 				</Notice>
 			) }
 
-			<section className="wp5w-card">
-				<h2>{ __( 'Sorgenti', 'wp-5w' ) }</h2>
+			<Card id="status-sources" title={ __( 'Sorgenti', 'wp-5w' ) }>
 				<table className="widefat striped">
 					<tbody>
 						{ status.sources.map( ( source ) => (
@@ -84,10 +84,9 @@ export default function StatusPage() {
 						) ) }
 					</tbody>
 				</table>
-			</section>
+			</Card>
 
-			<section className="wp5w-card">
-				<h2>{ __( 'Dati importati', 'wp-5w' ) }</h2>
+			<Card id="status-tables" title={ __( 'Dati importati', 'wp-5w' ) }>
 				<table className="widefat striped">
 					<thead>
 						<tr>
@@ -110,10 +109,9 @@ export default function StatusPage() {
 						) ) }
 					</tbody>
 				</table>
-			</section>
+			</Card>
 
-			<section className="wp5w-card">
-				<h2>{ __( 'Import', 'wp-5w' ) }</h2>
+			<Card id="status-import" title={ __( 'Import', 'wp-5w' ) }>
 				{ last ? (
 					<p>
 						{ __( 'Ultimo import:', 'wp-5w' ) } { formatTime( last.started ) } ({ last.mode },{ ' ' }
@@ -134,7 +132,7 @@ export default function StatusPage() {
 						{ __( 'Reimporta tutto lo storico', 'wp-5w' ) }
 					</Button>
 				</div>
-			</section>
+			</Card>
 
 			<p className="wp5w-note">
 				wp-5w { status.version }

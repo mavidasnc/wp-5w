@@ -80,19 +80,35 @@ final class SearchQuery {
 		);
 
 		return array(
-			'range'         => array(
+			'range'      => array(
 				'from' => $range->from,
 				'to'   => $range->to,
 			),
-			'previous'      => array(
+			'previous'   => array(
 				'from' => $previous->from,
 				'to'   => $previous->to,
 			),
 			// Il confronto ha senso solo se il periodo precedente è coperto dai dati (altrimenti +9000%).
-			'comparable'    => $comparable,
-			'kpis'          => Metrics::compare( $this->totals( $range ), $comparable ? $this->totals( $previous ) : array() ),
-			'series'        => Series::fill( $range, $daily, array( 'clicks', 'impressions' ) ),
-			'queries'       => $this->queries( $range, $previous ),
+			'comparable' => $comparable,
+			'kpis'       => Metrics::compare( $this->totals( $range ), $comparable ? $this->totals( $previous ) : array() ),
+			'series'     => Series::fill( $range, $daily, array( 'clicks', 'impressions' ) ),
+			'queries'    => $this->queries( $range, $previous ),
+			'coverage'   => array(
+				'from' => $coverage->d_from ?? null,
+				'to'   => $coverage->d_to ?? null,
+				'days' => (int) ( $coverage->days ?? 0 ),
+			),
+		);
+	}
+
+	/**
+	 * Pagine e opportunità dell'intervallo (box della Panoramica).
+	 *
+	 * @param DateRange $range Intervallo.
+	 * @return array<string,mixed>
+	 */
+	public function content( DateRange $range ): array {
+		return array(
 			'pages'         => $this->pages( $range ),
 			'opportunities' => array(
 				// Quasi in prima pagina: un piccolo miglioramento porta in prima pagina.
@@ -100,12 +116,17 @@ final class SearchQuery {
 				// In alto ma poco cliccate: titolo o descrizione da rivedere.
 				'low_ctr'    => $this->opportunities( $range, 'position <= 5 AND clicks / impressions < 0.02' ),
 			),
-			'coverage'      => array(
-				'from' => $coverage->d_from ?? null,
-				'to'   => $coverage->d_to ?? null,
-				'days' => (int) ( $coverage->days ?? 0 ),
-			),
 		);
+	}
+
+	/**
+	 * Primo giorno con dati di Search Console, stringa vuota se la tabella è vuota.
+	 *
+	 * @return string
+	 */
+	public function first_day(): string {
+		global $wpdb;
+		return (string) $wpdb->get_var( 'SELECT MIN(day) FROM ' . Schema::table( 'gsc_daily' ) );
 	}
 
 	/**
@@ -142,9 +163,10 @@ final class SearchQuery {
 	 *
 	 * @param DateRange $range    Intervallo.
 	 * @param DateRange $previous Periodo precedente.
+	 * @param int       $limit    Numero massimo di query.
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function queries( DateRange $range, DateRange $previous ): array {
+	public function queries( DateRange $range, DateRange $previous, int $limit = self::QUERIES_LIMIT ): array {
 		global $wpdb;
 
 		$gsc  = Schema::table( 'gsc_daily' );
@@ -156,7 +178,7 @@ final class SearchQuery {
 				GROUP BY query_hash ORDER BY clicks DESC, impressions DESC LIMIT %d",
 				$range->from,
 				$range->to,
-				self::QUERIES_LIMIT
+				$limit
 			),
 			ARRAY_A
 		);

@@ -11,25 +11,24 @@ namespace Mavida\FiveW\Query;
 
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Support\DateRange;
-use Mavida\FiveW\Support\Metrics;
+use Mavida\FiveW\Support\Months;
 use Mavida\FiveW\Support\Series;
-use Mavida\FiveW\Support\Weekdays;
 
 defined( 'ABSPATH' ) || exit;
 
 // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- Tabelle del plugin, nomi costruiti con $wpdb->prefix in Schema::table().
 
 /**
- * Giorni della settimana, referrer e keyword recenti.
+ * Ultimi 7 giorni, ultimi 6 mesi, referrer e keyword recenti.
  */
 final class AudienceQuery {
 
 	/**
-	 * Giorni dell'analisi "ultimi 6 mesi".
+	 * Mesi dell'analisi "ultimi 6 mesi", compreso quello in corso.
 	 *
 	 * @var int
 	 */
-	private const HALF_YEAR_DAYS = 183;
+	private const MONTHS = 6;
 
 	/**
 	 * Righe delle tabelle referrer e keyword.
@@ -37,6 +36,13 @@ final class AudienceQuery {
 	 * @var int
 	 */
 	private const LIMIT = 50;
+
+	/**
+	 * Costruttore.
+	 *
+	 * @param SearchQuery $search Query di Search Console (riuso della tabella query con variazione).
+	 */
+	public function __construct( private readonly SearchQuery $search ) {}
 
 	/**
 	 * Tutti i dati della scheda.
@@ -48,7 +54,7 @@ final class AudienceQuery {
 
 		$today = wp_date( 'Y-m-d' );
 		$week  = DateRange::last_days( 7, $today );
-		$half  = DateRange::last_days( self::HALF_YEAR_DAYS, $today );
+		$half  = new DateRange( Months::first_day( $today, self::MONTHS ), $today );
 		$site  = Schema::table( 'site_daily' );
 
 		$week_rows = $wpdb->get_results(
@@ -64,6 +70,9 @@ final class AudienceQuery {
 		$last_gsc = $wpdb->get_var( 'SELECT MAX(day) FROM ' . Schema::table( 'gsc_daily' ) );
 		$gsc_week = $last_gsc ? DateRange::last_days( 7, (string) $last_gsc ) : null;
 
+		// Variazione rispetto ai 7 giorni precedenti solo se coperti dai dati (come in SearchQuery::get()).
+		$comparable = $gsc_week && $this->search->first_day() <= $gsc_week->previous()->from;
+
 		return array(
 			'week'      => array(
 				'range' => array(
@@ -73,11 +82,11 @@ final class AudienceQuery {
 				'days'  => Series::fill( $week, $week_rows, array( 'visitors', 'views' ) ),
 			),
 			'half_year' => array(
-				'range'    => array(
+				'range'  => array(
 					'from' => $half->from,
 					'to'   => $half->to,
 				),
-				'weekdays' => Weekdays::group( $half_rows ),
+				'months' => Months::group( $half_rows, $half->from, self::MONTHS ),
 			),
 			'referrers' => array(
 				'range' => array(
@@ -87,11 +96,12 @@ final class AudienceQuery {
 				'rows'  => $this->referrers( $week ),
 			),
 			'keywords'  => array(
-				'range' => $gsc_week ? array(
+				'range'      => $gsc_week ? array(
 					'from' => $gsc_week->from,
 					'to'   => $gsc_week->to,
 				) : null,
-				'rows'  => $gsc_week ? $this->keywords( $gsc_week ) : array(),
+				'comparable' => $comparable,
+				'rows'       => $gsc_week ? $this->search->queries( $gsc_week, $gsc_week->previous(), self::LIMIT ) : array(),
 			),
 		);
 	}
@@ -125,39 +135,6 @@ final class AudienceQuery {
 				'channel'  => (string) $row['channel'],
 				'visitors' => (int) $row['visitors'],
 				'contents' => (int) $row['contents'],
-			),
-			$rows
-		);
-	}
-
-	/**
-	 * Query di ricerca nel periodo.
-	 *
-	 * @param DateRange $range Intervallo.
-	 * @return array<int,array<string,mixed>>
-	 */
-	private function keywords( DateRange $range ): array {
-		global $wpdb;
-
-		$rows = $wpdb->get_results(
-			$wpdb->prepare(
-				'SELECT MIN(query) AS query, SUM(clicks) AS clicks, SUM(impressions) AS impressions, SUM(pos_x_impr) AS pos_x_impr
-				FROM ' . Schema::table( 'gsc_daily' ) . ' WHERE day BETWEEN %s AND %s
-				GROUP BY query_hash ORDER BY clicks DESC, impressions DESC LIMIT %d',
-				$range->from,
-				$range->to,
-				self::LIMIT
-			),
-			ARRAY_A
-		);
-
-		return array_map(
-			static fn( array $row ): array => array(
-				'query'       => (string) $row['query'],
-				'clicks'      => (int) $row['clicks'],
-				'impressions' => (int) $row['impressions'],
-				'ctr'         => Metrics::ctr( (int) $row['clicks'], (int) $row['impressions'] ),
-				'position'    => Metrics::weighted_position( (float) $row['pos_x_impr'], (int) $row['impressions'] ),
 			),
 			$rows
 		);

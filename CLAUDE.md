@@ -37,9 +37,9 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 
 - `src/Sources/`: `Source` (controllo dello schema, `replace_by_month`), `WpStatisticsSource`, `RankMathSource`.
 - `src/Etl/`: `Importer` (lock, stato in `wp5w_etl_state`) e `Scheduler` (cron `wp5w_etl_daily` alle 4:00, `wp5w_etl_full` dopo l'attivazione).
-- `src/Query/`: `OverviewQuery` (Panoramica) e `PostsQuery` (elenchi Articoli e dettaglio del modale) leggono solo le tabelle `wp5w_*`.
-- `src/Support/`: `DateRange`, `Metrics`, `Series` e `SchemaCheck` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
-- `assets/admin/`: app React (`@wordpress/components` + Chart.js con react-chartjs-2).
+- `src/Query/`: `OverviewQuery` (Panoramica), `PostsQuery` (elenchi Articoli e dettaglio del modale), `SearchQuery` (scheda Search Console; `content()` alimenta Opportunità e Pagine della Panoramica) e `AudienceQuery` (Visitatori) leggono solo le tabelle `wp5w_*`.
+- `src/Support/`: `DateRange`, `Metrics`, `Series`, `Months` e `SchemaCheck` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
+- `assets/admin/`: app React (`@wordpress/components` + Chart.js con react-chartjs-2). I box a riga intera usano `components/Card.jsx` (riducibile, stato in `localStorage` con chiave `wp5w-card-<id>`).
 
 ## Punti da ricordare
 

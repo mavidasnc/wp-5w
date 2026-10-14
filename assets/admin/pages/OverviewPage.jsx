@@ -5,6 +5,7 @@ import { api, formatDay, shiftDay, today } from '../api';
 import KpiCard from '../components/KpiCard';
 import TrendChart from '../components/TrendChart';
 import TopContents from '../components/TopContents';
+import SearchContent from '../components/SearchContent';
 import ChannelList from '../components/ChannelList';
 import PostDetailModal from '../components/PostDetailModal';
 
@@ -101,6 +102,7 @@ export default function OverviewPage() {
 					</div>
 
 					<TopContents range={ data.range } onOpen={ setDetail } />
+					<SearchContent range={ data.range } onOpen={ setDetail } />
 				</>
 			) }
 

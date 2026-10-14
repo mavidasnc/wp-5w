@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import {
-	Button,
 	Notice,
 	SearchControl,
 	SelectControl,
 	Spinner,
 } from '@wordpress/components';
-import { api, formatDay, formatNumber, shiftDay, today } from '../api';
+import { api, formatDay, shiftDay, today } from '../api';
 import KpiCard from '../components/KpiCard';
 import TrendChart from '../components/TrendChart';
 import QueryTable from '../components/QueryTable';
-import PostDetailModal from '../components/PostDetailModal';
 import ShowMore from '../components/ShowMore';
+import Card from '../components/Card';
 
 // Periodi: 28 giorni come in Search Console; "all" parte dal primo giorno disponibile.
 const PERIODS = [
@@ -52,7 +51,6 @@ export default function SearchPage() {
 	const [ data, setData ] = useState( null );
 	const [ error, setError ] = useState( null );
 	const [ filter, setFilter ] = useState( '' );
-	const [ detail, setDetail ] = useState( null );
 
 	useEffect( () => {
 		const { from, to } = rangeFor( period );
@@ -122,8 +120,7 @@ export default function SearchPage() {
 						) ) }
 					</div>
 
-					<section className="wp5w-card">
-						<h2>{ __( 'Andamento', 'wp-5w' ) }</h2>
+					<Card id="gsc-trend" title={ __( 'Andamento', 'wp-5w' ) }>
 						<TrendChart
 							series={ data.series }
 							keys={ [ 'clicks', 'impressions' ] }
@@ -134,18 +131,20 @@ export default function SearchPage() {
 								'wp-5w'
 							) }
 						</p>
-					</section>
+					</Card>
 
-					<section className="wp5w-card">
-						<div className="wp5w-card__head">
-							<h2>{ __( 'Query', 'wp-5w' ) }</h2>
+					<Card
+						id="gsc-queries"
+						title={ __( 'Query', 'wp-5w' ) }
+						actions={
 							<SearchControl
 								__nextHasNoMarginBottom
 								label={ __( 'Filtra le query', 'wp-5w' ) }
 								value={ filter }
 								onChange={ setFilter }
 							/>
-						</div>
+						}
+					>
 						<ShowMore rows={ queries }>
 							{ ( rows ) => <QueryTable rows={ rows } extra change={ data.comparable } /> }
 						</ShowMore>
@@ -154,157 +153,8 @@ export default function SearchPage() {
 								? __( 'Variazione: differenza di click rispetto al periodo precedente.', 'wp-5w' )
 								: __( 'Nessun confronto: il periodo precedente non è coperto dai dati di Search Console.', 'wp-5w' ) }
 						</p>
-					</section>
-
-					<div className="wp5w-columns">
-						<section className="wp5w-card">
-							<h2>{ __( 'Quasi in prima pagina', 'wp-5w' ) }</h2>
-							<p className="wp5w-note">
-								{ __(
-									'Posizione media tra 8 e 20, almeno 20 impression: basta poco per salire.',
-									'wp-5w'
-								) }
-							</p>
-							<ShowMore
-								rows={ data.opportunities.near_first }
-								size={ 10 }
-							>
-								{ ( rows ) => (
-									<QueryTable
-										rows={ rows }
-										empty={ __(
-											'Nessuna query in questa fascia.',
-											'wp-5w'
-										) }
-									/>
-								) }
-							</ShowMore>
-						</section>
-						<section className="wp5w-card">
-							<h2>
-								{ __( 'In alto ma poco cliccate', 'wp-5w' ) }
-							</h2>
-							<p className="wp5w-note">
-								{ __(
-									'Posizione fino a 5 e CTR sotto il 2%: titolo e descrizione da rivedere.',
-									'wp-5w'
-								) }
-							</p>
-							<ShowMore
-								rows={ data.opportunities.low_ctr }
-								size={ 10 }
-							>
-								{ ( rows ) => (
-									<QueryTable
-										rows={ rows }
-										empty={ __(
-											'Nessuna query in questa fascia.',
-											'wp-5w'
-										) }
-									/>
-								) }
-							</ShowMore>
-						</section>
-					</div>
-
-					<section className="wp5w-card">
-						<h2>{ __( 'Pagine', 'wp-5w' ) }</h2>
-						<ShowMore rows={ data.pages }>
-							{ ( pages ) => (
-								<table className="widefat striped wp5w-table">
-									<thead>
-										<tr>
-											<th>{ __( 'Pagina', 'wp-5w' ) }</th>
-											<th className="num">
-												{ __( 'Click', 'wp-5w' ) }
-											</th>
-											<th className="num">
-												{ __( 'Impression', 'wp-5w' ) }
-											</th>
-											<th className="num">
-												{ __( 'CTR', 'wp-5w' ) }
-											</th>
-											<th className="num">
-												{ __( 'Posizione', 'wp-5w' ) }
-											</th>
-											<th className="num">
-												{ __( 'Query', 'wp-5w' ) }
-											</th>
-										</tr>
-									</thead>
-									<tbody>
-										{ pages.map( ( row ) => (
-											<tr key={ row.page }>
-												<td>
-													{ row.id > 0 ? (
-														<Button
-															variant="link"
-															onClick={ () =>
-																setDetail( {
-																	id: row.id,
-																	title: row.title,
-																} )
-															}
-														>
-															{ row.title }
-														</Button>
-													) : (
-														row.title
-													) }
-													<a
-														className="wp5w-edit"
-														href={ row.url }
-														target="_blank"
-														rel="noreferrer"
-													>
-														{ __(
-															'Apri',
-															'wp-5w'
-														) }
-													</a>
-												</td>
-												<td className="num">
-													{ formatNumber(
-														row.clicks
-													) }
-												</td>
-												<td className="num">
-													{ formatNumber(
-														row.impressions
-													) }
-												</td>
-												<td className="num">
-													{ formatNumber(
-														row.ctr,
-														'%'
-													) }
-												</td>
-												<td className="num">
-													{ formatNumber(
-														row.position
-													) }
-												</td>
-												<td className="num">
-													{ formatNumber(
-														row.queries
-													) }
-												</td>
-											</tr>
-										) ) }
-									</tbody>
-								</table>
-							) }
-						</ShowMore>
-					</section>
+					</Card>
 				</>
-			) }
-
-			{ detail && (
-				<PostDetailModal
-					post={ detail }
-					initialPeriod="90"
-					onClose={ () => setDetail( null ) }
-				/>
 			) }
 		</div>
 	);

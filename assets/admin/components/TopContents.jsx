@@ -2,6 +2,7 @@ import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { Notice, SelectControl, Spinner } from '@wordpress/components';
 import { api } from '../api';
+import Card from './Card';
 import TopPostsTable from './TopPostsTable';
 
 const TYPE_OPTIONS = [
@@ -35,9 +36,10 @@ export default function TopContents( { range, onOpen } ) {
 	}, [ range.from, range.to, type, limit ] );
 
 	return (
-		<section className="wp5w-card">
-			<div className="wp5w-card__head">
-				<h2>{ __( 'Contenuti più visti', 'wp-5w' ) }</h2>
+		<Card
+			id="top"
+			title={ __( 'Contenuti più visti', 'wp-5w' ) }
+			actions={
 				<div className="wp5w-filters">
 					<SelectControl
 						__nextHasNoMarginBottom
@@ -56,10 +58,11 @@ export default function TopContents( { range, onOpen } ) {
 						onChange={ setLimit }
 					/>
 				</div>
-			</div>
+			}
+		>
 			{ error && <Notice status="error" isDismissible={ false }>{ error }</Notice> }
 			{ ! rows && ! error && <Spinner /> }
 			{ rows && <TopPostsTable rows={ rows } onOpen={ onOpen } /> }
-		</section>
+		</Card>
 	);
 }

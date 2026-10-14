@@ -2,6 +2,18 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.4.0] — 2026-10-14
+
+### Added
+- Toggle per ridurre i box a riga intera di tutte le schede; lo stato resta memorizzato nel browser.
+- Keyword degli ultimi 7 giorni: variazione dei click rispetto ai 7 giorni precedenti e numero di pagine, come nella tabella Query.
+
+### Changed
+- Visitatori: «Ultimi 6 mesi» è raggruppato per mese (totali e medie al giorno) invece che per giorno della settimana; le tabelle dei 7 giorni e dei mesi mostrano il più recente in alto.
+- Visitatori: provenienza e keyword occupano tutta la riga; la provenienza separa sorgente e canale.
+- Le opportunità («Quasi in prima pagina», «In alto ma poco cliccate») e le pagine su Google passano dalla scheda Search Console alla Panoramica, con il periodo della Panoramica (nuova rotta `/admin/search/content`).
+- Tabelle e grafici a barre più compatti.
+
 ## [0.3.0] — 2026-10-14
 
 ### Added
