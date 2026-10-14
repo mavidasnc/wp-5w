@@ -157,6 +157,11 @@
 	color: #646970;
 }
 
+// Confronto con WP Statistics: i giorni oltre la soglia (stesso giallo di .wp5w-badge.is-near_first).
+.wp5w-status tr.is-flagged td {
+	background: #fcf0d4;
+}
+
 .wp5w-actions {
 	display: flex;
 	gap: 8px;
