@@ -58,7 +58,8 @@ La home ha gli stessi identificativi nelle due origini: `home` con ID 4 per `/`,
 Prima di scrivere codice, Sonnet esegue sul blog le query di 9.1 (sono di sola lettura) e applica la tabella di decisione di 9.1:
 
 - **esito «ok» o «dati insufficienti»:** si implementa questa specifica senza l'Appendice A, e l'esito va scritto nella PR;
-- **esito «proxy sospetto»:** si esegue la diagnosi di A.1 e, se la conferma, si implementa anche l'Appendice A, con test e controlli, nella stessa PR;
+- **esito «proxy sospetto»:** ci si ferma e si avvisa Maurizio. La diagnosi di A.1 richiede un file temporaneo sul server, quindi il suo consenso, che il flusso automatico non può dare. Se la diagnosi conferma il proxy, l'Appendice A entra nella stessa PR, con i suoi test e controlli;
+- **esito «raccolta ferma o parziale»:** ci si ferma e si avvisa Maurizio, perché il confronto non avrebbe senso finché il tracker non invia le visite (beacon, JS combinato da LiteSpeed, cache);
 - **esito «sorgente pesante»:** non si corregge nulla, perché è un bot e non un proxy. Il dato si riporta nella PR e nella nota di consegna.
 
 ---
@@ -72,7 +73,7 @@ La roadmap lascia aperte alcune scelte. Ecco come le risolve questa specifica, c
 | E1 | Nessuna tabella nuova, nessuna migrazione e nessuna scrittura nuova. Il confronto legge `site_daily`, `object_daily`, `entry_daily`, `dim_daily` e `wp5w_discards`. `HitController`, `Tracker` e `OwnSource` non cambiano, salvo l'Appendice A. | Gli aggregati hanno già entrambe le origini nella chiave primaria, e gli scarti sono già contati per giorno e motivo. Il requisito (d) vieta tabelle e scritture non necessarie. |
 | E2 | Il confronto sta in una classe nuova, `Query\CompareQuery`, che legge **di proposito** le due origini e quindi non usa `Origin::where()`. È l'unica eccezione alla regola dell'origine, ed è scritta in `CLAUDE.md` e in un commento della classe. | Confrontare `wps` con `own` è il suo scopo. Tenerla separata lascia valido il `grep` di review per tutte le altre classi `Query`. |
 | E3 | Le regole del confronto (finestra dei giorni, soglia, quote, classifica) stanno in una classe pura, `Support\Comparison`, coperta da PHPUnit. `CompareQuery` fa solo le letture SQL. | È lo schema già usato per `Trend`, `Origin` e `Visit`: la logica si prova senza database. |
-| E4 | **Finestra:** dal giorno dopo il primo giorno con righe `own` (oggi 2026-10-15) fino a ieri, e comunque non oltre il giorno prima dell'ultimo ETL riuscito né oltre il suo `to`. Contano solo i giorni con una riga in `site_daily` per **entrambe** le origini (R1). | Il primo giorno `own` è sempre parziale (la raccolta parte a metà giornata) e oggi è in corso. La riga `wps` di ieri diventa completa solo con l'ETL delle 4:00. Così si confrontano giorni interi con interi, come chiede il requisito (b). |
+| E4 | **Finestra:** dal giorno dopo il primo giorno con righe `own` (oggi 2026-10-15) fino a ieri, e comunque non oltre il giorno prima dell'ultimo ETL (`Importer::last_state()`, anche se ha avuto errori) né oltre il suo `to`; un ETL con errori si segnala con `etl_ok` falso, senza togliere giorni. Contano solo i giorni con una riga in `site_daily` per **entrambe** le origini (R1). | Il primo giorno `own` è sempre parziale (la raccolta parte a metà giornata) e oggi è in corso. La riga `wps` di ieri diventa completa solo con l'ETL delle 4:00. Così si confrontano giorni interi con interi, come chiede il requisito (b). |
 | E5 | La copertura elenca **ogni giorno escluso con il motivo**: `partial`, `today`, `etl_pending`, `no_wps`, `no_own`. | Chi guarda deve capire subito perché ieri non c'è ancora (prima delle 4:00) o perché manca un giorno, senza leggere il codice. |
 | E6 | **Differenza** = `(own − wps) / wps × 100`, arrotondata a una cifra con `Metrics::change( own, wps )`, e `null` se `wps` vale 0. Un giorno è «da spiegare» se la differenza dei visitatori o delle visualizzazioni supera il **15%** in valore assoluto. | La roadmap dice che una differenza stabile entro il 10-15% è normale. Si usa il limite alto per non segnalare come anomali i giorni tranquilli. |
 | E7 | **Quota di uno scarto** = `n / ( visualizzazioni own + scarti totali ) × 100`, sugli stessi giorni completi. Non si divide mai per i visitatori. | Uno scarto è una richiesta, non un visitatore: il denominatore giusto sono tutte le richieste arrivate all'endpoint. |
@@ -267,9 +268,9 @@ Se si applica l'Appendice A, si aggiungono anche i controlli di A.4.
 
 Ogni criterio va nella checklist della PR, con l'esito.
 
-1. Il passo 0 (sezione 2) è stato eseguito: la PR riporta i numeri delle query di 9.1 e l'esito della tabella di decisione. Con l'esito «proxy sospetto», l'Appendice A è implementata con i suoi test.
+1. Il passo 0 (sezione 2) è stato eseguito: la PR riporta i numeri delle query di 9.1 e l'esito della tabella di decisione. Con l'esito «proxy sospetto» o «raccolta ferma o parziale», Maurizio è stato avvisato prima di proseguire, e l'Appendice A è implementata con i suoi test se la diagnosi di A.1 ha confermato il proxy.
 2. `composer ci` passa: PHPCS, PHPStan livello 6 e PHPUnit, compreso `ComparisonTest`.
-3. `npm run check` passa, e `build/tracker/tracker.js` è identico a quello della 0.7.0 (stesso contenuto, il tracker non cambia).
+3. `npm run check` passa (compreso il limite di 1.536 byte del tracker), e `git diff main -- assets/tracker webpack.config.js` è vuoto: il tracker non cambia.
 4. `seed.php` seguito da `verify.php` termina con «Tutti i controlli superati», compresi tutti i controlli della sezione 7.
 5. `GET /wp5w/v1/admin/compare` risponde 200 solo agli amministratori (401 o 403 agli altri), con `Cache-Control: no-store`, e con la struttura di R2.
 6. La finestra comprende solo giorni completi con entrambe le origini: il primo giorno `own`, oggi e i giorni senza ETL o senza una delle due origini sono esclusi ed elencati con il motivo (`ComparisonTest` e verify, punti 3 e 9).
@@ -307,7 +308,7 @@ $WP db query "SELECT COALESCE(SUM(count),0) wps_views FROM maurizio_statistics_p
 # Scarti per motivo.
 $WP db query "SELECT reason, n FROM maurizio_wp5w_discards WHERE day = '$G' ORDER BY n DESC"
 # I 5 hash più pesanti (hash giornalieri: nessun dato personale in più).
-$WP db query "SELECT HEX(LEFT(visitor,4)) h, COUNT(*) views, COUNT(DISTINCT object_type, object_id) contents FROM maurizio_wp5w_hits WHERE day = '$G' GROUP BY visitor ORDER BY views DESC LIMIT 5"
+$WP db query "SELECT HEX(LEFT(visitor,4)) h, COUNT(*) views, COUNT(DISTINCT object_type, object_id) contents, SUM(is_entry) entries, COUNT(DISTINCT referrer_host) referrers FROM maurizio_wp5w_hits WHERE day = '$G' GROUP BY visitor ORDER BY views DESC LIMIT 5"
 # Ora per ora (UTC): WP Statistics (first_view è in ora locale, quindi si converte) contro la raccolta propria.
 $WP db query "SELECT HOUR(CONVERT_TZ(first_view, @@session.time_zone, '+00:00')) h_utc, COUNT(*) wps FROM maurizio_statistics_visitor WHERE last_counter = '$G' GROUP BY h_utc"
 $WP db query "SELECT HOUR(ts) h_utc, COUNT(DISTINCT visitor) own FROM maurizio_wp5w_hits WHERE day = '$G' GROUP BY h_utc"
@@ -317,12 +318,13 @@ Si calcolano `r_own = own_visitors / own_views` e `r_wps = wps_visitors / wps_vi
 
 | Esito | Condizione | Azione |
 |---|---|---|
-| **Dati insufficienti** | `own_views < 30` | Si prosegue con il deploy e si ripete 9.1 il giorno dopo. Lo si scrive nella nota di consegna. |
-| **Proxy sospetto** | `r_own < 0,5 × r_wps`, oppure i 3 hash più pesanti sommano più del 50% di `own_views` | `REMOTE_ADDR` probabilmente non è l'IP del client: con lo stesso UA, persone diverse finiscono nello stesso hash. Si esegue la diagnosi di A.1. Se la conferma, si implementa l'Appendice A (anche dopo il deploy, come 0.8.1) e intanto si spegne la raccolta (`own_tracking` = falso) e si avvisa Maurizio. |
-| **Sorgente pesante** | Un hash ha più di 30 visualizzazioni, oppure la quota di `rate` supera il 5% di `own_views + scarti` | È un bot o uno scraper, non un proxy: nessuna correzione. Si riporta nella nota (è un dato per R5). |
+| **Dati insufficienti** | `wps_views < 30`, oppure meno di 6 ore di traffico dal deploy | Si prosegue con il deploy e si ripete 9.1 il giorno dopo. Lo si scrive nella nota di consegna. |
+| **Raccolta ferma o parziale** | `wps_views >= 100` e `own_views < 0,3 × wps_views` | Il tracker non invia (o perde) le visite: ci si ferma e si avvisa Maurizio. Si indagano il beacon da Chrome, il JS combinato da LiteSpeed e la cache; il confronto non ha senso finché non è risolto. |
+| **Proxy sospetto** | `r_own < 0,5 × r_wps`, e tra i 5 hash più pesanti ce n'è almeno uno con 3 o più ingressi da 2 o più referrer diversi (più persone fuse in un hash) | `REMOTE_ADDR` probabilmente non è l'IP del client: con lo stesso UA, persone diverse finiscono nello stesso hash. Ci si ferma e si avvisa Maurizio, che autorizza la diagnosi di A.1. Se la conferma, si implementa l'Appendice A (anche dopo il deploy, come 0.8.1) e intanto si spegne la raccolta (`own_tracking` = falso). |
+| **Sorgente pesante** | Un hash ha più di 30 visualizzazioni, oppure i 3 hash più pesanti sommano più del 50% di `own_views`, oppure la quota di `rate` supera il 5% di `own_views + scarti` | È un bot o uno scraper (di solito un solo ingresso e un solo referrer), non un proxy: nessuna correzione. Si riporta nella nota (è un dato per R5). |
 | **Ok** | Nessuna delle condizioni precedenti | Si prosegue. |
 
-Si guarda anche il confronto ora per ora. Se in molte ore la raccolta propria vale 0 mentre WP Statistics ha visitatori, va scritto nella nota (ipotesi D di R5): non blocca il deploy, ma è un dato importante per la decisione finale. La query con `CONVERT_TZ( first_view, @@session.time_zone, '+00:00' )` è stata provata sul blog il 2026-10-14 (sessione `SYSTEM`); se restituisse `NULL`, si usa `HOUR(first_view)` ricordando che è in ora locale.
+Si guarda anche il confronto ora per ora. Se in molte ore la raccolta propria vale 0 mentre WP Statistics ha visitatori, va scritto nella nota (ipotesi D di R5): se i totali non arrivano all'esito «raccolta ferma o parziale» non blocca il deploy, ma è un dato importante per la decisione finale. La query con `CONVERT_TZ( first_view, @@session.time_zone, '+00:00' )` è stata provata sul blog il 2026-10-14 (sessione `SYSTEM`); se restituisse `NULL`, si usa `HOUR(first_view)` ricordando che è in ora locale.
 
 ### 9.2 Backup e cattura di non regressione
 
@@ -337,6 +339,7 @@ unset MYSQL_PWD
 ls -l ~/backups/wp5w-pre-0.8.0-$STAMP.sql            # non vuoto
 $WP option list --search='wp5w_*' --format=json > ~/backups/wp5w-options-pre-0.8.0.json
 $WP plugin get wp-5w --field=version                 # 0.7.0
+LOG_WP5W=$(grep -c "wp5w" ~/logs/maurizio-debug.log); echo "$LOG_WP5W"   # righe wp5w nel log prima dell'installazione
 {
   $WP db query "SELECT origin, COUNT(*), SUM(visitors), SUM(views) FROM maurizio_wp5w_site_daily WHERE day BETWEEN '2026-09-14' AND '2026-10-12' GROUP BY origin"
   $WP db query "SELECT origin, COUNT(*), SUM(views), SUM(visitors) FROM maurizio_wp5w_object_daily WHERE day BETWEEN '2026-09-14' AND '2026-10-12' GROUP BY origin"
@@ -358,7 +361,7 @@ INSTALL_UTC=$(date -u '+%F %T'); echo "$INSTALL_UTC"
 $WP plugin install https://github.com/mavidasnc/wp-5w/releases/download/v0.8.0/wp-5w-0.8.0.zip --force
 $WP plugin get wp-5w --field=version                  # 0.8.0
 $WP option get wp5w_db_version                         # 4 (nessuna migrazione)
-grep -c "wp5w" ~/logs/maurizio-debug.log               # uguale a prima dell'installazione (5)
+grep -c "wp5w" ~/logs/maurizio-debug.log               # uguale a $LOG_WP5W (stessa sessione SSH di 9.2)
 $WP cron event list --fields=hook,recurrence | grep wp5w   # wp5w_etl_daily e wp5w_own_hourly, come prima
 ```
 
@@ -374,8 +377,9 @@ Dal PC locale, con Git Bash. L'application password dell'utente `maurizio` è in
 WPAUTH="maurizio:<application password>"
 URL=https://maurizio.mavida.com/wp-json/wp5w/v1/admin/compare
 curl -s -o /dev/null -w "%{http_code}\n" "$URL"                       # 401 senza credenziali
-curl -s -D - -o /tmp/compare.json -u "$WPAUTH" "$URL" | grep -i "^HTTP\|cache-control"   # 200, no-store
-python -c "import json; d=json.load(open('/tmp/compare.json')); c=d['coverage']; print(d['available'], c['from'], c['to'], c['days'], c['excluded']); print(d['totals']); print(d['home_direct']); print(d['discards'])"
+curl -s -o /dev/null -D - -u "$WPAUTH" "$URL" | grep -i "^HTTP\|cache-control"            # 200, no-store
+# Il body passa da stdin: niente file in /tmp (in Git Bash /tmp e il /tmp di Python sono cartelle diverse).
+curl -s -u "$WPAUTH" "$URL" | python -c "import json,sys; d=json.load(sys.stdin); c=d['coverage']; print(d['available'], c['from'], c['to'], c['days'], c['excluded']); print(d['totals']); print(d['home_direct']); print(d['discards'])"
 ```
 
 Cosa ci si aspetta:
