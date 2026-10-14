@@ -19,7 +19,7 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Il file `.mmdb` sta in `uploads/wp5w/`. Il paese si calcola nell'endpoint delle visite e l'IP non si salva mai.
- * L'aggiornamento usa solo funzioni PHP e WordPress (sul blog `exec()` è disabilitato).
+ * L'aggiornamento usa solo funzioni PHP e WordPress (sul blog le funzioni di esecuzione dei comandi sono disabilitate).
  */
 final class CountryDatabase {
 

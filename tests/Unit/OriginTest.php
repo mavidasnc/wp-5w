@@ -27,12 +27,12 @@ final class OriginTest extends TestCase {
 
 	public function test_valid_date_splits_wps_and_own(): void {
 		$this->assertSame(
-			"( ( o.origin = 'wps' AND o.day < '2026-11-01' ) OR ( o.origin = 'own' AND o.day >= '2026-11-01' ) )",
+			"o.origin = IF( o.day < '2026-11-01', 'wps', 'own' )",
 			Origin::where( '2026-11-01', 'o' )
 		);
 		// Senza alias le colonne non hanno prefisso.
 		$this->assertSame(
-			"( ( origin = 'wps' AND day < '2026-11-01' ) OR ( origin = 'own' AND day >= '2026-11-01' ) )",
+			"origin = IF( day < '2026-11-01', 'wps', 'own' )",
 			Origin::where( '2026-11-01' )
 		);
 	}
