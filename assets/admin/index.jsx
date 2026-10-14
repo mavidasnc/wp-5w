@@ -4,6 +4,7 @@ import { TabPanel } from '@wordpress/components';
 import OverviewPage from './pages/OverviewPage';
 import PostsPage from './pages/PostsPage';
 import AudiencePage from './pages/AudiencePage';
+import OptionsPage from './pages/OptionsPage';
 import StatusPage from './pages/StatusPage';
 import './styles/admin.scss';
 
@@ -11,6 +12,7 @@ const TABS = [
 	{ name: 'overview', title: __( 'Panoramica', 'wp-5w' ) },
 	{ name: 'posts', title: __( 'Articoli', 'wp-5w' ) },
 	{ name: 'audience', title: __( 'Visitatori', 'wp-5w' ) },
+	{ name: 'options', title: __( 'Opzioni', 'wp-5w' ) },
 	{ name: 'status', title: __( 'Stato', 'wp-5w' ) },
 ];
 
@@ -35,6 +37,7 @@ function App() {
 					const pages = {
 						posts: PostsPage,
 						audience: AudiencePage,
+						options: OptionsPage,
 						status: StatusPage,
 					};
 					const Page = pages[ tab.name ] ?? OverviewPage;

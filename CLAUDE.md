@@ -19,7 +19,7 @@ mkdir -p .wp-env-plugins && for z in wp-statistics.14.16.15 seo-by-rank-math.1.0
 
 npx wp-env start
 npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/seed.php     # dati sintetici
-npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php   # 11 controlli
+npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php   # schema v4, ETL, raccolta propria, opzioni
 ```
 
 ### Recupero dello storico di Search Console
@@ -35,10 +35,11 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 
 ## Struttura
 
-- `src/Sources/`: `Source` (controllo dello schema, `replace_by_month`), `WpStatisticsSource`, `RankMathSource`.
-- `src/Etl/`: `Importer` (lock, stato in `wp5w_etl_state`) e `Scheduler` (cron `wp5w_etl_daily` alle 4:00, `wp5w_etl_full` dopo l'attivazione).
+- `src/Sources/`: `Source` (controllo dello schema, `replace_by_month`), `WpStatisticsSource`, `RankMathSource` e `OwnSource` (aggrega `wp5w_hits` in righe `origin = 'own'`, con `run_hourly()`).
+- `src/Etl/`: `Importer` (lock, stato in `wp5w_etl_state`) e `Scheduler` (cron `wp5w_etl_daily` alle 4:00, `wp5w_own_hourly` ogni ora, `wp5w_etl_full` dopo l'attivazione).
+- `src/Front/Tracker.php` (script e blocco JSON `#wp5w-hit` nel frontend), `src/REST/HitController.php` (`POST /wp5w/v1/hit`), `src/Settings.php` (opzioni `wp5w_settings`, `wp5w_own_since`) e `assets/tracker/tracker.js` (seconda entry di webpack, `build/tracker/tracker.js`, limite di 1.536 byte controllato da `check-build.js`).
 - `src/Query/`: `OverviewQuery` (Panoramica), `PostsQuery` (elenchi Articoli e dettaglio del modale), `SearchQuery` (opportunità e pagine della Panoramica sugli ultimi N giorni disponibili, query delle keyword), `TrendQuery` (trend del sito e dei contenuti; `AdminController` lo aggiunge alle risposte con `attach()`) e `AudienceQuery` (Visitatori) leggono solo le tabelle `wp5w_*`.
-- `src/Support/`: `DateRange`, `Metrics`, `Series`, `Months`, `Trend` e `SchemaCheck` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
+- `src/Support/`: `DateRange`, `Metrics`, `Series`, `Months`, `Trend`, `SchemaCheck`, `Origin`, `BotFilter`, `Channels` e `Visit` sono classi pure senza guard ABSPATH, coperte da PHPUnit.
 - `assets/admin/`: app React (`@wordpress/components` + Chart.js con react-chartjs-2). I box a riga intera usano `components/Card.jsx` (riducibile, stato in `localStorage` con chiave `wp5w-card-<id>`).
 
 ## Punti da ricordare
@@ -55,5 +56,14 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 - **Collation diverse:** le tabelle di Rank Math sono `utf8mb4_general_ci`, quelle del plugin `utf8mb4_unicode_520_ci`. Niente JOIN su colonne di testo tra le due: si confronta in PHP o con gli hash MD5.
 - **Trend:** finestre di settimane complete (lunedì-domenica): il traffico fino a ieri, Search Console fino all'ultimo giorno disponibile, quindi le due finestre possono differire. Formula, pesi e soglie sono in `Support\Trend` (coperta da `TrendTest`).
 - **Confronti con il periodo precedente:** vanno mostrati solo se quel periodo è coperto dai dati (`SearchQuery` restituisce `comparable`), altrimenti escono variazioni del +9000%.
+- **Regola dell'origine:** le cinque tabelle aggregate (`site_daily`, `object_daily`, `entry_daily`, `referrer_daily`, `dim_daily`) hanno `origin` (`wps` o `own`) nella chiave primaria. Ogni lettura in `src/Query/` aggiunge `Origin::where( Settings::own_since(), <alias> )` (anche nelle subquery e in `MIN(day)` e `coverage()`), ma non su `gsc_daily`: controllo con `grep -n "site_daily\|object_daily\|entry_daily\|referrer_daily\|dim_daily" src/Query`. Le righe `wps` le scrive solo `WpStatisticsSource` e le `own` solo `OwnSource`, ognuna con `replace_by_month(..., " AND origin = '...'")`.
+- **Migrazione dello schema:** `dbDelta` non cambia le chiavi primarie, quindi `Schema::install()` fa prima un `ALTER TABLE` esplicito sotto `GET_LOCK( 'wp5w_schema_upgrade', 0 )` e rilegge la versione dal database. Se il lock è occupato non tocca nulla, nemmeno `wp5w_db_version`.
+- **L'hash del visitatore (`binary(16)`) passa sempre come esadecimale con `UNHEX(%s)`:** con byte grezzi `wpdb::query()` può togliere sequenze UTF-8 non valide e corrompere il valore.
+- **Utente collegato letto dal cookie nell'endpoint:** `wp_validate_auth_cookie( $_COOKIE[ LOGGED_IN_COOKIE ], 'logged_in' )`, perché una REST senza `X-WP-Nonce` viene riportata all'utente 0 e le pagine in cache non hanno un nonce valido. Serve solo a scartare la visita.
+- **`REMOTE_ADDR` e header `DNT` si leggono da `$_SERVER`,** mai da `X-Forwarded-For` (falsificabile) né da `$request->get_header()` (vuoto in `rest_do_request`).
+- **Il blocco `#wp5w-hit` si stampa a mano,** non con `wp_print_inline_script_tag`: con temi senza supporto html5 per gli script WordPress avvolge il contenuto in CDATA e il JSON non è più valido.
+- **Cache di LiteSpeed:** il TTL pubblico è di 7 giorni. Dopo il deploy, e quando cambiano `own_tracking` o `respect_dnt` (lo fa il salvataggio delle opzioni con `litespeed_purge_all`), le pagine in cache vanno svuotate; lo stesso se cambiano le salt di WordPress (la firma usa `wp_salt( 'auth' )`).
+- **Chiave del giorno:** `wp5w_daily_salt` si rigenera alla prima visita del giorno con un `UPDATE` condizionato al vecchio valore, così due richieste simultanee non creano due chiavi. Nessun transient in `wp_options` per le visite.
+- **`navigator.webdriver` vale vero con Playwright e Puppeteer:** per provare il beacon in un browser automatico va sovrascritto con uno script di init e va impostato uno user agent da browser (altrimenti `BotFilter` scarta la visita).
 - **Su Windows con Git Bash** usa `MSYS_NO_PATHCONV=1` per gli argomenti che iniziano con `/` (per esempio `wp rewrite structure`) e scrivi i JSON con backslash usando l'editor, non gli heredoc.
 - **Blog di produzione** (`maurizio.mavida.com`): WP-CLI richiede `--url=https://maurizio.mavida.com`.

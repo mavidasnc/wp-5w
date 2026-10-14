@@ -162,6 +162,13 @@
 	gap: 8px;
 }
 
+// Scheda Opzioni: i campi non devono allargarsi a tutta la riga.
+.wp5w-options {
+	.wp5w-card .components-base-control {
+		max-width: 560px;
+	}
+}
+
 // Scheda Articoli e dettaglio.
 .wp5w-card__head {
 	display: flex;

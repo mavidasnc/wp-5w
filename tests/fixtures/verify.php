@@ -565,6 +565,27 @@ $check(
 	$wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE '\\_transient\\_wp5w%' OR option_name LIKE '\\_transient\\_timeout\\_wp5w%'" )
 );
 
+// Tracker nel frontend: attivo sugli articoli, spento in anteprima, nei feed, negli embed e con la raccolta spenta
+// (il Customizer e la cache di LiteSpeed si provano a mano, vedi la PR).
+$tracker      = new Tracker();
+$track_query  = static function ( array $args ) use ( $tracker ): bool {
+	global $wp_query;
+	$saved    = $wp_query;
+	$wp_query = new WP_Query( $args ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Prova isolata, il valore originale viene ripristinato.
+	$result   = $tracker->should_track();
+	$wp_query = $saved; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Ripristino.
+	return $result;
+};
+wp_set_current_user( $admin_id );
+$check( 'tracker: articolo tracciato', true, $track_query( array( 'p' => $post_a ) ) );
+$check( 'tracker: anteprima non tracciata', false, $track_query( array( 'p' => $post_a, 'preview' => true ) ) );
+$check( 'tracker: feed non tracciato', false, $track_query( array( 'feed' => 'rss2' ) ) );
+$check( 'tracker: embed non tracciato', false, $track_query( array( 'p' => $post_a, 'embed' => true ) ) );
+update_option( Settings::OPTION, array( 'own_tracking' => false ) + Settings::defaults() );
+$check( 'tracker: raccolta spenta non tracciata', false, $track_query( array( 'p' => $post_a ) ) );
+update_option( Settings::OPTION, Settings::defaults() );
+wp_set_current_user( 0 );
+
 // ---------------------------------------------------------------------------
 // 6. Aggregazione oraria.
 // ---------------------------------------------------------------------------

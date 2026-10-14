@@ -2,6 +2,26 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.7.0] — 2026-10-14
+
+Fase 1 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): raccolta propria delle visite, in parallelo a WP Statistics e senza cambiare nessun numero dell'interfaccia (specifica in [docs/fasi/fase-1.md](docs/fasi/fase-1.md)).
+
+### Added
+- **Tracker** `build/tracker/tracker.js` (sotto 1,5 KB, senza dipendenze, senza cookie né `localStorage`): legge il blocco JSON `#wp5w-hit` stampato in `wp_footer` e invia la visita con `sendBeacon` (ripiego `fetch` con `keepalive`). Non parte con `navigator.webdriver`; con Do Not Track (opzione attiva) invia solo `dnt=1`.
+- **Endpoint pubblico** `POST /wp5w/v1/hit`, sempre `204`: scarta bot, DNT, firma errata, IP esclusi, utenti collegati (letti dal cookie di login, perché dalle pagine in cache non c'è un nonce) e oltre 30 visite al minuto per visitatore. Per una visita registrata fa una `SELECT` e una `INSERT`.
+- **Privacy:** nessun IP né user agent salvati; il visitatore è un hash `md5( ip . user_agent . chiave_del_giorno )` e la chiave (`wp5w_daily_salt`) si rigenera alla prima visita del giorno, sovrascrivendo la precedente.
+- **Tabelle** `wp5w_hits` (visite grezze) e `wp5w_discards` (scarti per giorno e motivo: `bot`, `user`, `dnt`, `rate`, `signature`, `ip`).
+- **Aggregazione** `Sources\OwnSource`: scrive righe `origin = 'own'` nelle cinque tabelle aggregate, con l'ETL notturno e con un passaggio orario (`wp5w_own_hourly`, ieri e oggi, lock proprio, senza toccare «Ultimo import»).
+- **Scheda Opzioni** (`/admin/settings`): raccolta propria, utenti collegati da escludere, IP esclusi (anche CIDR), Do Not Track, conservazione delle visite grezze (salvata ma non ancora applicata) e data di passaggio `wp5w_own_since`. La modifica di raccolta o DNT svuota la cache di LiteSpeed.
+- Classi pure con test PHPUnit: `Support\Origin`, `BotFilter`, `Channels`, `Visit`.
+
+### Changed
+- **Schema alla versione 4:** colonna `origin` (`wps` o `own`, ultima colonna della chiave primaria) nelle cinque tabelle aggregate; migrazione con `ALTER TABLE` esplicito e idempotente sotto un lock MySQL (`dbDelta` non cambia le chiavi primarie).
+- **Regola dell'origine:** tutte le interrogazioni in `src/Query/` leggono le righe `wps`, e `own` solo dal giorno di `wp5w_own_since`; finché è vuota i numeri sono quelli di prima. La scheda Stato mostra la copertura con la stessa regola.
+- L'ETL di WP Statistics scrive e cancella solo righe `wps`.
+- Panoramica: i canali con gli stessi visitatori si ordinano per nome, così l'ordine è stabile.
+- `verify.php` copre schema, migrazione da v3, visite simulate, aggregazione, non regressione e opzioni.
+
 ## [0.6.0] — 2026-10-14
 
 ### Added
