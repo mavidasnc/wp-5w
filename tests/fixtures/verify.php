@@ -198,7 +198,7 @@ remove_filter( 'query', $count_alters );
 $check( 'install() rieseguito: nessun errore', '', $wpdb->last_error );
 $check( 'install() rieseguito: nessun ALTER', 0, $alters );
 $check( 'install() rieseguito: versione 4', '4', get_option( 'wp5w_db_version' ) );
-$check( 'install() rieseguito: SHOW CREATE TABLE identico', $create_before, $show_create() );
+$check( 'install() rieseguito: SHOW CREATE TABLE identico', md5( $create_before ), md5( $show_create() ) );
 
 // ---------------------------------------------------------------------------
 // 3. Controlli esistenti dell'ETL di WP Statistics e Rank Math (somme sulle sole righe wps).
@@ -327,9 +327,14 @@ $seed_posts = array_map(
 			'orderby'     => 'ID',
 			'order'       => 'ASC',
 			'fields'      => 'ids',
+			// Gli articoli del seed (su un dump reale non esistono: si ripiega sui primi articoli pubblicati).
+			'post_name__in' => array( 'calendario-2006', 'blocksy-tema', 'php-solutions', 'uscito-oggi' ),
 		)
 	)
 );
+if ( ! $seed_posts ) {
+	$seed_posts = array_map( 'intval', get_posts( array( 'post_type' => 'post', 'post_status' => 'publish', 'numberposts' => 4, 'orderby' => 'ID', 'order' => 'ASC', 'fields' => 'ids' ) ) );
+}
 $post_a     = $seed_posts[0] ?? 1;
 $post_b     = $seed_posts[1] ?? 2;
 

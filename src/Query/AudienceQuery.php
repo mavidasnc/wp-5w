@@ -128,7 +128,7 @@ final class AudienceQuery {
 				'SELECT referrer, MAX(source) AS source, MAX(channel) AS channel, SUM(visitors) AS visitors,
 					COUNT(DISTINCT object_type, object_id) AS contents
 				FROM ' . Schema::table( 'referrer_daily' ) . ' WHERE day BETWEEN %s AND %s AND ' . $origin . '
-				GROUP BY referrer ORDER BY visitors DESC LIMIT %d',
+				GROUP BY referrer ORDER BY visitors DESC, referrer LIMIT %d',
 				$range->from,
 				$range->to,
 				self::LIMIT
