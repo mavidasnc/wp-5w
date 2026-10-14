@@ -14,13 +14,16 @@ use Mavida\FiveW\Cli\Command;
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
+use Mavida\FiveW\Front\Tracker;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\REST\AdminController;
+use Mavida\FiveW\REST\HitController;
 use Mavida\FiveW\REST\RestController;
+use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Sources\RankMathSource;
 use Mavida\FiveW\Sources\WpStatisticsSource;
 use Mavida\FiveW\Support\Updater;
@@ -69,7 +72,7 @@ final class Plugin {
 	 * @return Importer
 	 */
 	public static function importer(): Importer {
-		return new Importer( array( new WpStatisticsSource(), new RankMathSource() ) );
+		return new Importer( array( new WpStatisticsSource(), new RankMathSource(), new OwnSource() ) );
 	}
 
 	/**
@@ -92,6 +95,9 @@ final class Plugin {
 		// Aggiorna lo schema del database se la versione è cambiata.
 		Schema::register();
 
+		// Impostazioni della raccolta propria (register_setting su init).
+		Settings::register();
+
 		$importer = self::importer();
 
 		// ETL giornaliero e import iniziale in background.
@@ -101,6 +107,12 @@ final class Plugin {
 		add_filter( 'rest_post_dispatch', array( RestController::class, 'no_cache' ), 10, 3 );
 		$search = new SearchQuery();
 		( new AdminController( $importer, new OverviewQuery(), new PostsQuery(), $search, new AudienceQuery( $search ), new TrendQuery() ) )->register();
+
+		// Raccolta propria: endpoint pubblico delle visite e tracker nel frontend.
+		( new HitController() )->register();
+		if ( ! is_admin() ) {
+			( new Tracker() )->register();
+		}
 
 		if ( is_admin() ) {
 			( new AdminMenu() )->register();

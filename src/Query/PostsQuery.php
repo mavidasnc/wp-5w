@@ -10,8 +10,10 @@ declare(strict_types=1);
 namespace Mavida\FiveW\Query;
 
 use Mavida\FiveW\Database\Schema;
+use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Metrics;
+use Mavida\FiveW\Support\Origin;
 use Mavida\FiveW\Support\Series;
 
 defined( 'ABSPATH' ) || exit;
@@ -95,13 +97,15 @@ final class PostsQuery {
 	public function top( int $days ): array {
 		global $wpdb;
 
+		// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
+		$origin = Origin::where( Settings::own_since() );
 		$period = DateRange::last_days( $days, wp_date( 'Y-m-d' ) );
 		$ids    = array_map(
 			'intval',
 			$wpdb->get_col(
 				$wpdb->prepare(
 					'SELECT object_id FROM ' . Schema::table( 'object_daily' ) . "
-					WHERE object_type = 'post' AND object_id > 0 AND day BETWEEN %s AND %s
+					WHERE object_type = 'post' AND object_id > 0 AND day BETWEEN %s AND %s AND {$origin}
 					GROUP BY object_id ORDER BY SUM(views) DESC LIMIT %d",
 					$period->from,
 					$period->to,
@@ -150,11 +154,14 @@ final class PostsQuery {
 		$gsc      = Schema::table( 'gsc_daily' );
 		$referrer = Schema::table( 'referrer_daily' );
 
+		// Regola dell'origine per le tabelle del traffico (non per gsc_daily).
+		$origin = Origin::where( Settings::own_since() );
+
 		// Visualizzazioni e visitatori per giorno.
 		$traffic = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT day, SUM(views) AS views, SUM(visitors) AS visitors FROM {$object}
-				WHERE object_type = %s AND object_id = %d AND day BETWEEN %s AND %s GROUP BY day",
+				WHERE object_type = %s AND object_id = %d AND day BETWEEN %s AND %s AND {$origin} GROUP BY day",
 				$type,
 				$id,
 				$range->from,
@@ -187,7 +194,7 @@ final class PostsQuery {
 		$channels = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT channel, SUM(visitors) AS visitors FROM {$entry}
-				WHERE object_type = %s AND object_id = %d AND day BETWEEN %s AND %s
+				WHERE object_type = %s AND object_id = %d AND day BETWEEN %s AND %s AND {$origin}
 				GROUP BY channel ORDER BY visitors DESC",
 				$type,
 				$id,
@@ -214,7 +221,7 @@ final class PostsQuery {
 		$referrers = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT referrer, MAX(channel) AS channel, MAX(source) AS source, SUM(visitors) AS visitors FROM {$referrer}
-				WHERE object_type = %s AND object_id = %d AND day BETWEEN %s AND %s
+				WHERE object_type = %s AND object_id = %d AND day BETWEEN %s AND %s AND {$origin}
 				GROUP BY referrer ORDER BY visitors DESC LIMIT 30",
 				$type,
 				$id,
@@ -326,10 +333,11 @@ final class PostsQuery {
 		global $wpdb;
 
 		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$origin       = Origin::where( Settings::own_since() ); // Regola dell'origine.
 		$rows         = $wpdb->get_results(
 			$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Segnaposto %d generati per ogni id.
 				'SELECT object_id, day, SUM(views) AS views, SUM(visitors) AS visitors FROM ' . Schema::table( 'object_daily' ) . "
-				WHERE object_type = 'post' AND object_id IN ({$placeholders}) AND day BETWEEN %s AND %s
+				WHERE object_type = 'post' AND object_id IN ({$placeholders}) AND day BETWEEN %s AND %s AND {$origin}
 				GROUP BY object_id, day",
 				array_merge( $ids, array( $range->from, $range->to ) )
 			),
@@ -357,10 +365,11 @@ final class PostsQuery {
 		global $wpdb;
 
 		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$origin       = Origin::where( Settings::own_since() ); // Regola dell'origine.
 		$rows         = $wpdb->get_results(
 			$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Segnaposto %d generati per ogni id.
 				'SELECT object_id, SUM(views) AS views, SUM(visitors) AS visitors FROM ' . Schema::table( 'object_daily' ) . "
-				WHERE object_type = 'post' AND object_id IN ({$placeholders}) AND day BETWEEN %s AND %s
+				WHERE object_type = 'post' AND object_id IN ({$placeholders}) AND day BETWEEN %s AND %s AND {$origin}
 				GROUP BY object_id",
 				array_merge( $ids, array( $range->from, $range->to ) )
 			),
@@ -384,7 +393,7 @@ final class PostsQuery {
 	 */
 	private function first_day(): ?string {
 		global $wpdb;
-		$day = $wpdb->get_var( 'SELECT MIN(day) FROM ' . Schema::table( 'object_daily' ) );
+		$day = $wpdb->get_var( 'SELECT MIN(day) FROM ' . Schema::table( 'object_daily' ) . ' WHERE ' . Origin::where( Settings::own_since() ) );
 		return $day ? (string) $day : null;
 	}
 }

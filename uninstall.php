@@ -17,6 +17,10 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 // Gli eventi cron si tolgono sempre.
 wp_clear_scheduled_hook( 'wp5w_etl_daily' );
 wp_clear_scheduled_hook( 'wp5w_etl_full' );
+wp_clear_scheduled_hook( 'wp5w_own_hourly' );
+
+// La chiave del giorno dell'hash dei visitatori si toglie sempre, anche senza WP5W_DELETE_DATA.
+delete_option( 'wp5w_daily_salt' );
 
 if ( ! defined( 'WP5W_DELETE_DATA' ) || ! WP5W_DELETE_DATA ) {
 	return;
@@ -25,9 +29,11 @@ if ( ! defined( 'WP5W_DELETE_DATA' ) || ! WP5W_DELETE_DATA ) {
 global $wpdb;
 
 // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-foreach ( array( 'site_daily', 'object_daily', 'entry_daily', 'referrer_daily', 'dim_daily', 'gsc_daily' ) as $wp5w_table ) {
+foreach ( array( 'site_daily', 'object_daily', 'entry_daily', 'referrer_daily', 'dim_daily', 'gsc_daily', 'hits', 'discards' ) as $wp5w_table ) {
 	$wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}wp5w_{$wp5w_table}" );
 }
 
 delete_option( 'wp5w_db_version' );
 delete_option( 'wp5w_etl_state' );
+delete_option( 'wp5w_settings' );
+delete_option( 'wp5w_own_since' );

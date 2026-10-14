@@ -10,8 +10,10 @@ declare(strict_types=1);
 namespace Mavida\FiveW\Query;
 
 use Mavida\FiveW\Database\Schema;
+use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Metrics;
+use Mavida\FiveW\Support\Origin;
 use Mavida\FiveW\Support\Series;
 
 defined( 'ABSPATH' ) || exit;
@@ -81,9 +83,12 @@ final class OverviewQuery {
 	private function totals( DateRange $range ): array {
 		global $wpdb;
 
+		// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
+		$origin = Origin::where( Settings::own_since() );
+
 		$site = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT COALESCE(SUM(visitors), 0) AS visitors, COALESCE(SUM(views), 0) AS views FROM ' . Schema::table( 'site_daily' ) . ' WHERE day BETWEEN %s AND %s',
+				'SELECT COALESCE(SUM(visitors), 0) AS visitors, COALESCE(SUM(views), 0) AS views FROM ' . Schema::table( 'site_daily' ) . ' WHERE day BETWEEN %s AND %s AND ' . $origin,
 				$range->from,
 				$range->to
 			)
@@ -118,8 +123,11 @@ final class OverviewQuery {
 	private function series( DateRange $range ): array {
 		global $wpdb;
 
+		// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
+		$origin = Origin::where( Settings::own_since() );
+
 		$site = $wpdb->get_results(
-			$wpdb->prepare( 'SELECT day, visitors, views FROM ' . Schema::table( 'site_daily' ) . ' WHERE day BETWEEN %s AND %s', $range->from, $range->to ),
+			$wpdb->prepare( 'SELECT day, visitors, views FROM ' . Schema::table( 'site_daily' ) . ' WHERE day BETWEEN %s AND %s AND ' . $origin, $range->from, $range->to ),
 			OBJECT_K
 		);
 		$gsc  = $wpdb->get_results(
@@ -148,9 +156,12 @@ final class OverviewQuery {
 	private function channels( DateRange $range ): array {
 		global $wpdb;
 
+		// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
+		$origin = Origin::where( Settings::own_since() );
+
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT value AS channel, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day BETWEEN %s AND %s GROUP BY value ORDER BY visitors DESC",
+				'SELECT value AS channel, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day BETWEEN %s AND %s AND {$origin} GROUP BY value ORDER BY visitors DESC, value",
 				$range->from,
 				$range->to
 			),
@@ -183,14 +194,19 @@ final class OverviewQuery {
 		$filter = self::TOP_TYPES[ $type ] ?? self::TOP_TYPES['all'];
 		$limit  = in_array( $limit, self::TOP_LIMITS, true ) ? $limit : self::TOP_LIMITS[0];
 
+		// Regola dell'origine, con l'alias della tabella: o per object_daily, e per entry_daily nelle due subquery.
+		$own_since = Settings::own_since();
+		$origin_o  = Origin::where( $own_since, 'o' );
+		$origin_e  = Origin::where( $own_since, 'e' );
+
 		// Solo contenuti veri (id > 0).
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT o.object_type, o.object_id, MIN(o.uri) AS uri, SUM(o.views) AS views,
-					( SELECT COALESCE(SUM(e.visitors), 0) FROM {$entry} e WHERE e.object_type = o.object_type AND e.object_id = o.object_id AND e.channel = 'search' AND e.day BETWEEN %s AND %s ) AS search_entries,
-					( SELECT COALESCE(SUM(e.visitors), 0) FROM {$entry} e WHERE e.object_type = o.object_type AND e.object_id = o.object_id AND e.day BETWEEN %s AND %s ) AS entries
+					( SELECT COALESCE(SUM(e.visitors), 0) FROM {$entry} e WHERE e.object_type = o.object_type AND e.object_id = o.object_id AND e.channel = 'search' AND e.day BETWEEN %s AND %s AND {$origin_e} ) AS search_entries,
+					( SELECT COALESCE(SUM(e.visitors), 0) FROM {$entry} e WHERE e.object_type = o.object_type AND e.object_id = o.object_id AND e.day BETWEEN %s AND %s AND {$origin_e} ) AS entries
 				FROM {$object} o
-				WHERE o.day BETWEEN %s AND %s AND o.object_id > 0 AND {$filter}
+				WHERE o.day BETWEEN %s AND %s AND o.object_id > 0 AND {$filter} AND {$origin_o}
 				GROUP BY o.object_type, o.object_id
 				ORDER BY views DESC
 				LIMIT %d",
@@ -255,9 +271,12 @@ final class OverviewQuery {
 	public function coverage(): array {
 		global $wpdb;
 
-		$coverage = array();
+		$own_since = Settings::own_since();
+		$coverage  = array();
 		foreach ( Schema::TABLES as $name ) {
-			$row               = $wpdb->get_row( 'SELECT MIN(day) AS d_from, MAX(day) AS d_to, COUNT(*) AS n FROM ' . Schema::table( $name ) );
+			// Le cinque tabelle aggregate seguono la regola dell'origine, gsc_daily no (la sua origin ha un altro significato).
+			$where             = in_array( $name, Origin::TABLES, true ) ? ' WHERE ' . Origin::where( $own_since ) : '';
+			$row               = $wpdb->get_row( 'SELECT MIN(day) AS d_from, MAX(day) AS d_to, COUNT(*) AS n FROM ' . Schema::table( $name ) . $where );
 			$coverage[ $name ] = array(
 				'from' => $row->d_from ?? null,
 				'to'   => $row->d_to ?? null,

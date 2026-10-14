@@ -10,8 +10,10 @@ declare(strict_types=1);
 namespace Mavida\FiveW\Query;
 
 use Mavida\FiveW\Database\Schema;
+use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Metrics;
+use Mavida\FiveW\Support\Origin;
 use Mavida\FiveW\Support\Trend;
 
 defined( 'ABSPATH' ) || exit;
@@ -44,11 +46,12 @@ final class TrendQuery {
 
 		[ $traffic, $gsc ] = $this->windows();
 		$site              = Schema::table( 'site_daily' );
+		$origin            = Origin::where( Settings::own_since() ); // Regola dell'origine.
 		$values            = array();
 		foreach ( array( 'current', 'previous' ) as $period ) {
 			$values[ $period ] = array(
 				'visitors' => (int) $wpdb->get_var(
-					$wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$site} WHERE day BETWEEN %s AND %s", $traffic[ $period ]->from, $traffic[ $period ]->to )
+					$wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$site} WHERE day BETWEEN %s AND %s AND {$origin}", $traffic[ $period ]->from, $traffic[ $period ]->to )
 				),
 			) + $this->site_gsc( $gsc[ $period ] ?? null );
 		}
@@ -72,12 +75,13 @@ final class TrendQuery {
 
 		[ $traffic, $gsc ] = $this->windows();
 		$placeholders      = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$origin            = Origin::where( Settings::own_since() ); // Regola dell'origine (solo su object_daily).
 		$data              = array();
 		foreach ( array( 'current', 'previous' ) as $period ) {
 			$data[ $period ]['visitors'] = $wpdb->get_results(
 				$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Segnaposto %d generati per ogni id.
 					'SELECT object_id, SUM(visitors) AS visitors FROM ' . Schema::table( 'object_daily' ) . '
-					WHERE day BETWEEN %s AND %s AND ' . self::POST_TYPES . " AND object_id IN ({$placeholders}) GROUP BY object_id",
+					WHERE day BETWEEN %s AND %s AND ' . self::POST_TYPES . " AND {$origin} AND object_id IN ({$placeholders}) GROUP BY object_id",
 					array_merge( array( $traffic[ $period ]->from, $traffic[ $period ]->to ), $ids )
 				),
 				OBJECT_K

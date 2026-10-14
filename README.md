@@ -1,6 +1,6 @@
 # wp-5w
 
-Dashboard di analytics in wp-admin che incrocia i dati già raccolti da **WP Statistics** (traffico) e da **Rank Math Analytics** (Google Search Console), senza aggiungere tracciamento, cookie o servizi esterni.
+Dashboard di analytics in wp-admin che incrocia i dati già raccolti da **WP Statistics** (traffico) e da **Rank Math Analytics** (Google Search Console), senza servizi esterni. Dalla 0.7.0 raccoglie anche le visite da sé, senza cookie e senza salvare IP, in parallelo a WP Statistics (vedi [la roadmap](docs/roadmap-sostituzione-wp-statistics.md)): finché non si imposta la data di passaggio, l'interfaccia mostra solo i dati di WP Statistics.
 
 Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegare le fonti per singolo contenuto, cioè quante visite riceve un articolo, da dove arrivano e con quali ricerche su Google.
 
@@ -20,6 +20,11 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
   - **Visitatori:** ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), provenienze e keyword degli ultimi 7 giorni.
   - I box a riga intera si riducono con un toggle, che resta memorizzato nel browser.
   - **Stato:** sorgenti, copertura delle tabelle, ultimo import, avvio manuale.
+- **Raccolta propria (dalla 0.7.0):**
+  - **Tracker** di meno di 1,5 KB, in `defer`, che funziona anche con le pagine in cache: invia la visita a `POST /wp5w/v1/hit` con `sendBeacon`. Nessun cookie, nessun `localStorage`, nessun IP o user agent salvato (il visitatore è un hash che cambia ogni giorno).
+  - **Esclusioni:** bot e crawler, browser automatici, Do Not Track, amministratori (o tutti gli utenti collegati), IP e intervalli CIDR, oltre 30 visite al minuto per visitatore. Gli scarti si contano per giorno e motivo.
+  - **Scheda Opzioni** per raccolta, utenti, IP, DNT, conservazione e data di passaggio (`wp5w_own_since`).
+  - Le righe si distinguono con la colonna `origin` (`wps` o `own`) nelle tabelle aggregate.
 - **Comandi WP-CLI:** `wp 5w status`, `wp 5w etl [--full] [--from=] [--to=]` e `wp 5w gsc-import <file.jsonl>`.
 - **Recupero dello storico di Search Console** dall'API (fino a 16 mesi) con `scripts/gsc-backfill.py`: le credenziali Google restano sul computer, sul server arriva solo il file dei dati.
 - **Aggiornamenti automatici** dalle release di GitHub.
@@ -33,7 +38,11 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 | `wp5w_entry_daily` | Visitatori entrati da un contenuto, per canale | `statistics_visitor.first_page` → `statistics_pages` |
 | `wp5w_referrer_daily` | Siti di provenienza (host) di chi entra da un contenuto | `statistics_visitor.referred` |
 | `wp5w_dim_daily` | Visitatori per paese, device, browser, sistema, canale e sorgente | `statistics_visitor` |
+| `wp5w_hits` | Visite grezze della raccolta propria (hash del visitatore, contenuto, URI, referrer, canale, UTM, ingresso): niente IP né user agent | Tracker del plugin |
+| `wp5w_discards` | Visite scartate per giorno e motivo (`bot`, `user`, `dnt`, `rate`, `signature`, `ip`) | Endpoint `/hit` |
 | `wp5w_gsc_daily` | Click, impression e posizione per giorno, pagina e query; `origin` rankmath o api | `rank_math_analytics_gsc` oppure l'API di Search Console (backfill), collegata ai contenuti tramite `rank_math_analytics_objects` o `url_to_postid()` |
+
+Le cinque tabelle del traffico hanno la colonna `origin`: `wps` per le righe importate da WP Statistics, `own` per quelle della raccolta propria. Le interrogazioni usano `wps` prima di `wp5w_own_since` e `own` da quel giorno in poi (data vuota: solo `wps`).
 
 La posizione media si calcola sempre come `SUM(pos_x_impr) / SUM(impressions)`, cioè pesata sulle impression come in Search Console.
 
@@ -55,7 +64,7 @@ All'attivazione l'import completo parte da solo dopo un minuto; con WP-CLI lo si
 
 ## Disinstallazione
 
-Le tabelle `wp5w_*` sono spesso l'unica copia dello storico, quindi la disinstallazione **non le cancella**. Per eliminarle, definisci `WP5W_DELETE_DATA` a `true` in `wp-config.php` prima di disinstallare.
+Le tabelle `wp5w_*` sono spesso l'unica copia dello storico, quindi la disinstallazione **non le cancella**. Per eliminarle (comprese `wp5w_hits` e `wp5w_discards`) e togliere le opzioni `wp5w_settings`, `wp5w_own_since` e `wp5w_daily_salt`, definisci `WP5W_DELETE_DATA` a `true` in `wp-config.php` prima di disinstallare.
 
 ## Sviluppo
 

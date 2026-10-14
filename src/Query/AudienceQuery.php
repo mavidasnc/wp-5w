@@ -10,8 +10,10 @@ declare(strict_types=1);
 namespace Mavida\FiveW\Query;
 
 use Mavida\FiveW\Database\Schema;
+use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Months;
+use Mavida\FiveW\Support\Origin;
 use Mavida\FiveW\Support\Series;
 
 defined( 'ABSPATH' ) || exit;
@@ -57,12 +59,15 @@ final class AudienceQuery {
 		$half  = new DateRange( Months::first_day( $today, self::MONTHS ), $today );
 		$site  = Schema::table( 'site_daily' );
 
+		// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
+		$origin = Origin::where( Settings::own_since() );
+
 		$week_rows = $wpdb->get_results(
-			$wpdb->prepare( "SELECT day, visitors, views FROM {$site} WHERE day BETWEEN %s AND %s", $week->from, $week->to ),
+			$wpdb->prepare( "SELECT day, visitors, views FROM {$site} WHERE day BETWEEN %s AND %s AND {$origin}", $week->from, $week->to ),
 			OBJECT_K
 		);
 		$half_rows = $wpdb->get_results(
-			$wpdb->prepare( "SELECT day, visitors, views FROM {$site} WHERE day BETWEEN %s AND %s", $half->from, $half->to ),
+			$wpdb->prepare( "SELECT day, visitors, views FROM {$site} WHERE day BETWEEN %s AND %s AND {$origin}", $half->from, $half->to ),
 			ARRAY_A
 		);
 
@@ -115,12 +120,15 @@ final class AudienceQuery {
 	private function referrers( DateRange $range ): array {
 		global $wpdb;
 
+		// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
+		$origin = Origin::where( Settings::own_since() );
+
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
 				'SELECT referrer, MAX(source) AS source, MAX(channel) AS channel, SUM(visitors) AS visitors,
 					COUNT(DISTINCT object_type, object_id) AS contents
-				FROM ' . Schema::table( 'referrer_daily' ) . ' WHERE day BETWEEN %s AND %s
-				GROUP BY referrer ORDER BY visitors DESC LIMIT %d',
+				FROM ' . Schema::table( 'referrer_daily' ) . ' WHERE day BETWEEN %s AND %s AND ' . $origin . '
+				GROUP BY referrer ORDER BY visitors DESC, referrer LIMIT %d',
 				$range->from,
 				$range->to,
 				self::LIMIT

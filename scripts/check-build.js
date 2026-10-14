@@ -19,7 +19,7 @@ const exists = ( rel ) => fs.existsSync( path.join( ROOT, rel ) );
 const nonEmpty = ( rel ) => exists( rel ) && fs.statSync( path.join( ROOT, rel ) ).size > 0;
 
 // 1) File attesi dopo la build.
-[ 'build/admin/index.js', 'build/admin/index.css', 'build/admin/index.asset.php' ].forEach( ( file ) => {
+[ 'build/admin/index.js', 'build/admin/index.css', 'build/admin/index.asset.php', 'build/tracker/tracker.js' ].forEach( ( file ) => {
 	if ( ! nonEmpty( file ) ) {
 		errors.push( `File compilato mancante o vuoto: ${ file }` );
 	}
@@ -56,6 +56,19 @@ const adminMenu = fs.readFileSync( path.join( ROOT, 'src/Admin/AdminMenu.php' ),
 		errors.push( `src/Admin/AdminMenu.php non aggancia ${ file }` );
 	}
 } );
+
+// 4) Il tracker del frontend deve restare leggero (viene scaricato a ogni visita) ed essere agganciato da Front\Tracker.
+const TRACKER_MAX_BYTES = 1536;
+if ( exists( 'build/tracker/tracker.js' ) ) {
+	const size = fs.statSync( path.join( ROOT, 'build/tracker/tracker.js' ) ).size;
+	if ( size >= TRACKER_MAX_BYTES ) {
+		errors.push( `build/tracker/tracker.js pesa ${ size } byte: il limite è ${ TRACKER_MAX_BYTES }` );
+	}
+}
+const tracker = fs.readFileSync( path.join( ROOT, 'src/Front/Tracker.php' ), 'utf8' );
+if ( ! tracker.includes( `'build/tracker/tracker.js'` ) ) {
+	errors.push( `src/Front/Tracker.php non aggancia build/tracker/tracker.js` );
+}
 
 if ( errors.length ) {
 	console.error( '\x1b[31m✗ Controllo dei file compilati fallito:\x1b[0m' );

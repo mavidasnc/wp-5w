@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Mavida\FiveW\Etl;
 
+use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Support\DateRange;
 
 defined( 'ABSPATH' ) || exit;
@@ -33,6 +34,13 @@ final class Scheduler {
 	public const FULL_HOOK = 'wp5w_etl_full';
 
 	/**
+	 * Hook del passaggio orario che aggrega le visite della raccolta propria (ieri e oggi).
+	 *
+	 * @var string
+	 */
+	public const OWN_HOURLY_HOOK = 'wp5w_own_hourly';
+
+	/**
 	 * Giorni rielaborati ogni notte: coprono il ritardo di 2-3 giorni di Search Console.
 	 *
 	 * @var int
@@ -47,18 +55,24 @@ final class Scheduler {
 	public function __construct( private readonly Importer $importer ) {}
 
 	/**
-	 * Aggancia gli eventi e pianifica quello giornaliero se manca.
+	 * Aggancia gli eventi e pianifica quelli ricorrenti (giornaliero e orario) se mancano.
 	 *
 	 * @return void
 	 */
 	public function register(): void {
 		add_action( self::DAILY_HOOK, array( $this, 'run_daily' ) );
 		add_action( self::FULL_HOOK, array( $this, 'run_full' ) );
+		add_action( self::OWN_HOURLY_HOOK, static fn() => ( new OwnSource() )->run_hourly() );
 
 		// Alle 4:00 del sito: dopo le manutenzioni notturne di WP Statistics e Rank Math.
 		if ( ! wp_next_scheduled( self::DAILY_HOOK ) ) {
 			$next = new \DateTimeImmutable( 'tomorrow 04:00', wp_timezone() );
 			wp_schedule_event( $next->getTimestamp(), 'daily', self::DAILY_HOOK );
+		}
+
+		// Aggregazione oraria della raccolta propria: ieri si chiude entro un'ora dalla mezzanotte, senza aspettare le 4:00.
+		if ( ! wp_next_scheduled( self::OWN_HOURLY_HOOK ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', self::OWN_HOURLY_HOOK );
 		}
 	}
 

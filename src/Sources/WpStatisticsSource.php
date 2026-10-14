@@ -24,6 +24,8 @@ defined( 'ABSPATH' ) || exit;
  * - statistics_visitor: un visitatore per giorno, con sorgente, paese, device e pagina d'ingresso.
  *
  * Gli IP (già anonimizzati con hash da WP Statistics) non vengono mai copiati.
+ *
+ * Scrive e cancella solo righe con origin = 'wps': le righe 'own' della raccolta propria non si toccano mai.
  */
 final class WpStatisticsSource extends Source {
 
@@ -114,8 +116,8 @@ final class WpStatisticsSource extends Source {
 		if ( $scope ) {
 			$rows += (int) $wpdb->query(
 				$wpdb->prepare(
-					"INSERT INTO {$target} (day, views)
-					SELECT date, SUM(count) FROM {$pages} WHERE date BETWEEN %s AND %s GROUP BY date
+					"INSERT INTO {$target} (day, views, origin)
+					SELECT date, SUM(count), 'wps' FROM {$pages} WHERE date BETWEEN %s AND %s GROUP BY date
 					ON DUPLICATE KEY UPDATE views = VALUES(views)",
 					$scope->from,
 					$scope->to
@@ -123,8 +125,8 @@ final class WpStatisticsSource extends Source {
 			);
 			$rows += (int) $wpdb->query(
 				$wpdb->prepare(
-					"INSERT INTO {$target} (day, visitors)
-					SELECT last_counter, COUNT(*) FROM {$visitor} WHERE last_counter BETWEEN %s AND %s GROUP BY last_counter
+					"INSERT INTO {$target} (day, visitors, origin)
+					SELECT last_counter, COUNT(*), 'wps' FROM {$visitor} WHERE last_counter BETWEEN %s AND %s GROUP BY last_counter
 					ON DUPLICATE KEY UPDATE visitors = VALUES(visitors)",
 					$scope->from,
 					$scope->to
@@ -135,8 +137,8 @@ final class WpStatisticsSource extends Source {
 		// I giorni a zero (es. 2017-2022 sul blog) sono buchi di raccolta, non traffico nullo: si saltano.
 		$rows += (int) $wpdb->query(
 			$wpdb->prepare(
-				"INSERT INTO {$target} (day, visitors, views)
-				SELECT date, visitors, views FROM {$summary}
+				"INSERT INTO {$target} (day, visitors, views, origin)
+				SELECT date, visitors, views, 'wps' FROM {$summary}
 				WHERE date BETWEEN %s AND %s AND ( visitors > 0 OR views > 0 )
 				ON DUPLICATE KEY UPDATE visitors = VALUES(visitors), views = VALUES(views)",
 				$range->from,
@@ -163,7 +165,7 @@ final class WpStatisticsSource extends Source {
 			'object_daily',
 			$range,
 			$this->data_range( 'statistics_pages', 'date' ),
-			"SELECT a.day, a.object_type, a.object_id, a.uri, a.views, COALESCE(b.visitors, 0)
+			"SELECT a.day, a.object_type, a.object_id, a.uri, a.views, COALESCE(b.visitors, 0), 'wps'
 			FROM (
 				SELECT date AS day, LEFT(type, 40) AS object_type, id AS object_id, MIN(uri) AS uri, SUM(count) AS views
 				FROM {$pages} WHERE date BETWEEN %s AND %s
@@ -175,7 +177,8 @@ final class WpStatisticsSource extends Source {
 				WHERE r.date >= %s AND r.date < DATE_ADD(%s, INTERVAL 1 DAY)
 				GROUP BY DATE(r.date), p.type, p.id
 			) b ON b.day = a.day AND b.object_type = a.object_type AND b.object_id = a.object_id",
-			'day, object_type, object_id, uri, views, visitors'
+			'day, object_type, object_id, uri, views, visitors, origin',
+			" AND origin = 'wps'"
 		);
 	}
 
@@ -196,11 +199,12 @@ final class WpStatisticsSource extends Source {
 			$range,
 			$this->data_range( 'statistics_visitor', 'last_counter' ),
 			"SELECT v.last_counter, LEFT(p.type, 40), p.id, LEFT(v.referred, 190),
-				COALESCE(MAX(v.source_channel), ''), COALESCE(MAX(v.source_name), ''), COUNT(*)
+				COALESCE(MAX(v.source_channel), ''), COALESCE(MAX(v.source_name), ''), COUNT(*), 'wps'
 			FROM {$visitor} v JOIN {$pages} p ON p.page_id = v.first_page
 			WHERE v.last_counter BETWEEN %s AND %s AND v.referred <> ''
 			GROUP BY v.last_counter, p.type, p.id, 4",
-			'day, object_type, object_id, referrer, channel, source, visitors'
+			'day, object_type, object_id, referrer, channel, source, visitors, origin',
+			" AND origin = 'wps'"
 		);
 	}
 
@@ -220,11 +224,12 @@ final class WpStatisticsSource extends Source {
 			'entry_daily',
 			$range,
 			$this->data_range( 'statistics_visitor', 'last_counter' ),
-			"SELECT v.last_counter, LEFT(p.type, 40), p.id, COALESCE(NULLIF(v.source_channel, ''), 'unassigned'), COUNT(*)
+			"SELECT v.last_counter, LEFT(p.type, 40), p.id, COALESCE(NULLIF(v.source_channel, ''), 'unassigned'), COUNT(*), 'wps'
 			FROM {$visitor} v JOIN {$pages} p ON p.page_id = v.first_page
 			WHERE v.last_counter BETWEEN %s AND %s
 			GROUP BY v.last_counter, p.type, p.id, 4",
-			'day, object_type, object_id, channel, visitors'
+			'day, object_type, object_id, channel, visitors, origin',
+			" AND origin = 'wps'"
 		);
 	}
 
@@ -240,7 +245,7 @@ final class WpStatisticsSource extends Source {
 		// Una SELECT per dimensione, unite: così ogni mese si sostituisce in un'unica transazione.
 		$parts = array();
 		foreach ( self::DIMENSIONS as $dim => $column ) {
-			$parts[] = "SELECT last_counter AS day, '{$dim}' AS dim, LEFT(COALESCE(NULLIF({$column}, ''), '(n/d)'), 100) AS value, COUNT(*) AS visitors
+			$parts[] = "SELECT last_counter AS day, '{$dim}' AS dim, LEFT(COALESCE(NULLIF({$column}, ''), '(n/d)'), 100) AS value, COUNT(*) AS visitors, 'wps' AS origin
 				FROM {$visitor} WHERE last_counter BETWEEN %s AND %s GROUP BY last_counter, 3";
 		}
 
@@ -249,7 +254,8 @@ final class WpStatisticsSource extends Source {
 			$range,
 			$this->data_range( 'statistics_visitor', 'last_counter' ),
 			implode( ' UNION ALL ', $parts ),
-			'day, dim, value, visitors'
+			'day, dim, value, visitors, origin',
+			" AND origin = 'wps'"
 		);
 	}
 }
