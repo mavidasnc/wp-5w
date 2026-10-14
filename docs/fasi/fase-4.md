@@ -98,6 +98,8 @@ La roadmap lascia aperte alcune scelte. Per ciascuna, la decisione presa qui e d
 | F22 | **Le tabelle 404 e ricerche si conservano per sempre**, come gli aggregati. La disinstallazione le elimina solo con `WP5W_DELETE_DATA`. | Sono piccole (righe per giorno e valore). L'eventuale pulizia si decide con la conservazione di `wp5w_hits` nella fase 5. |
 | F23 | **Il tetto del tracker resta di 1.536 byte.** Il tracker passa da 669 byte a circa 720 (solo l'invio di `q` e `n`). | Il margine resta ampio, quindi non serve un tetto nuovo. |
 | F24 | **Limite dello zip: 460.000 byte** (la 0.9.0 pesa 430.489). | Il codice nuovo (circa 10 classi e componenti) aggiunge 10-20 KB all'app compilata. |
+| F25 | **Scostamento da R5: le 404 salvano l'URI codificato (%XX), non quello di `relative_uri()`.** `count_not_found()` parte dallo stesso percorso (`relative_path()`: senza query string, frammento e sottocartella della home) e tiene solo i caratteri di un percorso RFC 3986, compreso `%`, al massimo 190 caratteri (un `%XX` tagliato dal limite si toglie), oppure `/` se non resta nulla. `relative_uri()` non cambia, quindi `wp5w_hits.uri` resta com'è. | `relative_uri()` passa da `sanitize_text_field()`, che toglie ogni ottetto `%XX`: una 404 su `/citt%C3%A0/post%E2%80%9D/` finiva in `/citt/post/`, URI diversi si fondevano e il link dell'admin poteva puntare a una pagina esistente. L'URI è nella chiave primaria di una tabella conservata per sempre (F22), quindi il dato perso non si recupera. La sicurezza resta all'escape di React e al prefisso di `home_url()`. |
+| F26 | **Scostamento da R6: il termine `q` arriva a `SearchTerm::store()` grezzo** (solo troncato a 200 caratteri con `mb_substr`), senza `sanitize_text_field()`. | Il filtro toglieva `%XX` e le parti tra `<` e `>` (`50%ab` diventava `50`, `<div>` non si contava). `SearchTerm` toglie già i caratteri di controllo e l'admin fa l'escape con React. |
 
 ---
 
@@ -589,6 +591,7 @@ Va dopo la sezione 11, e la pulizia finale diventa la sezione 13. Si usano `$che
    - la seconda visita uguale porta `hits` a 2 e `last_seen` maggiore o uguale;
    - con `r=` l'URL di un articolo del sito, il referrer è l'host del sito;
    - un 404 da Googlebot non cambia la tabella (scarto `bot`), e nemmeno una visita a un articolo;
+   - **URI codificato (F25):** `u=/citt%C3%A0/post%E2%80%9D/` salva `/citt%C3%A0/post%E2%80%9D/` e non `/citt/post/`; `u=/pagina%20con%20spazi/?x=1#y` salva `/pagina%20con%20spazi/`; `u=/<b>x"y/` salva `/bxy/`;
    - con il filtro `query`, una 404 registrata fa esattamente 3 query: la `SELECT` e la `INSERT` su `wp5w_hits`, poi la `INSERT ... ON DUPLICATE KEY UPDATE` su `notfound_daily`;
    - `OperationsQuery::not_found()` restituisce le righe con `internal` e `label` corretti, e la rotta ha gli stessi permessi e lo stesso controllo di `days` delle altre.
 8. **Ricerche:**
@@ -596,6 +599,7 @@ Va dopo la sezione 11, e la pulizia finale diventa la sezione 13. Si usano `$che
    - con `n=0`, `empty` sale a 1;
    - `q=mario.rossi@example.com` e `q=333 1234567` vanno in `(filtrato)` (2 ricerche);
    - un `q` di 100 caratteri dà un termine di 60;
+   - `q=50%ab` e `q=<div>` si contano così come sono (F26);
    - con `q` vuoto o di soli spazi non si scrive nessuna riga, e la visita fa 2 query;
    - `q` con `t=post` e un `q[]=x` (array) non scrivono righe e non danno warning (stesso gestore di errori dei parametri array);
    - una ricerca registrata fa 3 query;
@@ -660,11 +664,15 @@ Si fanno **prima di ogni altro passo** se la data del deploy è il **2026-10-15 
    - **«dati insufficienti», «sorgente pesante» o «ok»:** si prosegue e si riportano i numeri nella nota.
 2. **9.6 della fase 2 (chiavi dei contenuti):** le due query su `G`. Non blocca: le chiavi presenti solo in `own` vanno nella nota.
 3. **9.8 della fase 2 (raddoppio):** solo dal 2026-10-18, con `FROM=2026-10-15` e `TO` = ieri. Non blocca: i risultati vanno nella nota per la decisione del 2026-10-28.
-4. **9.10 della fase 2 (raccolta attiva):**
+4. **9.10 della fase 2 (raccolta attiva):** le due parti usano **la stessa finestra**, il giorno `G` (le visite proprie tra le 20:50 e le 20:53 UTC del 2026-10-14 non devono bastare a dare un esito positivo):
 
    ```bash
-   $WP db query "SELECT COUNT(*) new_hits, MIN(ts), MAX(ts) FROM maurizio_wp5w_hits WHERE ts >= '2026-10-14 20:50:00'"
-   $WP db query "SELECT COUNT(*) wps_visitors FROM maurizio_statistics_visitor WHERE last_counter >= '2026-10-15'"
+   G=2026-10-15   # lo stesso G del punto 1
+   $WP db query "SELECT COUNT(*) new_hits, MIN(ts), MAX(ts) FROM maurizio_wp5w_hits WHERE day = '$G'"
+   $WP db query "SELECT COUNT(*) wps_visitors FROM maurizio_statistics_visitor WHERE last_counter = '$G'"
+   # Ora per ora (UTC), come in 9.1 della fase 2: le ore a 0 da una parte sola si vedono subito.
+   $WP db query "SELECT HOUR(ts) h_utc, COUNT(DISTINCT visitor) own FROM maurizio_wp5w_hits WHERE day = '$G' GROUP BY h_utc"
+   $WP db query "SELECT HOUR(CONVERT_TZ(first_view, @@session.time_zone, '+00:00')) h_utc, COUNT(*) wps FROM maurizio_statistics_visitor WHERE last_counter = '$G' GROUP BY h_utc"
    curl -s https://maurizio.mavida.com/ | grep -o 'id="wp5w-hit"[^<]*'
    ```
 

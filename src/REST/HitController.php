@@ -200,7 +200,7 @@ final class HitController extends RestController {
 		// Passo 11: aggregati giornalieri di 404 e ricerche. Solo per le visite registrate (dopo tutti gli scarti)
 		// e senza legame con il visitatore: né l'hash né l'ID della riga di wp5w_hits.
 		if ( '404' === $type ) {
-			$this->count_not_found( $day, $uri, substr( Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), '' ), 0, 190 ) );
+			$this->count_not_found( $day, $this->param( $request, 'u' ), substr( Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), '' ), 0, 190 ) );
 		} elseif ( 'search' === $type ) {
 			$this->count_search( $day, $request );
 		}
@@ -211,13 +211,25 @@ final class HitController extends RestController {
 	 *
 	 * Il referrer comprende il sito stesso: nell'admin distingue i link interni rotti da quelli esterni.
 	 *
+	 * L'URI si salva codificato (%XX) come lo invia il browser: sanitize_text_field() di relative_uri() toglierebbe
+	 * ogni ottetto %XX e URI diversi finirebbero nella stessa riga. La sicurezza resta all'escape di React e a home_url().
+	 *
 	 * @param string $day      Giorno del sito (Y-m-d).
-	 * @param string $uri      Percorso della pagina, senza query string.
+	 * @param string $path     Percorso inviato dal tracker (location.pathname), ancora da pulire.
 	 * @param string $referrer Host del referrer (solo l'host, mai il percorso).
 	 * @return void
 	 */
-	private function count_not_found( string $day, string $uri, string $referrer ): void {
+	private function count_not_found( string $day, string $path, string $referrer ): void {
 		global $wpdb;
+
+		// Passo 1: solo i caratteri ammessi in un percorso (RFC 3986, compreso %), al massimo 190 caratteri.
+		$uri = substr( (string) preg_replace( '~[^A-Za-z0-9\-._\~!$&\'()*+,;=:@/%]~', '', $this->relative_path( $path ) ), 0, 190 );
+
+		// Passo 2: un ottetto %XX tagliato dal limite di lunghezza non è valido, si toglie.
+		$uri = (string) preg_replace( '~%[0-9A-Fa-f]?$~', '', $uri );
+		if ( '' === $uri ) {
+			$uri = '/';
+		}
 
 		$wpdb->query(
 			$wpdb->prepare(
@@ -244,7 +256,10 @@ final class HitController extends RestController {
 	private function count_search( string $day, \WP_REST_Request $request ): void {
 		global $wpdb;
 
-		$term = SearchTerm::store( $this->text( $request->get_param( 'q' ), 200 ) );
+		// Il termine grezzo (al massimo 200 caratteri): sanitize_text_field() toglierebbe %XX e le parti tra < e >,
+		// SearchTerm::store() toglie già i caratteri di controllo e l'admin fa l'escape con React.
+		$raw  = $request->get_param( 'q' );
+		$term = SearchTerm::store( mb_substr( is_scalar( $raw ) ? (string) $raw : '', 0, 200 ) );
 		if ( '' === $term ) {
 			return;
 		}
@@ -353,6 +368,17 @@ final class HitController extends RestController {
 	 * @return string
 	 */
 	private function relative_uri( string $path ): string {
+		$uri = $this->relative_path( $path );
+		return $this->text( '' === $uri ? '/' : $uri, 190 );
+	}
+
+	/**
+	 * Percorso della pagina relativo alla home, senza query string né frammento e senza nessuna pulizia dei caratteri.
+	 *
+	 * @param string $path Percorso inviato dal tracker (location.pathname).
+	 * @return string
+	 */
+	private function relative_path( string $path ): string {
 		$uri = (string) wp_parse_url( '/' . ltrim( $path, '/' ), PHP_URL_PATH );
 
 		// Sito in una sottocartella: si toglie il percorso della home.
@@ -361,7 +387,7 @@ final class HitController extends RestController {
 			$uri = substr( $uri, strlen( $home ) );
 		}
 
-		return $this->text( '' === $uri ? '/' : $uri, 190 );
+		return $uri;
 	}
 
 	/**

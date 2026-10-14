@@ -9,6 +9,7 @@ import Card from '../components/Card';
 import AudienceDimensions from '../components/AudienceDimensions';
 import Campaigns from '../components/Campaigns';
 import OnlineNow from '../components/OnlineNow';
+import { LABELS } from '../components/ChannelList';
 
 // Indice 0 = lunedì (getUTCDay() spostato di 6, ISO-8601).
 const WEEKDAYS = [
@@ -181,7 +182,7 @@ export default function AudiencePage() {
 										<tr key={ row.referrer }>
 											<td title={ row.referrer }>{ row.label }</td>
 											<td>{ row.source || '–' }</td>
-											<td>{ row.channel || '–' }</td>
+											<td>{ LABELS[ row.channel ] ?? ( row.channel || '–' ) }</td>
 											<td className="num">{ formatNumber( row.visitors ) }</td>
 											<td className="num">{ formatNumber( row.contents ) }</td>
 										</tr>

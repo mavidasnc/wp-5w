@@ -1638,6 +1638,15 @@ $check( 'notfound: un 404 da Googlebot non cambia la tabella (scarto bot)', $bef
 $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v12-articolo/' ) ), '192.0.2.35', $chrome );
 $check( 'notfound: nemmeno una visita a un articolo', $before, $nf_total() );
 
+// URI codificato: la 404 con caratteri non ASCII si salva con gli ottetti %XX (non /citta/post/) e due URI diversi restano due righe.
+$hit_404( '/citt%C3%A0/post%E2%80%9D/', '', '192.0.2.61', $chrome );
+$check( 'notfound: URI codificato: si salva com è (%XX)', '1', $nf_row( '/citt%C3%A0/post%E2%80%9D/', '' )->hits ?? 'nessuna riga' );
+$check( 'notfound: URI codificato: non si fonde con /citt/post/', 'nessuna riga', $nf_row( '/citt/post/', '' )->hits ?? 'nessuna riga' );
+$hit_404( '/pagina%20con%20spazi/?x=1#y', '', '192.0.2.62', $chrome );
+$check( 'notfound: spazio codificato, senza query string né frammento', '1', $nf_row( '/pagina%20con%20spazi/', '' )->hits ?? 'nessuna riga' );
+$hit_404( '/<b>x"y/', '', '192.0.2.63', $chrome );
+$check( 'notfound: i caratteri non ammessi in un percorso si tolgono', '1', $nf_row( '/bxy/', '' )->hits ?? 'nessuna riga' );
+
 // Con il filtro query: una 404 registrata fa esattamente 3 query (SELECT e INSERT su wp5w_hits, poi l'INSERT sulle 404).
 $queries = array();
 add_filter( 'query', $capture_query );
@@ -1660,7 +1669,7 @@ $check( 'notfound lettura: link interno', 1, (int) ( $nf_by_ref[ $site_key ]['in
 $check( 'notfound lettura: referrer vuoto senza etichetta', '0|', (int) ( $nf_by_ref['/manca-diretta/|']['internal'] ?? 1 ) . '|' . ( $nf_by_ref['/manca-diretta/|']['label'] ?? 'x' ) );
 $check( 'notfound lettura: hits della riga più visitata', 2, $not_found['rows'][0]['hits'] ?? '' );
 $check( 'notfound lettura: totale delle visite', $nf_total(), $not_found['hits'] ?? '' );
-$check( 'notfound lettura: indirizzi distinti', 3, $not_found['uris'] ?? '' );
+$check( 'notfound lettura: indirizzi distinti', 6, $not_found['uris'] ?? '' );
 foreach ( array( '/wp5w/v1/admin/notfound', '/wp5w/v1/admin/searches' ) as $wp5w_route ) {
 	$check( "{$wp5w_route} senza utente: 401 o 403", true, in_array( $rest_call( 'GET', $wp5w_route, array( 'days' => 30 ) )->get_status(), array( 401, 403 ), true ) );
 	$admin_user( $admin_id );
@@ -1688,6 +1697,10 @@ $check( 'ricerche: email e numero lungo vanno in (filtrato)', 2, $search_row( '(
 $check( 'ricerche: l\'email non è salvata', 0, $wpdb->get_var( "SELECT COUNT(*) FROM {$search_table} WHERE term LIKE '%@%' OR term LIKE '%1234567%'" ) );
 $hit_search( array( 'q' => str_repeat( 'a', 100 ), 'n' => 1 ), '192.0.2.46' );
 $check( 'ricerche: un termine di 100 caratteri dà un termine di 60', 1, $search_row( str_repeat( 'a', 60 ) )->searches ?? 'nessuna riga' );
+$hit_search( array( 'q' => '50%ab', 'n' => 1 ), '192.0.2.64' );
+$check( 'ricerche: il termine con %XX non perde nulla', 1, $search_row( '50%ab' )->searches ?? 'nessuna riga' );
+$hit_search( array( 'q' => '<div>', 'n' => 1 ), '192.0.2.65' );
+$check( 'ricerche: il termine tra < e > si conta', 1, $search_row( '<div>' )->searches ?? 'nessuna riga' );
 
 // Termine vuoto o di soli spazi, q con un tipo diverso da search e q array: nessuna riga e nessun warning.
 $search_total = static fn(): int => (int) $wpdb->get_var( "SELECT COALESCE(SUM(searches), 0) FROM {$search_table}" );

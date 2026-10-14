@@ -2,7 +2,7 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
-## [0.10.0] — 2026-10-14
+## [0.10.0] — 2026-10-15
 
 Fase 4 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): canali, tempo reale e dati operativi (specifica in [docs/fasi/fase-4.md](docs/fasi/fase-4.md)). Lo schema passa alla **versione 5**, con due tabelle nuove e nessuna migrazione delle chiavi; nessun evento cron nuovo.
 
@@ -22,6 +22,7 @@ Fase 4 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): canali, temp
 - `CompareQuery` usa `ObjectType::is_post()` (titolo e link solo per `post`, `page`, `home` e `post_type_*` con ID maggiore di zero) e il suo `phpcs:disable` è ristretto a quello delle altre classi `Query`.
 - Ordine deterministico a parità di visitatori nei referrer del dettaglio (`PostsQuery`) e a parità di click e impression nelle query (`SearchQuery`).
 - La regola dell'origine ha ora due eccezioni documentate: `CompareQuery` e `AudienceQuery::campaigns()` (solo `utm_*`).
+- Le 404 salvano l'URI codificato (`%XX`) come lo invia il browser, con soli caratteri di un percorso RFC 3986 (prima `sanitize_text_field()` toglieva gli ottetti e URI diversi si fondevano); `wp5w_hits.uri` non cambia. Il termine di ricerca arriva a `SearchTerm::store()` senza `sanitize_text_field()` (`50%ab` e `<div>` non si perdono). La tabella «Provenienza» mostra le etichette italiane dei canali.
 
 ## [0.9.0] — 2026-10-14
 
