@@ -44,6 +44,11 @@ function App() {
 					return <Page />;
 				} }
 			</TabPanel>
+			<p className="wp5w-note wp5w-admin__credits">
+				<a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">
+					{ __( 'IP Geolocation by DB-IP', 'wp-5w' ) }
+				</a>
+			</p>
 		</div>
 	);
 }

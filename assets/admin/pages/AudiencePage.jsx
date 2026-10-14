@@ -6,6 +6,7 @@ import BarChart from '../components/BarChart';
 import QueryTable from '../components/QueryTable';
 import ShowMore from '../components/ShowMore';
 import Card from '../components/Card';
+import AudienceDimensions from '../components/AudienceDimensions';
 
 // Indice 0 = lunedì (getUTCDay() spostato di 6, ISO-8601).
 const WEEKDAYS = [
@@ -142,6 +143,8 @@ export default function AudiencePage() {
 					<p className="wp5w-note">{ __( 'Barre: totali del mese (asse sinistro). Linee: media al giorno (asse destro), calcolata sui giorni con dati, quindi confrontabile anche per il mese in corso.', 'wp-5w' ) }</p>
 				</section>
 			</div>
+
+			<AudienceDimensions />
 
 			<Card
 				id="referrers"
