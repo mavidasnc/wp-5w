@@ -161,7 +161,7 @@ final class OverviewQuery {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT value AS channel, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day BETWEEN %s AND %s AND {$origin} GROUP BY value ORDER BY visitors DESC",
+				'SELECT value AS channel, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day BETWEEN %s AND %s AND {$origin} GROUP BY value ORDER BY visitors DESC, value",
 				$range->from,
 				$range->to
 			),
