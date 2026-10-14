@@ -186,8 +186,8 @@ Su un'installazione nuova le tabelle non esistono, il punto 3 non fa nulla e `db
 
 `permission_callback` è `__return_true` e la rotta non dichiara `args`: i parametri si leggono e si validano a mano, per restare leggeri. Risponde **sempre** `204` senza body, anche per gli scarti e gli errori interni, che finiscono in `error_log` solo con `WP_DEBUG`. I passi seguono quest'ordine e si fermano al primo scarto:
 
-1. Se `get_option( 'wp5w_db_version' ) !== '4'` oppure `own_tracking` è falso, si esce senza scrivere nulla (succede anche durante la migrazione).
-2. **DNT:** se `respect_dnt` è attivo e il parametro `dnt` vale `1` oppure l'header `DNT` vale `1`, scarto `dnt`. Se `respect_dnt` è spento e arriva solo `dnt=1`, si esce senza scrivere nulla (pagina in cache con l'opzione vecchia).
+1. Se `get_option( 'wp5w_db_version' ) !== Schema::DB_VERSION` (mai un valore letterale: le fasi successive alzeranno la versione) oppure `own_tracking` è falso, si esce senza scrivere nulla (succede anche durante la migrazione).
+2. **DNT:** se `respect_dnt` è attivo e il parametro `dnt` vale `1` oppure l'header `DNT` vale `1`, scarto `dnt`. L'header si legge da `$_SERVER['HTTP_DNT']`, come `REMOTE_ADDR` e lo user agent, e non con `$request->get_header()`: `rest_do_request()` in verify non riempie gli header della richiesta. Se `respect_dnt` è spento e arriva solo `dnt=1`, si esce senza scrivere nulla (pagina in cache con l'opzione vecchia).
 3. **Bot:** se `BotFilter::is_bot( $_SERVER['HTTP_USER_AGENT'] ?? '' )`, scarto `bot`.
 4. **Firma:** `t` deve corrispondere a `^[a-z0-9_]{1,40}$` e `id` deve essere un intero ≥ 0; poi `Visit::check_signature()`. Se uno dei controlli fallisce, scarto `signature`.
 5. **IP esclusi:** se `Visit::ip_excluded( REMOTE_ADDR, excluded_ips )`, scarto `ip`.
@@ -316,7 +316,7 @@ Tutti e due si pianificano in `Scheduler::register()` se mancano, e si tolgono i
 
 `verify.php` resta un unico script e usa la closure `$check` che c'è già. Ordine:
 
-1. **Schema v4:** `wp5w_db_version` vale `4`; per le cinque tabelle, `SHOW KEYS ... PRIMARY` corrisponde alla tabella di sezione 3; `wp5w_hits` e `wp5w_discards` esistono; `wp5w_hits` non ha colonne il cui nome contiene `ip` o `agent`.
+1. **Schema v4:** `wp5w_db_version` vale `Schema::DB_VERSION` (`4`); per le cinque tabelle, `SHOW KEYS ... PRIMARY` corrisponde alla tabella di sezione 3; `wp5w_hits` e `wp5w_discards` esistono; `wp5w_hits` non ha colonne il cui nome contiene `ip` o `agent`.
 2. **Migrazione da v3:** si eliminano le cinque tabelle e si ricreano con le definizioni v3 (copiate nel test), con una riga ciascuna; poi `update_option( 'wp5w_db_version', '3' )`.
    - **Concorrenza:** una seconda connessione `mysqli` (`DB_HOST`, `DB_USER`, `DB_PASSWORD` e `DB_NAME`) prende `GET_LOCK( 'wp5w_schema_upgrade', 0 )`. Con il lock occupato, `Schema::maybe_upgrade()` lascia la versione a `3` e le chiavi come prima.
    - **Migrazione:** si rilascia il lock e si chiama di nuovo `maybe_upgrade()`. La versione diventa `4`, le chiavi sono quelle della v4 e le righe esistenti hanno `origin = 'wps'`.
@@ -362,7 +362,7 @@ Ciascuno deve comparire nella checklist della PR con l'esito.
 1. `composer ci` passa: PHPCS, PHPStan livello 6 e PHPUnit, con i quattro nuovi test.
 2. `npm run check` passa; `build/tracker/tracker.js` esiste e pesa meno di 1.536 byte.
 3. `npx wp-env run cli wp eval-file .../seed.php` seguito da `verify.php` termina con «Tutti i controlli superati», compresi tutti i controlli della sezione 6.
-4. Su un'installazione con lo schema v3 e dati, il primo caricamento del plugin porta `wp5w_db_version` a `4`, mette le chiavi primarie della sezione 3 e assegna `origin = 'wps'` a tutte le righe esistenti; rieseguire `Schema::install()` non esegue `ALTER` (verify, punto 2).
+4. Su un'installazione con lo schema v3 e dati, il primo caricamento del plugin porta `wp5w_db_version` a `Schema::DB_VERSION` (`4`), mette le chiavi primarie della sezione 3 e assegna `origin = 'wps'` a tutte le righe esistenti; rieseguire `Schema::install()` non esegue `ALTER` (verify, punto 2).
 5. Con il lock `wp5w_schema_upgrade` occupato, la migrazione non parte e la versione resta `3` (verify, punto 2).
 6. Con `wp5w_own_since` vuota e righe `own` presenti, le risposte di Panoramica, classifica, Articoli, dettaglio, Visitatori, trend e coverage sono identiche a quelle senza righe `own` (verify, punto 7).
 7. Con `wp5w_own_since` impostata, le query usano `wps` prima della data e `own` dalla data in poi (verify, punto 8 e `OriginTest`).
@@ -411,7 +411,18 @@ TABLES=$($WP db tables 'maurizio_wp5w_*' --all-tables --format=csv)
 $WP db export ~/backups/wp5w-pre-0.7.0-$(date +%F-%H%M).sql --tables="$TABLES"
 $WP option list --search='wp5w_*' --format=json > ~/backups/wp5w-options-pre-0.7.0.json
 $WP plugin get wp-5w --field=version   # deve essere 0.6.0
+# Cattura di non regressione subito prima dell'installazione (stesse query di 8.4, senza filtro sull'origine).
+{
+  $WP db query "SELECT COUNT(*), SUM(visitors), SUM(views) FROM maurizio_wp5w_site_daily WHERE day BETWEEN '2026-09-14' AND '2026-10-12'"
+  $WP db query "SELECT COUNT(*), SUM(views), SUM(visitors) FROM maurizio_wp5w_object_daily WHERE day BETWEEN '2026-09-14' AND '2026-10-12'"
+  for t in entry_daily referrer_daily dim_daily; do
+    $WP db query "SELECT '$t', COUNT(*) FROM maurizio_wp5w_$t WHERE day BETWEEN '2026-09-14' AND '2026-10-12'"
+  done
+} > ~/backups/wp5w-nonreg-pre-0.7.0.txt
+cat ~/backups/wp5w-nonreg-pre-0.7.0.txt
 ```
+
+Tra la cattura e l'installazione non deve girare l'ETL: si evita di farle a cavallo delle 4:00.
 
 ### 8.3 Installazione e migrazione
 
@@ -435,19 +446,19 @@ Se la versione non è `4`, si legge l'errore nel log di PHP (`grep wp5w ~/domain
 
 ```bash
 $WP db query "SELECT COUNT(*), SUM(visitors), SUM(views) FROM maurizio_wp5w_site_daily WHERE origin='wps' AND day BETWEEN '2026-09-14' AND '2026-10-12'"
-# atteso: 29, 3532, 4659
+# atteso: come nella cattura di 8.2 (riferimento in 8.1: 29, 3532, 4659)
 $WP db query "SELECT COUNT(*), SUM(views), SUM(visitors) FROM maurizio_wp5w_object_daily WHERE origin='wps' AND day BETWEEN '2026-09-14' AND '2026-10-12'"
-# atteso: 576, 4660, 4111
+# atteso: come nella cattura di 8.2 (riferimento: 576, 4660, 4111)
 for t in entry_daily referrer_daily dim_daily; do
   $WP db query "SELECT '$t', COUNT(*) FROM maurizio_wp5w_$t WHERE origin='wps' AND day BETWEEN '2026-09-14' AND '2026-10-12'"
 done
-# atteso: 371, 186, 1110
+# atteso: come nella cattura di 8.2 (riferimento: 371, 186, 1110)
 $WP eval '$r = ( new Mavida\FiveW\Query\OverviewQuery() )->get( new Mavida\FiveW\Support\DateRange( "2026-09-14", "2026-10-12" ) ); echo $r["kpis"]["visitors"]["value"], " ", $r["kpis"]["views"]["value"], "\n";'
-# atteso: 3532 4659 (passa dalla regola dell'origine sul database di produzione)
+# atteso: visitatori e visualizzazioni di site_daily nella cattura di 8.2 (passa dalla regola dell'origine sul database di produzione)
 $WP option get wp5w_own_since    # vuota oppure assente
 ```
 
-Se una differenza non si spiega con la rielaborazione notturna di WP Statistics degli ultimi 7 giorni (che non tocca questo intervallo), si va al rollback.
+Il confronto vincolante è con la cattura `~/backups/wp5w-nonreg-pre-0.7.0.txt` di 8.2, fatta subito prima dell'installazione: i valori devono essere **identici**. La tabella di 8.1 serve solo da riferimento, perché l'ETL notturno rielabora gli ultimi 7 giorni e può aver cambiato di poco la fine dell'intervallo. Una differenza rispetto alla cattura porta al rollback.
 
 ### 8.5 Cron e cache
 
@@ -525,7 +536,7 @@ $WP cron event delete wp5w_own_hourly
 $WP litespeed-purge all                                    # toglie il tracker dalle pagine in cache
 ```
 
-Poi si ripete 8.4 con le query senza `origin` (come in 0.6.0) e i valori attesi della sezione 8.1.
+Poi si ripetono le query della cattura di 8.2, che devono dare gli stessi valori.
 
 ### 8.11 Nota di consegna per la fase 2
 
