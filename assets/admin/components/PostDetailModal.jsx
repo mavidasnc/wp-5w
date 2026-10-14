@@ -5,6 +5,7 @@ import { api, formatDay, formatNumber, shiftDay, today } from '../api';
 import KpiCard from './KpiCard';
 import TrendChart from './TrendChart';
 import ChannelList from './ChannelList';
+import QueryTable from './QueryTable';
 
 // Periodi del dettaglio: giorni fino a oggi oppure dalla pubblicazione.
 export const DETAIL_PERIODS = [
@@ -109,32 +110,7 @@ export default function PostDetailModal( { post, initialPeriod = '30', onClose }
 					<div className="wp5w-grid">
 						<section className="wp5w-card wp5w-grid__main">
 							<h2>{ __( 'Ricerche su Google', 'wp-5w' ) }</h2>
-							{ data.queries.length ? (
-								<table className="widefat striped wp5w-table">
-									<thead>
-										<tr>
-											<th>{ __( 'Query', 'wp-5w' ) }</th>
-											<th className="num">{ __( 'Click', 'wp-5w' ) }</th>
-											<th className="num">{ __( 'Impression', 'wp-5w' ) }</th>
-											<th className="num">{ __( 'CTR', 'wp-5w' ) }</th>
-											<th className="num">{ __( 'Posizione', 'wp-5w' ) }</th>
-										</tr>
-									</thead>
-									<tbody>
-										{ data.queries.map( ( row ) => (
-											<tr key={ row.query }>
-												<td>{ row.query }</td>
-												<td className="num">{ formatNumber( row.clicks ) }</td>
-												<td className="num">{ formatNumber( row.impressions ) }</td>
-												<td className="num">{ formatNumber( row.ctr, '%' ) }</td>
-												<td className="num">{ formatNumber( row.position ) }</td>
-											</tr>
-										) ) }
-									</tbody>
-								</table>
-							) : (
-								<p>{ __( 'Nessuna ricerca registrata da Search Console nel periodo.', 'wp-5w' ) }</p>
-							) }
+							<QueryTable rows={ data.queries } empty={ __( 'Nessuna ricerca registrata da Search Console nel periodo.', 'wp-5w' ) } />
 						</section>
 
 						<section className="wp5w-card">

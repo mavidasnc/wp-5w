@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Mavida\FiveW\Cli;
 
+use Mavida\FiveW\Etl\GscFileImport;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Support\DateRange;
@@ -117,5 +118,35 @@ final class Command {
 		} else {
 			\WP_CLI::error( 'ETL completato con errori.' );
 		}
+	}
+
+	/**
+	 * Importa righe di Search Console da un file JSONL (prodotto da scripts/gsc-backfill.py).
+	 *
+	 * ## OPTIONS
+	 *
+	 * <file>
+	 * : Percorso del file JSONL.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp 5w gsc-import ~/backups/gsc-backfill.jsonl
+	 *
+	 * @subcommand gsc-import
+	 *
+	 * @param array<int,string>    $args       Argomenti posizionali.
+	 * @param array<string,string> $assoc_args Opzioni.
+	 * @return void
+	 */
+	public function gsc_import( array $args, array $assoc_args ): void {
+		unset( $assoc_args );
+
+		try {
+			$result = ( new GscFileImport() )->run( $args[0] );
+		} catch ( \RuntimeException $e ) {
+			\WP_CLI::error( $e->getMessage() );
+		}
+
+		\WP_CLI::success( sprintf( '%d righe in %d giorni (%s → %s), %d scartate.', $result['rows'], $result['days'], $result['from'] ?? '-', $result['to'] ?? '-', $result['skipped'] ) );
 	}
 }

@@ -12,7 +12,9 @@ namespace Mavida\FiveW\REST;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Query\OverviewQuery;
+use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
+use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Updater;
 
@@ -29,11 +31,15 @@ final class AdminController extends RestController {
 	 * @param Importer      $importer Importer.
 	 * @param OverviewQuery $overview Interrogazioni della Panoramica.
 	 * @param PostsQuery    $posts    Interrogazioni della scheda Articoli e del dettaglio.
+	 * @param SearchQuery   $search   Interrogazioni della scheda Search Console.
+	 * @param AudienceQuery $audience Interrogazioni della scheda Visitatori.
 	 */
 	public function __construct(
 		private readonly Importer $importer,
 		private readonly OverviewQuery $overview,
-		private readonly PostsQuery $posts
+		private readonly PostsQuery $posts,
+		private readonly SearchQuery $search,
+		private readonly AudienceQuery $audience
 	) {}
 
 	/**
@@ -74,6 +80,49 @@ final class AdminController extends RestController {
 				'callback'            => array( $this, 'overview' ),
 				'permission_callback' => array( $this, 'check_admin_permission' ),
 				'args'                => self::range_args(),
+			)
+		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/top',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'top' ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::range_args() + array(
+					'type'  => array(
+						'type'    => 'string',
+						'enum'    => array_keys( OverviewQuery::TOP_TYPES ),
+						'default' => 'all',
+					),
+					'limit' => array(
+						'type'    => 'integer',
+						'enum'    => OverviewQuery::TOP_LIMITS,
+						'default' => OverviewQuery::TOP_LIMITS[0],
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/search',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'search' ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => self::range_args(),
+			)
+		);
+
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/audience',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn() => $this->respond( $this->audience->get() ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
 			)
 		);
 
@@ -191,6 +240,31 @@ final class AdminController extends RestController {
 	public function overview( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
 		$range = self::range_from( $request );
 		return $range instanceof DateRange ? $this->respond( $this->overview->get( $range ) ) : $range;
+	}
+
+	/**
+	 * Classifica dei contenuti più visti, filtrata per tipo.
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function top( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$range = self::range_from( $request );
+		if ( ! $range instanceof DateRange ) {
+			return $range;
+		}
+		return $this->respond( $this->overview->top( $range, (string) $request->get_param( 'type' ), (int) $request->get_param( 'limit' ) ) );
+	}
+
+	/**
+	 * Dati della scheda Search Console.
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function search( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$range = self::range_from( $request );
+		return $range instanceof DateRange ? $this->respond( $this->search->get( $range ) ) : $range;
 	}
 
 	/**

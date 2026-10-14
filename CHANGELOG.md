@@ -2,6 +2,23 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.3.0] — 2026-10-14
+
+### Added
+- Panoramica: nella classifica «Contenuti più visti», filtro per tipo (tutti, articoli, pagine, allegati) e numero di righe (20, 50, 100).
+- Scheda **Search Console**:
+  - KPI con confronto (solo se il periodo precedente ha dati) e andamento;
+  - query con filtro di testo e variazione dei click;
+  - pagine, che aprono il dettaglio;
+  - opportunità: «quasi in prima pagina» e «in alto ma poco cliccate».
+- Scheda **Visitatori**: visitatori e visualizzazioni per giorno della settimana (ultimi 7 giorni e ultimi 6 mesi, con medie), siti di provenienza degli ultimi 7 giorni e keyword degli ultimi 7 giorni disponibili.
+- Recupero dello storico di Search Console: `scripts/gsc-backfill.py` scarica giorno, pagina e query dall'API e `wp 5w gsc-import` li importa.
+
+### Changed
+- Schema del database alla versione 3: `wp5w_gsc_daily.origin` (`rankmath` o `api`). I giorni importati dall'API, più completi, non vengono più toccati dall'ETL di Rank Math.
+- L'ETL di Rank Math sostituisce solo i giorni presenti nella sorgente, quindi i giorni recuperati non vengono più cancellati.
+- Le pagine GSC si collegano ai contenuti in PHP: il JOIN tra tabelle con collation diverse falliva.
+
 ## [0.2.0] — 2026-10-14
 
 ### Added

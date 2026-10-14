@@ -204,3 +204,46 @@
 		font-size: 20px;
 	}
 }
+
+// Filtri, colonne affiancate e grafici a barre (v0.3).
+.wp5w-filters {
+	display: flex;
+	gap: 8px;
+
+	.components-base-control {
+		min-width: 120px;
+	}
+}
+
+.wp5w-columns {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+
+	@media (max-width: 1100px) {
+		grid-template-columns: 1fr;
+	}
+}
+
+.wp5w-chart--bars {
+	height: 260px;
+	margin-bottom: 16px;
+}
+
+.wp5w-card__head .components-search-control {
+	min-width: 260px;
+}
+
+.wp5w-table {
+	td.is-good {
+		color: #00a32a;
+	}
+
+	td.is-bad {
+		color: #d63638;
+	}
+}
+
+.wp5w-more {
+	margin-top: 8px;
+}

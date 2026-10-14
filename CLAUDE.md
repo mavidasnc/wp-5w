@@ -22,6 +22,15 @@ npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/seed.php
 npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php   # 11 controlli
 ```
 
+### Recupero dello storico di Search Console
+
+```bash
+# In locale, con il token OAuth (scope webmasters.readonly) di maurizio.pelizzone@gmail.com:
+python scripts/gsc-backfill.py --token "C:/Users/maurizio.MAVIDA/Claude/credenzials/google/maurizio.pelizzone@gmail.com/token-searchconsole.json"   --site https://maurizio.mavida.com/ --days 180 --out .wp-env-data/gsc-backfill.jsonl
+scp .wp-env-data/gsc-backfill.jsonl mavida-blog:backups/
+ssh mavida-blog 'cd ~/domains/mavida.com/public_html/maurizio && wp --url=https://maurizio.mavida.com 5w gsc-import ~/backups/gsc-backfill.jsonl'
+```
+
 Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `maurizio_rank_math_analytics_{gsc,objects}` dal blog, poi `sed 's/`maurizio_/`wp_/g'` in `.wp-env-data/` (gitignored), `wp db import` e `verify.php`.
 
 ## Struttura
@@ -42,5 +51,8 @@ Per provare sui dati reali: dump delle tabelle `maurizio_statistics_*` e `mauriz
 - **Visitatori sommati su più giorni:** una persona conta una volta per ogni giorno di visita (l'hash IP di WP Statistics cambia ogni giorno).
 - **`statistics_visitor.referred` contiene solo l'host:** il referrer vale per la pagina d'ingresso.
 - **Dettaglio:** `PostsQuery::detail()` accorcia il periodo al primo giorno con dati, così «dalla pubblicazione» su post vecchi non genera anni di zeri.
+- **Origine delle righe GSC:** i giorni importati dall'API (`origin = 'api'`) hanno circa il doppio delle query di Rank Math; l'ETL di Rank Math li salta e cancella solo righe `rankmath` dei giorni che possiede (`replace_by_month` con il parametro `$delete`).
+- **Collation diverse:** le tabelle di Rank Math sono `utf8mb4_general_ci`, quelle del plugin `utf8mb4_unicode_520_ci`. Niente JOIN su colonne di testo tra le due: si confronta in PHP o con gli hash MD5.
+- **Confronti con il periodo precedente:** vanno mostrati solo se quel periodo è coperto dai dati (`SearchQuery` restituisce `comparable`), altrimenti escono variazioni del +9000%.
 - **Su Windows con Git Bash** usa `MSYS_NO_PATHCONV=1` per gli argomenti che iniziano con `/` (per esempio `wp rewrite structure`) e scrivi i JSON con backslash usando l'editor, non gli heredoc.
 - **Blog di produzione** (`maurizio.mavida.com`): WP-CLI richiede `--url=https://maurizio.mavida.com`.

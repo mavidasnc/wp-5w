@@ -3,12 +3,16 @@ import { __ } from '@wordpress/i18n';
 import { TabPanel } from '@wordpress/components';
 import OverviewPage from './pages/OverviewPage';
 import PostsPage from './pages/PostsPage';
+import SearchPage from './pages/SearchPage';
+import AudiencePage from './pages/AudiencePage';
 import StatusPage from './pages/StatusPage';
 import './styles/admin.scss';
 
 const TABS = [
 	{ name: 'overview', title: __( 'Panoramica', 'wp-5w' ) },
 	{ name: 'posts', title: __( 'Articoli', 'wp-5w' ) },
+	{ name: 'search', title: __( 'Search Console', 'wp-5w' ) },
+	{ name: 'audience', title: __( 'Visitatori', 'wp-5w' ) },
 	{ name: 'status', title: __( 'Stato', 'wp-5w' ) },
 ];
 
@@ -30,10 +34,14 @@ function App() {
 			</header>
 			<TabPanel tabs={ TABS } initialTabName={ initial }>
 				{ ( tab ) => {
-					if ( tab.name === 'status' ) {
-						return <StatusPage />;
-					}
-					return tab.name === 'posts' ? <PostsPage /> : <OverviewPage />;
+					const pages = {
+						posts: PostsPage,
+						search: SearchPage,
+						audience: AudiencePage,
+						status: StatusPage,
+					};
+					const Page = pages[ tab.name ] ?? OverviewPage;
+					return <Page />;
 				} }
 			</TabPanel>
 		</div>

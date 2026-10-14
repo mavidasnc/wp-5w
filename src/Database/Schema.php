@@ -23,7 +23,7 @@ final class Schema {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '2';
+	public const DB_VERSION = '3';
 
 	/**
 	 * Nomi brevi delle tabelle, nell'ordine in cui compaiono nella pagina Stato.
@@ -145,6 +145,7 @@ final class Schema {
 		);
 
 		// Search Console per giorno, pagina e query (pos_x_impr serve per la posizione media pesata).
+		// origin: "rankmath" (ETL) o "api" (backfill da file): i giorni "api" sono più completi e Rank Math non li tocca.
 		dbDelta(
 			"CREATE TABLE {$gsc} (
 			day date NOT NULL,
@@ -156,6 +157,7 @@ final class Schema {
 			clicks int(10) unsigned NOT NULL DEFAULT 0,
 			impressions int(10) unsigned NOT NULL DEFAULT 0,
 			pos_x_impr double NOT NULL DEFAULT 0,
+			origin varchar(8) NOT NULL DEFAULT 'rankmath',
 			PRIMARY KEY  (day,page_hash,query_hash),
 			KEY object_day (object_id,day)
 		) {$charset};"

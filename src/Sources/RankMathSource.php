@@ -70,6 +70,7 @@ final class RankMathSource extends Source {
 	public function import( DateRange $range ): array {
 		$gsc     = $this->table( 'rank_math_analytics_gsc' );
 		$objects = $this->table( 'rank_math_analytics_objects' );
+		$target  = Schema::table( 'gsc_daily' );
 
 		// object_id dalla tabella ponte di Rank Math (una pagina può comparire più volte: si prende il MAX).
 		$rows = $this->replace_by_month(
@@ -81,8 +82,12 @@ final class RankMathSource extends Source {
 			FROM {$gsc} g
 			LEFT JOIN ( SELECT page, MAX(object_id) AS object_id FROM {$objects} GROUP BY page ) o ON o.page = g.page
 			WHERE g.created >= %s AND g.created < DATE_ADD(%s, INTERVAL 1 DAY)
+				AND DATE(g.created) NOT IN ( SELECT DISTINCT day FROM {$target} WHERE origin = 'api' AND day BETWEEN %s AND %s )
 			GROUP BY DATE(g.created), g.page, g.query",
-			'day, page_hash, query_hash, object_id, page, query, clicks, impressions, pos_x_impr'
+			'day, page_hash, query_hash, object_id, page, query, clicks, impressions, pos_x_impr',
+			// Si cancellano solo le righe di Rank Math e solo nei giorni che Rank Math ha (ha buchi, es. maggio-giugno
+			// 2026 sul blog): i giorni recuperati dall'API, più completi, restano intatti.
+			"AND origin = 'rankmath' AND day IN ( SELECT DATE(created) FROM {$gsc} WHERE created >= %s AND created < DATE_ADD(%s, INTERVAL 1 DAY) )"
 		);
 
 		$this->map_unknown_pages( $range );
@@ -91,21 +96,33 @@ final class RankMathSource extends Source {
 	}
 
 	/**
-	 * Associa a un contenuto le pagine che Rank Math non ha in rank_math_analytics_objects.
+	 * Associa a un contenuto le righe GSC senza object_id: prima con la tabella ponte di Rank Math
+	 * (serve alle righe importate da file), poi con url_to_postid per le pagine che Rank Math non conosce.
 	 *
 	 * @param DateRange $range Intervallo appena importato.
 	 * @return void
 	 */
-	private function map_unknown_pages( DateRange $range ): void {
+	public function map_unknown_pages( DateRange $range ): void {
 		global $wpdb;
 
 		$table = Schema::table( 'gsc_daily' );
+
+		// Pagina => contenuto secondo Rank Math. Il confronto si fa in PHP: un JOIN tra le due tabelle
+		// fallirebbe per la diversa collation delle colonne page (general_ci contro unicode_520_ci).
+		$known = array();
+		if ( null !== $this->columns( 'rank_math_analytics_objects' ) ) {
+			$objects = $this->table( 'rank_math_analytics_objects' );
+			foreach ( $wpdb->get_results( "SELECT page, MAX(object_id) AS object_id FROM {$objects} GROUP BY page", ARRAY_A ) as $row ) {
+				$known[ (string) $row['page'] ] = (int) $row['object_id'];
+			}
+		}
+
 		$pages = $wpdb->get_col(
 			$wpdb->prepare( "SELECT DISTINCT page FROM {$table} WHERE object_id = 0 AND day BETWEEN %s AND %s", $range->from, $range->to )
 		);
 
 		foreach ( $pages as $page ) {
-			$post_id = url_to_postid( home_url( (string) $page ) );
+			$post_id = $known[ (string) $page ] ?? url_to_postid( home_url( (string) $page ) );
 			if ( $post_id > 0 ) {
 				$wpdb->query(
 					$wpdb->prepare( "UPDATE {$table} SET object_id = %d WHERE object_id = 0 AND page_hash = MD5(%s)", $post_id, $page )

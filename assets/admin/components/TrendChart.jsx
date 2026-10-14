@@ -95,8 +95,8 @@ export default function TrendChart( { series, keys = null } ) {
 		interaction: { mode: 'index', intersect: false },
 		plugins: { legend: { position: 'bottom' } },
 		scales: {
-			traffic: { type: 'linear', position: 'left', beginAtZero: true },
-			gsc: { type: 'linear', position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } },
+			traffic: { type: 'linear', position: 'left', beginAtZero: true, display: 'auto' },
+			gsc: { type: 'linear', position: 'right', beginAtZero: true, display: 'auto', grid: { drawOnChartArea: false } },
 		},
 	};
 

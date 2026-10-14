@@ -54,4 +54,24 @@ final class Metrics {
 		}
 		return round( ( $current - $previous ) / $previous * 100, 1 );
 	}
+
+	/**
+	 * KPI con valore attuale, precedente e variazione percentuale.
+	 *
+	 * @param array<string,int|float|null> $current  Valori del periodo.
+	 * @param array<string,int|float|null> $previous Valori del periodo precedente.
+	 * @return array<string,array{value:int|float|null,previous:int|float|null,change:float|null}>
+	 */
+	public static function compare( array $current, array $previous ): array {
+		$kpis = array();
+		foreach ( $current as $key => $value ) {
+			$before       = $previous[ $key ] ?? null;
+			$kpis[ $key ] = array(
+				'value'    => $value,
+				'previous' => $before,
+				'change'   => null === $value || null === $before ? null : self::change( $value, $before ),
+			);
+		}
+		return $kpis;
+	}
 }

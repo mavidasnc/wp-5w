@@ -140,10 +140,13 @@ abstract class Source {
 	 * @param DateRange|null $available Intervallo con dati nella sorgente.
 	 * @param string         $select    SELECT che produce le colonne di $columns; ogni coppia di segnaposto %s riceve primo e ultimo giorno.
 	 * @param string         $columns   Colonne di destinazione, separate da virgola.
+	 * @param string         $delete    Condizione SQL aggiuntiva per la DELETE (con coppie di segnaposto come $select),
+	 *                                  per le sorgenti con buchi o con righe di altra origine: si cancella solo ciò
+	 *                                  che la sorgente rimpiazza (es. non i giorni recuperati dall'API di Search Console).
 	 * @return int Righe inserite.
 	 * @throws \RuntimeException Se una query fallisce (la transazione del mese viene annullata).
 	 */
-	protected function replace_by_month( string $target, DateRange $requested, ?DateRange $available, string $select, string $columns ): int {
+	protected function replace_by_month( string $target, DateRange $requested, ?DateRange $available, string $select, string $columns, string $delete = '' ): int {
 		global $wpdb;
 
 		$range = $available ? $requested->intersect( $available ) : null;
@@ -157,10 +160,8 @@ abstract class Source {
 		foreach ( $range->months() as $month ) {
 			$wpdb->query( 'START TRANSACTION' );
 
-			$deleted = $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE day BETWEEN %s AND %s", $month->from, $month->to ) );
-			// Una coppia (primo, ultimo giorno) per ogni coppia di segnaposto della SELECT (le UNION ne hanno più di una).
-			$args     = array_merge( ...array_fill( 0, intdiv( substr_count( $select, '%s' ), 2 ), array( $month->from, $month->to ) ) );
-			$inserted = $wpdb->query( $wpdb->prepare( "INSERT INTO {$table} ({$columns}) {$select}", $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $select contiene i segnaposto preparati qui.
+			$deleted  = $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE day BETWEEN %s AND %s {$delete}", self::month_args( $month, 'day BETWEEN %s AND %s' . $delete ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $delete contiene i segnaposto preparati qui.
+			$inserted = $wpdb->query( $wpdb->prepare( "INSERT INTO {$table} ({$columns}) {$select}", self::month_args( $month, $select ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $select contiene i segnaposto preparati qui.
 
 			if ( false === $deleted || false === $inserted ) {
 				$wpdb->query( 'ROLLBACK' );
@@ -172,5 +173,16 @@ abstract class Source {
 		}
 
 		return $rows;
+	}
+
+	/**
+	 * Una coppia (primo, ultimo giorno) per ogni coppia di segnaposto %s dell'SQL (le UNION e le subquery ne hanno più di una).
+	 *
+	 * @param DateRange $month Mese.
+	 * @param string    $sql   SQL con i segnaposto.
+	 * @return array<int,string>
+	 */
+	private static function month_args( DateRange $month, string $sql ): array {
+		return array_merge( ...array_fill( 0, intdiv( substr_count( $sql, '%s' ), 2 ), array( $month->from, $month->to ) ) );
 	}
 }

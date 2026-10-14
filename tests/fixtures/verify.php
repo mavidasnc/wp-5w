@@ -118,6 +118,31 @@ $wpdb->query( $wpdb->prepare( "DELETE FROM {$p}rank_math_analytics_gsc WHERE DAT
 Plugin::importer()->run( Importer::full_range(), 'full' );
 $check( 'storico GSC conservato dopo la pulizia di Rank Math', $rows_before, $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( 'gsc_daily' ) ) );
 
+// Backfill dall'API: un giorno che Rank Math non ha e uno che ha (con una query in più).
+$rm_day   = (string) $wpdb->get_var( "SELECT MAX(DATE(created)) FROM {$p}rank_math_analytics_gsc" );
+$rm_page  = (string) $wpdb->get_var( $wpdb->prepare( "SELECT page FROM {$p}rank_math_analytics_gsc WHERE DATE(created) = %s LIMIT 1", $rm_day ) );
+$api_day  = '2020-01-15';
+$api_file = get_temp_dir() . 'wp5w-verify.jsonl';
+$api_rows = array(
+	array( 'day' => $api_day, 'page' => $rm_page, 'query' => 'query api', 'clicks' => 5, 'impressions' => 50, 'position' => 2.0 ),
+	array( 'day' => $rm_day, 'page' => $rm_page, 'query' => 'query solo api', 'clicks' => 1, 'impressions' => 10, 'position' => 9.0 ),
+);
+file_put_contents( $api_file, implode( "\n", array_map( 'wp_json_encode', $api_rows ) ) . "\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+( new Mavida\FiveW\Etl\GscFileImport() )->run( $api_file );
+Plugin::importer()->run( Importer::full_range(), 'full' );
+$check(
+	'giorni dell\'API intatti dopo l\'ETL di Rank Math',
+	2,
+	$wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'gsc_daily' ) . " WHERE origin = 'api' AND day IN (%s, %s)", $api_day, $rm_day ) )
+);
+$check(
+	'righe Rank Math del giorno sostituito dall\'API',
+	0,
+	$wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'gsc_daily' ) . " WHERE origin = 'rankmath' AND day = %s", $rm_day ) )
+);
+$check( 'righe API collegate al contenuto', 0, $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( 'gsc_daily' ) . " WHERE origin = 'api' AND object_id = 0" ) );
+wp_delete_file( $api_file );
+
 if ( $failures ) {
 	WP_CLI::error( "{$failures} controlli falliti." );
 }

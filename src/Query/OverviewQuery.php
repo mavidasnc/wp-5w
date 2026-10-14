@@ -24,11 +24,24 @@ defined( 'ABSPATH' ) || exit;
 final class OverviewQuery {
 
 	/**
-	 * Numero di contenuti nella classifica.
+	 * Filtri della classifica: nome => condizione SQL su object_type.
+	 * "all" esclude home, archivi e 404, che restano nei totali del sito.
 	 *
-	 * @var int
+	 * @var array<string,string>
 	 */
-	private const TOP_LIMIT = 20;
+	public const TOP_TYPES = array(
+		'all'        => "o.object_type NOT IN ('home', '404', 'search', 'archive', 'author', 'category', 'post_tag', 'loginpage')",
+		'post'       => "o.object_type = 'post'",
+		'page'       => "o.object_type = 'page'",
+		'attachment' => "o.object_type = 'post_type_attachment'",
+	);
+
+	/**
+	 * Righe consentite nella classifica.
+	 *
+	 * @var array<int,int>
+	 */
+	public const TOP_LIMITS = array( 20, 50, 100 );
 
 	/**
 	 * Tutti i dati della Panoramica per l'intervallo.
@@ -41,14 +54,7 @@ final class OverviewQuery {
 		$current  = $this->totals( $range );
 		$before   = $this->totals( $previous );
 
-		$kpis = array();
-		foreach ( $current as $key => $value ) {
-			$kpis[ $key ] = array(
-				'value'    => $value,
-				'previous' => $before[ $key ],
-				'change'   => null === $value || null === $before[ $key ] ? null : Metrics::change( $value, $before[ $key ] ),
-			);
-		}
+		$kpis = Metrics::compare( $current, $before );
 
 		return array(
 			'range'    => array(
@@ -62,7 +68,6 @@ final class OverviewQuery {
 			'kpis'     => $kpis,
 			'series'   => $this->series( $range ),
 			'channels' => $this->channels( $range ),
-			'top'      => $this->top( $range ),
 			'coverage' => $this->coverage(),
 		);
 	}
@@ -165,23 +170,27 @@ final class OverviewQuery {
 	 * Contenuti più visti, con ingressi da ricerca e dati Search Console.
 	 *
 	 * @param DateRange $range Intervallo.
+	 * @param string    $type  Filtro (chiave di TOP_TYPES).
+	 * @param int       $limit Righe (uno dei TOP_LIMITS).
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function top( DateRange $range ): array {
+	public function top( DateRange $range, string $type = 'all', int $limit = 20 ): array {
 		global $wpdb;
 
 		$object = Schema::table( 'object_daily' );
 		$entry  = Schema::table( 'entry_daily' );
 		$gsc    = Schema::table( 'gsc_daily' );
+		$filter = self::TOP_TYPES[ $type ] ?? self::TOP_TYPES['all'];
+		$limit  = in_array( $limit, self::TOP_LIMITS, true ) ? $limit : self::TOP_LIMITS[0];
 
-		// Solo contenuti veri (id > 0): home, archivi e 404 restano nei totali del sito.
+		// Solo contenuti veri (id > 0).
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT o.object_type, o.object_id, MIN(o.uri) AS uri, SUM(o.views) AS views,
 					( SELECT COALESCE(SUM(e.visitors), 0) FROM {$entry} e WHERE e.object_type = o.object_type AND e.object_id = o.object_id AND e.channel = 'search' AND e.day BETWEEN %s AND %s ) AS search_entries,
 					( SELECT COALESCE(SUM(e.visitors), 0) FROM {$entry} e WHERE e.object_type = o.object_type AND e.object_id = o.object_id AND e.day BETWEEN %s AND %s ) AS entries
 				FROM {$object} o
-				WHERE o.day BETWEEN %s AND %s AND o.object_id > 0 AND o.object_type NOT IN ('home', '404', 'search', 'archive', 'author', 'category', 'post_tag', 'loginpage')
+				WHERE o.day BETWEEN %s AND %s AND o.object_id > 0 AND {$filter}
 				GROUP BY o.object_type, o.object_id
 				ORDER BY views DESC
 				LIMIT %d",
@@ -191,7 +200,7 @@ final class OverviewQuery {
 				$range->to,
 				$range->from,
 				$range->to,
-				self::TOP_LIMIT
+				$limit
 			),
 			ARRAY_A
 		);

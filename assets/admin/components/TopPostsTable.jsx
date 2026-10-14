@@ -12,9 +12,8 @@ const TYPES = {
 /**
  * Classifica dei contenuti: traffico di WP Statistics e Search Console di Rank Math sulla stessa riga.
  *
- * @param {Object} props
  * @param {Object}   props
- * @param {Array}    props.rows   Contenuti restituiti da /admin/overview.
+ * @param {Array}    props.rows   Contenuti restituiti da /admin/top.
  * @param {Function} props.onOpen Apertura del dettaglio di un contenuto.
  */
 export default function TopPostsTable( { rows, onOpen } ) {

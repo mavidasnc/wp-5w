@@ -4,7 +4,7 @@ import { Notice, SelectControl, Spinner } from '@wordpress/components';
 import { api, formatDay, shiftDay, today } from '../api';
 import KpiCard from '../components/KpiCard';
 import TrendChart from '../components/TrendChart';
-import TopPostsTable from '../components/TopPostsTable';
+import TopContents from '../components/TopContents';
 import ChannelList from '../components/ChannelList';
 import PostDetailModal from '../components/PostDetailModal';
 
@@ -100,10 +100,7 @@ export default function OverviewPage() {
 						</section>
 					</div>
 
-					<section className="wp5w-card">
-						<h2>{ __( 'Contenuti più visti', 'wp-5w' ) }</h2>
-						<TopPostsTable rows={ data.top } onOpen={ setDetail } />
-					</section>
+					<TopContents range={ data.range } onOpen={ setDetail } />
 				</>
 			) }
 
