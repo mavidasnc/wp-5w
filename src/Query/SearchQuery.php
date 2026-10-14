@@ -12,14 +12,13 @@ namespace Mavida\FiveW\Query;
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Metrics;
-use Mavida\FiveW\Support\Series;
 
 defined( 'ABSPATH' ) || exit;
 
 // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- Tabelle del plugin, nomi costruiti con $wpdb->prefix in Schema::table().
 
 /**
- * KPI, andamento, query, pagine e opportunità da wp5w_gsc_daily.
+ * Query, pagine e opportunità da wp5w_gsc_daily.
  *
  * I totali sono somme delle righe pagina+query: Search Console esclude le query anonimizzate,
  * quindi sono più bassi dei totali mostrati nell'interfaccia di Google.
@@ -55,68 +54,22 @@ final class SearchQuery {
 	private const MIN_IMPRESSIONS = 20;
 
 	/**
-	 * Tutti i dati della scheda per l'intervallo.
+	 * Periodi selezionabili (giorni) per pagine e opportunità.
 	 *
-	 * @param DateRange $range Intervallo.
-	 * @return array<string,mixed>
+	 * @var int[]
 	 */
-	public function get( DateRange $range ): array {
-		global $wpdb;
-
-		$gsc      = Schema::table( 'gsc_daily' );
-		$coverage = $wpdb->get_row( "SELECT MIN(day) AS d_from, MAX(day) AS d_to, COUNT(DISTINCT day) AS days FROM {$gsc}" );
-
-		// Prima del primo giorno con dati non c'è nulla: si accorcia il periodo ("tutto lo storico").
-		$first = (string) ( $coverage->d_from ?? '' );
-		if ( '' !== $first && $first > $range->from && $first <= $range->to ) {
-			$range = new DateRange( $first, $range->to );
-		}
-		$previous   = $range->previous();
-		$comparable = '' !== $first && $first <= $previous->from;
-
-		$daily = $wpdb->get_results(
-			$wpdb->prepare( "SELECT day, SUM(clicks) AS clicks, SUM(impressions) AS impressions FROM {$gsc} WHERE day BETWEEN %s AND %s GROUP BY day", $range->from, $range->to ),
-			OBJECT_K
-		);
-
-		return array(
-			'range'      => array(
-				'from' => $range->from,
-				'to'   => $range->to,
-			),
-			'previous'   => array(
-				'from' => $previous->from,
-				'to'   => $previous->to,
-			),
-			// Il confronto ha senso solo se il periodo precedente è coperto dai dati (altrimenti +9000%).
-			'comparable' => $comparable,
-			'kpis'       => Metrics::compare( $this->totals( $range ), $comparable ? $this->totals( $previous ) : array() ),
-			'series'     => Series::fill( $range, $daily, array( 'clicks', 'impressions' ) ),
-			'queries'    => $this->queries( $range, $previous ),
-			'coverage'   => array(
-				'from' => $coverage->d_from ?? null,
-				'to'   => $coverage->d_to ?? null,
-				'days' => (int) ( $coverage->days ?? 0 ),
-			),
-		);
-	}
+	public const DAYS = array( 7, 28, 90, 180 );
 
 	/**
-	 * Pagine e opportunità dell'intervallo (box della Panoramica).
+	 * Ultimi $days giorni disponibili in Search Console (i dati arrivano con 2-3 giorni di ritardo).
 	 *
-	 * @param DateRange $range Intervallo.
-	 * @return array<string,mixed>
+	 * @param int $days Numero di giorni.
+	 * @return DateRange|null Null se la tabella è vuota.
 	 */
-	public function content( DateRange $range ): array {
-		return array(
-			'pages'         => $this->pages( $range ),
-			'opportunities' => array(
-				// Quasi in prima pagina: un piccolo miglioramento porta in prima pagina.
-				'near_first' => $this->opportunities( $range, 'position BETWEEN 8 AND 20' ),
-				// In alto ma poco cliccate: titolo o descrizione da rivedere.
-				'low_ctr'    => $this->opportunities( $range, 'position <= 5 AND clicks / impressions < 0.02' ),
-			),
-		);
+	public function latest_range( int $days ): ?DateRange {
+		global $wpdb;
+		$last = (string) $wpdb->get_var( 'SELECT MAX(day) FROM ' . Schema::table( 'gsc_daily' ) );
+		return '' !== $last ? DateRange::last_days( $days, $last ) : null;
 	}
 
 	/**
@@ -127,35 +80,6 @@ final class SearchQuery {
 	public function first_day(): string {
 		global $wpdb;
 		return (string) $wpdb->get_var( 'SELECT MIN(day) FROM ' . Schema::table( 'gsc_daily' ) );
-	}
-
-	/**
-	 * Totali di Search Console nell'intervallo.
-	 *
-	 * @param DateRange $range Intervallo.
-	 * @return array{clicks:int,impressions:int,ctr:float|null,position:float|null}
-	 */
-	private function totals( DateRange $range ): array {
-		global $wpdb;
-
-		$row = $wpdb->get_row(
-			$wpdb->prepare(
-				'SELECT COALESCE(SUM(clicks), 0) AS clicks, COALESCE(SUM(impressions), 0) AS impressions, COALESCE(SUM(pos_x_impr), 0) AS pos_x_impr
-				FROM ' . Schema::table( 'gsc_daily' ) . ' WHERE day BETWEEN %s AND %s',
-				$range->from,
-				$range->to
-			)
-		);
-
-		$clicks      = (int) ( $row->clicks ?? 0 );
-		$impressions = (int) ( $row->impressions ?? 0 );
-
-		return array(
-			'clicks'      => $clicks,
-			'impressions' => $impressions,
-			'ctr'         => Metrics::ctr( $clicks, $impressions ),
-			'position'    => Metrics::weighted_position( (float) ( $row->pos_x_impr ?? 0 ), $impressions ),
-		);
 	}
 
 	/**
@@ -223,7 +147,7 @@ final class SearchQuery {
 	 * @param DateRange $range Intervallo.
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function pages( DateRange $range ): array {
+	public function pages( DateRange $range ): array {
 		global $wpdb;
 
 		$rows = $wpdb->get_results(
@@ -262,13 +186,31 @@ final class SearchQuery {
 	}
 
 	/**
+	 * Opportunità in un'unica lista ordinata per impression, con il tipo di ciascuna riga:
+	 * near_first = quasi in prima pagina (posizione 8-20), low_ctr = in alto ma poco cliccata (posizione fino a 5, CTR sotto il 2%).
+	 * Le due fasce di posizione non si sovrappongono, quindi una query compare una volta sola.
+	 *
+	 * @param DateRange $range Intervallo.
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function opportunities( DateRange $range ): array {
+		$rows = array_merge(
+			$this->opportunities_where( $range, 'position BETWEEN 8 AND 20', 'near_first' ),
+			$this->opportunities_where( $range, 'position <= 5 AND clicks / impressions < 0.02', 'low_ctr' )
+		);
+		usort( $rows, static fn( array $a, array $b ): int => $b['impressions'] <=> $a['impressions'] );
+		return $rows;
+	}
+
+	/**
 	 * Query che soddisfano una condizione su posizione pesata e CTR, ordinate per impression.
 	 *
 	 * @param DateRange $range     Intervallo.
 	 * @param string    $condition Condizione SQL su position, clicks e impressions (costante interna).
+	 * @param string    $kind      Tipo di opportunità.
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function opportunities( DateRange $range, string $condition ): array {
+	private function opportunities_where( DateRange $range, string $condition, string $kind ): array {
 		global $wpdb;
 
 		$rows = $wpdb->get_results(
@@ -290,6 +232,7 @@ final class SearchQuery {
 
 		return array_map(
 			static fn( array $row ): array => array(
+				'kind'        => $kind,
 				'query'       => (string) $row['query'],
 				'clicks'      => (int) $row['clicks'],
 				'impressions' => (int) $row['impressions'],

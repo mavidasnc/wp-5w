@@ -2,6 +2,14 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.5.0] — 2026-10-14
+
+### Changed
+- Eliminata la scheda Search Console (rotta `/admin/search`): KPI e andamento di Google sono già nella Panoramica, le query recenti nella scheda Visitatori.
+- Panoramica: «Quasi in prima pagina» e «In alto ma poco cliccate» diventano un'unica tabella «Opportunità su Google» a riga intera, riducibile, con il tipo evidenziato da etichetta e bordo colorati.
+- Panoramica: opportunità e pagine su Google hanno un proprio selettore del periodo (ultimi 7, 28, 90 o 180 giorni disponibili in Search Console) e mostrano le date effettive; rotte `/admin/search/opportunities` e `/admin/search/pages` al posto di `/admin/search/content`.
+- Visitatori: il grafico degli ultimi 6 mesi mostra i totali di visitatori e visualizzazioni a barre e le medie al giorno a linee su un secondo asse.
+
 ## [0.4.0] — 2026-10-14
 
 ### Added

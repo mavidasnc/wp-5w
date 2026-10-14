@@ -18,7 +18,8 @@ const WEEKDAYS = [
 	__( 'Domenica', 'wp-5w' ),
 ];
 
-const COLORS = { visitors: '#72aee6', views: '#2271b1' };
+// Barre in blu (totali), linee in arancio (medie al giorno), per distinguerle a colpo d'occhio.
+const COLORS = { visitors: '#72aee6', views: '#2271b1', avgVisitors: '#f0b849', avgViews: '#d63638' };
 
 /**
  * Nome del giorno della settimana di una data Y-m-d.
@@ -105,8 +106,10 @@ export default function AudiencePage() {
 					<BarChart
 						labels={ months.map( ( row ) => monthLabel( row.month, 'short' ) ) }
 						series={ [
-							{ label: __( 'Media visitatori al giorno', 'wp-5w' ), data: months.map( ( row ) => row.avg_visitors ), color: COLORS.visitors },
-							{ label: __( 'Media visualizzazioni al giorno', 'wp-5w' ), data: months.map( ( row ) => row.avg_views ), color: COLORS.views },
+							{ label: __( 'Visitatori', 'wp-5w' ), data: months.map( ( row ) => row.visitors ), color: COLORS.visitors },
+							{ label: __( 'Visualizzazioni', 'wp-5w' ), data: months.map( ( row ) => row.views ), color: COLORS.views },
+							{ label: __( 'Media visitatori al giorno', 'wp-5w' ), data: months.map( ( row ) => row.avg_visitors ), color: COLORS.avgVisitors, line: true },
+							{ label: __( 'Media visualizzazioni al giorno', 'wp-5w' ), data: months.map( ( row ) => row.avg_views ), color: COLORS.avgViews, line: true },
 						] }
 					/>
 					<table className="widefat striped wp5w-table">
@@ -136,7 +139,7 @@ export default function AudiencePage() {
 							) ) }
 						</tbody>
 					</table>
-					<p className="wp5w-note">{ __( 'Medie calcolate sui giorni con dati.', 'wp-5w' ) }</p>
+					<p className="wp5w-note">{ __( 'Barre: totali del mese (asse sinistro). Linee: media al giorno (asse destro), calcolata sui giorni con dati, quindi confrontabile anche per il mese in corso.', 'wp-5w' ) }</p>
 				</section>
 			</div>
 

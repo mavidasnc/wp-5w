@@ -31,7 +31,7 @@ final class AdminController extends RestController {
 	 * @param Importer      $importer Importer.
 	 * @param OverviewQuery $overview Interrogazioni della Panoramica.
 	 * @param PostsQuery    $posts    Interrogazioni della scheda Articoli e del dettaglio.
-	 * @param SearchQuery   $search   Interrogazioni della scheda Search Console.
+	 * @param SearchQuery   $search   Interrogazioni di Search Console (pagine e opportunità).
 	 * @param AudienceQuery $audience Interrogazioni della scheda Visitatori.
 	 */
 	public function __construct(
@@ -105,27 +105,25 @@ final class AdminController extends RestController {
 			)
 		);
 
-		register_rest_route(
-			self::API_NAMESPACE,
-			'/admin/search',
-			array(
-				'methods'             => \WP_REST_Server::READABLE,
-				'callback'            => array( $this, 'search' ),
-				'permission_callback' => array( $this, 'check_admin_permission' ),
-				'args'                => self::range_args(),
-			)
-		);
-
-		register_rest_route(
-			self::API_NAMESPACE,
-			'/admin/search/content',
-			array(
-				'methods'             => \WP_REST_Server::READABLE,
-				'callback'            => array( $this, 'search_content' ),
-				'permission_callback' => array( $this, 'check_admin_permission' ),
-				'args'                => self::range_args(),
-			)
-		);
+		// Pagine e opportunità di Search Console sugli ultimi N giorni disponibili.
+		foreach ( array( 'pages', 'opportunities' ) as $part ) {
+			register_rest_route(
+				self::API_NAMESPACE,
+				'/admin/search/' . $part,
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->search_part( $part, (int) $request->get_param( 'days' ) ) ),
+					'permission_callback' => array( $this, 'check_admin_permission' ),
+					'args'                => array(
+						'days' => array(
+							'type'    => 'integer',
+							'enum'    => SearchQuery::DAYS,
+							'default' => 28,
+						),
+					),
+				)
+			);
+		}
 
 		register_rest_route(
 			self::API_NAMESPACE,
@@ -268,25 +266,27 @@ final class AdminController extends RestController {
 	}
 
 	/**
-	 * Dati della scheda Search Console.
+	 * Pagine o opportunità di Search Console sugli ultimi giorni disponibili, con il periodo effettivo.
 	 *
-	 * @param \WP_REST_Request $request Richiesta.
-	 * @return \WP_REST_Response|\WP_Error
+	 * @param string $part 'pages' o 'opportunities'.
+	 * @param int    $days Numero di giorni.
+	 * @return array{range:array{from:string,to:string}|null,rows:array<int,array<string,mixed>>}
 	 */
-	public function search( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
-		$range = self::range_from( $request );
-		return $range instanceof DateRange ? $this->respond( $this->search->get( $range ) ) : $range;
-	}
-
-	/**
-	 * Pagine e opportunità di Search Console (box della Panoramica).
-	 *
-	 * @param \WP_REST_Request $request Richiesta.
-	 * @return \WP_REST_Response|\WP_Error
-	 */
-	public function search_content( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
-		$range = self::range_from( $request );
-		return $range instanceof DateRange ? $this->respond( $this->search->content( $range ) ) : $range;
+	private function search_part( string $part, int $days ): array {
+		$range = $this->search->latest_range( $days );
+		if ( null === $range ) {
+			return array(
+				'range' => null,
+				'rows'  => array(),
+			);
+		}
+		return array(
+			'range' => array(
+				'from' => $range->from,
+				'to'   => $range->to,
+			),
+			'rows'  => 'pages' === $part ? $this->search->pages( $range ) : $this->search->opportunities( $range ),
+		);
 	}
 
 	/**

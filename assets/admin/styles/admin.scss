@@ -286,3 +286,36 @@
 .wp5w-nowrap {
 	white-space: nowrap;
 }
+
+// Opportunità unificate (v0.5): etichetta e bordo sinistro per tipo.
+.wp5w-badge {
+	display: inline-block;
+	padding: 1px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	white-space: nowrap;
+
+	&.is-near_first {
+		color: #8a5a00;
+		background: #fcf0d4;
+	}
+
+	&.is-low_ctr {
+		color: #8a1f21;
+		background: #fbe5e5;
+	}
+}
+
+.wp5w-opportunities {
+	tr.is-near_first td:first-child {
+		box-shadow: inset 3px 0 0 #dba617;
+	}
+
+	tr.is-low_ctr td:first-child {
+		box-shadow: inset 3px 0 0 #d63638;
+	}
+}
+
+.wp5w-legend {
+	margin-right: 12px;
+}

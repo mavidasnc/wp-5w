@@ -13,11 +13,10 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 - **Deduplica** delle righe di Search Console, che Rank Math può duplicare quando l'import viene rilanciato.
 - **Controllo dello schema delle sorgenti:** se un aggiornamento cambia le tabelle, la sorgente viene saltata e il motivo compare nella pagina Stato.
 - **Pagina 5W in wp-admin:**
-  - **Panoramica:** KPI con confronto rispetto al periodo precedente, andamento di traffico e Search Console, canali, contenuti più visti con click, impression, CTR e posizione media pesata, opportunità di Search Console (quasi in prima pagina, CTR basso) e pagine su Google.
+  - **Panoramica:** KPI con confronto rispetto al periodo precedente, andamento di traffico e Search Console, canali, contenuti più visti con click, impression, CTR e posizione media pesata, opportunità di Search Console in un'unica tabella (quasi in prima pagina, poco cliccate) e pagine su Google, ciascuna con il proprio periodo (ultimi 7, 28, 90 o 180 giorni disponibili).
   - **Articoli:** ultimi 10 pubblicati e 10 più visti (settimana o mese), con il grafico delle visite degli ultimi 7 giorni.
   - **Dettaglio in un modale** (clic sul titolo): KPI, andamento, ricerche su Google, canali e siti di provenienza, con periodo selezionabile.
-  - **Search Console:** KPI, andamento e query (con filtro e variazione dei click).
-  - **Visitatori:** ultimi 7 giorni e ultimi 6 mesi per mese (con medie al giorno), provenienze e keyword degli ultimi 7 giorni.
+  - **Visitatori:** ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), provenienze e keyword degli ultimi 7 giorni.
   - I box a riga intera si riducono con un toggle, che resta memorizzato nel browser.
   - **Stato:** sorgenti, copertura delle tabelle, ultimo import, avvio manuale.
 - **Comandi WP-CLI:** `wp 5w status`, `wp 5w etl [--full] [--from=] [--to=]` e `wp 5w gsc-import <file.jsonl>`.

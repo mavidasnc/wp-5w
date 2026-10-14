@@ -102,7 +102,7 @@ export default function OverviewPage() {
 					</div>
 
 					<TopContents range={ data.range } onOpen={ setDetail } />
-					<SearchContent range={ data.range } onOpen={ setDetail } />
+					<SearchContent onOpen={ setDetail } />
 				</>
 			) }
 
