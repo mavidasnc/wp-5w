@@ -53,6 +53,26 @@ final class Channels {
 	);
 
 	/**
+	 * Assistenti AI: nome => domini (corrispondenza esatta o sottodominio, senza "www.").
+	 * I nomi ChatGPT e Perplexity sono gli stessi di WP Statistics (source_name).
+	 * I nomi dei pacchetti Android (com.openai.chatgpt...) servono per i referrer `android-app://`.
+	 * Elenco aggiornabile: ogni valore deve restare fatto di soli caratteri sicuri per SQL (lo controlla ChannelsTest).
+	 *
+	 * @var array<string,array<int,string>>
+	 */
+	public const AI = array(
+		'ChatGPT'    => array( 'chatgpt.com', 'chat.openai.com', 'com.openai.chatgpt' ),
+		'Perplexity' => array( 'perplexity.ai', 'ai.perplexity.app.android' ),
+		'Gemini'     => array( 'gemini.google.com', 'bard.google.com', 'com.google.android.apps.bard' ),
+		'Copilot'    => array( 'copilot.microsoft.com', 'com.microsoft.copilot' ),
+		'Claude'     => array( 'claude.ai', 'com.anthropic.claude' ),
+		'DeepSeek'   => array( 'chat.deepseek.com' ),
+		'Mistral'    => array( 'chat.mistral.ai' ),
+		'Grok'       => array( 'grok.com' ),
+		'Meta AI'    => array( 'meta.ai' ),
+	);
+
+	/**
 	 * Host del referrer: minuscolo, senza "www.", vuoto se il referrer manca, non è analizzabile o è il sito stesso.
 	 *
 	 * @param string $referrer  Referrer completo (document.referrer).
@@ -144,6 +164,57 @@ final class Channels {
 			'channel' => 'direct',
 			'source'  => 'Direct',
 		);
+	}
+
+	/**
+	 * Frammento SQL che normalizza una colonna con il referrer come l'host di Channels::host():
+	 * minuscolo, senza `android-app://`, senza `/` finale e senza `www.` iniziale.
+	 *
+	 * @param string $column Colonna (o espressione) con il referrer.
+	 * @return string
+	 */
+	public static function host_sql( string $column ): string {
+		return "TRIM(LEADING 'www.' FROM TRIM(TRAILING '/' FROM REPLACE(LOWER(TRIM({$column})), 'android-app://', '')))";
+	}
+
+	/**
+	 * Frammento SQL (un `CASE`) che dà il nome dell'assistente AI di una visita, o `''` se non è un assistente.
+	 *
+	 * La stessa regola vale per le due origini: l'aggregazione di `OwnSource` e quella di `WpStatisticsSource`
+	 * la usano per scrivere il canale `ai`, così il Confronto mette `ai` contro `ai`. Per ogni assistente la
+	 * condizione è l'OR di tre parti, e una parte si omette se il relativo argomento è vuoto:
+	 * host del referrer (esatto o sottodominio), `utm_source` (esatto, come in WP Statistics) e `source_name`.
+	 * I valori letterali vengono solo dalla costante AI (ChannelsTest controlla che siano sicuri).
+	 *
+	 * @param string $host       Espressione SQL con l'host già normalizzato (vedi host_sql()).
+	 * @param string $utm_source Colonna con utm_source (vuota se la sorgente non la salva).
+	 * @param string $name       Colonna con il nome della sorgente di WP Statistics (vuota se non c'è).
+	 * @return string
+	 */
+	public static function ai_sql( string $host, string $utm_source = '', string $name = '' ): string {
+		$cases = array();
+
+		foreach ( self::AI as $assistant => $domains ) {
+			$conditions = array();
+
+			foreach ( $domains as $domain ) {
+				// Referrer: host uguale al dominio o suo sottodominio.
+				$conditions[] = "{$host} = '{$domain}' OR {$host} LIKE '%.{$domain}'";
+				// utm_source: confronto esatto, senza "www.".
+				if ( '' !== $utm_source ) {
+					$conditions[] = "TRIM(LEADING 'www.' FROM LOWER(TRIM({$utm_source}))) = '{$domain}'";
+				}
+			}
+
+			// Nome della sorgente già riconosciuto da WP Statistics.
+			if ( '' !== $name ) {
+				$conditions[] = "{$name} = '{$assistant}'";
+			}
+
+			$cases[] = 'WHEN ' . implode( ' OR ', $conditions ) . " THEN '{$assistant}'";
+		}
+
+		return 'CASE ' . implode( ' ', $cases ) . " ELSE '' END";
 	}
 
 	/**
