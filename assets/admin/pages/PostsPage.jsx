@@ -99,6 +99,8 @@ export default function PostsPage() {
 	// Alla chiusura si toglie `detail` dall'URL, così ricaricando la pagina il modale non si riapre.
 	const closeDetail = () => {
 		setDetail( null );
+		// Anche il dato iniziale va tolto: cambiando scheda PostsPage si rimonta e rileggerebbe `detail`, riaprendo il modale.
+		delete window.wp5wAdmin.detail;
 		const url = new URL( window.location.href );
 		if ( url.searchParams.has( 'detail' ) ) {
 			url.searchParams.delete( 'detail' );
