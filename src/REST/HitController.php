@@ -15,6 +15,7 @@ use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\BotFilter;
 use Mavida\FiveW\Support\Channels;
+use Mavida\FiveW\Support\SearchTerm;
 use Mavida\FiveW\Support\UserAgent;
 use Mavida\FiveW\Support\Visit;
 
@@ -25,8 +26,10 @@ defined( 'ABSPATH' ) || exit;
 /**
  * `POST /wp5w/v1/hit`: rotta pubblica, risponde sempre 204 senza body (anche per scarti ed errori interni).
  *
- * Per una visita registrata esegue una SELECT (frequenza e visite del giorno) e una INSERT:
- * nessun update_option e nessun transient, a parte la rotazione giornaliera della chiave.
+ * Per una visita registrata esegue una SELECT (frequenza e visite del giorno) e una INSERT su wp5w_hits:
+ * 2 query per una visita normale, 3 per una pagina 404 o una ricerca interna valida (più una INSERT ... ON DUPLICATE KEY UPDATE
+ * negli aggregati giornalieri, senza legame con il visitatore). Nessun update_option e nessun transient,
+ * a parte la rotazione giornaliera della chiave.
  * Paese (dal database DB-IP, senza query) e dispositivo, browser e sistema (dallo user agent) si calcolano
  * dopo l'ultimo scarto e si salvano nella riga; né l'IP né lo user agent restano da nessuna parte.
  */
@@ -166,6 +169,8 @@ final class HitController extends RestController {
 		$is_entry  = Visit::is_entry( (int) ( $row->today ?? 0 ), $referrer );
 		$agent     = UserAgent::parse( $ua );
 		$country   = CountryDatabase::lookup( $ip );
+		$uri       = $this->relative_uri( $this->param( $request, 'u' ) );
+		$day       = wp_date( 'Y-m-d' );
 
 		// Passo 10: scrittura della visita (ts in UTC, day nel fuso del sito).
 		$wpdb->query(
@@ -173,11 +178,11 @@ final class HitController extends RestController {
 				"INSERT INTO {$hits} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, is_entry, country, device, browser, os)
 				VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s)",
 				gmdate( 'Y-m-d H:i:s' ),
-				wp_date( 'Y-m-d' ),
+				$day,
 				$hash,
 				$type,
 				(int) $id,
-				$this->relative_uri( $this->param( $request, 'u' ) ),
+				$uri,
 				substr( $referrer, 0, 190 ),
 				$channel['channel'],
 				$this->text( $channel['source'], 100 ),
@@ -189,6 +194,71 @@ final class HitController extends RestController {
 				substr( $agent['device'], 0, 20 ),
 				substr( $agent['browser'], 0, 40 ),
 				substr( $agent['os'], 0, 40 )
+			)
+		);
+
+		// Passo 11: aggregati giornalieri di 404 e ricerche. Solo per le visite registrate (dopo tutti gli scarti)
+		// e senza legame con il visitatore: né l'hash né l'ID della riga di wp5w_hits.
+		if ( '404' === $type ) {
+			$this->count_not_found( $day, $uri, substr( Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), '' ), 0, 190 ) );
+		} elseif ( 'search' === $type ) {
+			$this->count_search( $day, $request );
+		}
+	}
+
+	/**
+	 * Conta una visita a una pagina inesistente (una riga per giorno, URI e host del referrer).
+	 *
+	 * Il referrer comprende il sito stesso: nell'admin distingue i link interni rotti da quelli esterni.
+	 *
+	 * @param string $day      Giorno del sito (Y-m-d).
+	 * @param string $uri      Percorso della pagina, senza query string.
+	 * @param string $referrer Host del referrer (solo l'host, mai il percorso).
+	 * @return void
+	 */
+	private function count_not_found( string $day, string $uri, string $referrer ): void {
+		global $wpdb;
+
+		$wpdb->query(
+			$wpdb->prepare(
+				'INSERT INTO ' . Schema::table( 'notfound_daily' ) . ' (day, uri, referrer, hits, last_seen) VALUES (%s, %s, %s, 1, %s)
+				ON DUPLICATE KEY UPDATE hits = hits + 1, last_seen = VALUES(last_seen)',
+				$day,
+				$uri,
+				$referrer,
+				gmdate( 'Y-m-d H:i:s' )
+			)
+		);
+	}
+
+	/**
+	 * Conta una ricerca interna (una riga per giorno e termine, senza nessun orario).
+	 *
+	 * Il termine (`q`) e il numero di risultati (`n`) non sono coperti dalla firma, quindi li decide qui SearchTerm:
+	 * normalizza, filtra email e numeri lunghi (salvati come «(filtrato)») e ignora i termini vuoti.
+	 *
+	 * @param string           $day     Giorno del sito (Y-m-d).
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return void
+	 */
+	private function count_search( string $day, \WP_REST_Request $request ): void {
+		global $wpdb;
+
+		$term = SearchTerm::store( $this->text( $request->get_param( 'q' ), 200 ) );
+		if ( '' === $term ) {
+			return;
+		}
+
+		// Senza risultati solo con n = 0: un n mancante o non numerico vale «risultati sconosciuti», cioè con risultati.
+		$empty = '0' === $this->param( $request, 'n' ) ? 1 : 0;
+
+		$wpdb->query(
+			$wpdb->prepare(
+				'INSERT INTO ' . Schema::table( 'search_daily' ) . ' (day, term, searches, empty) VALUES (%s, %s, 1, %d)
+				ON DUPLICATE KEY UPDATE searches = searches + 1, empty = empty + VALUES(empty)',
+				$day,
+				$term,
+				$empty
 			)
 		);
 	}
