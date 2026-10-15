@@ -2,6 +2,25 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.11.0] — 2026-10-15
+
+Iterazione extra 1: tracciamento completo, quattro box del pubblico e aggiornamenti dall'admin (specifica in [docs/fasi/fase-extra1.md](docs/fasi/fase-extra1.md)). Lo schema passa alla **versione 6**, con una sola colonna nuova (`bot`) in `wp5w_hits`; nessuna tabella, opzione o evento cron nuovo, quindi `uninstall.php` e `Deactivator` non cambiano.
+
+### Added
+- **Colonna `bot` in `wp5w_hits`** (`varchar(20) NOT NULL DEFAULT ''`, dopo `os`, senza indice) con l'etichetta della visita: `ua-corto`, la firma del bot dichiarato, `webdriver` oppure vuota. Migrazione esplicita e idempotente (`Schema::migrate_hits_columns()`, un solo `ALTER TABLE` sotto il lock `wp5w_schema_upgrade`); le righe esistenti ricevono `bot = ''`.
+- **`BotFilter::label()`** con le costanti `LABEL_SHORT` e `LABEL_WEBDRIVER`: tra più firme vince la più lunga (`bot` corrisponde anche a GPTBot, ClaudeBot e PetalBot), a parità la prima dell'elenco.
+- **Il tracker segnala `navigator.webdriver`** con il parametro `w=1` (solo se esattamente `'1'` lato server) invece di scartare la visita.
+- **Box «Aggiornamenti»** nella scheda Stato (`UpdatesCard`) con `GET /wp5w/v1/admin/update`, `POST /admin/update/check` (`manage_options`) e `POST /admin/update/install` (`update_plugins`, `409` senza aggiornamenti), e link «Verifica aggiornamenti» nella riga del plugin verso `admin.php?page=wp5w&tab=status`. Il link «Check for updates» di plugin-update-checker si nasconde.
+- `verify.php`: migrazione da v5 a v6 (lock, un solo `ALTER`, idempotenza), installazione senza `wp5w_hits` con le stesse definizioni, etichette e query delle visite segnalate, aggregati con le visite segnalate e nuova sezione 13 «Iterazione 0.11.0» (la pulizia finale diventa la 14); `BotFilterTest` con `label()`.
+
+### Changed
+- **Bot e browser automatici non si scartano più:** le visite entrano in `wp5w_hits`, negli aggregati `own`, in «Online adesso», `wp5w_notfound_daily` e `wp5w_search_daily`. Il motivo di scarto `bot` non si scrive più (resta nei dati storici). Gli altri scarti (`dnt`, `signature`, `ip`, `user`, `rate`) e le query dell'endpoint (2 per una visita normale o segnalata, 3 per 404 e ricerche) non cambiano. La raccolta propria può ora contare più di WP Statistics nei giorni in cui crawler dichiarati eseguono JavaScript.
+- `BotFilter::is_bot()` è eliminato (nessun codice lo usa più).
+- Il box «Pubblico» diventa quattro box affiancati («Pubblico (paesi)», «Dispositivi», «Browser», «Sistemi operativi») con un solo selettore del periodo e una sola chiamata a `dimensions` per cambio; classe `.wp5w-columns--4` (4, 2 e 1 colonne).
+- Il testo d'aiuto del Confronto non dice più che la raccolta propria esclude i bot.
+- `Schema::DB_VERSION` passa a `6`. Il tracker passa da 706 a 716 byte (limite 1.536).
+- `GET /admin/status` non restituisce più `version` e `updates` (li leggeva solo la riga in fondo alla scheda Stato, sostituita dal box «Aggiornamenti»).
+
 ## [0.10.0] — 2026-10-15
 
 Fase 4 della [roadmap](docs/roadmap-sostituzione-wp-statistics.md): canali, tempo reale e dati operativi (specifica in [docs/fasi/fase-4.md](docs/fasi/fase-4.md)). Lo schema passa alla **versione 5**, con due tabelle nuove e nessuna migrazione delle chiavi; nessun evento cron nuovo.
