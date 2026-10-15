@@ -37,7 +37,7 @@ export default function UpdatesCard() {
 				setStatus( data );
 				setNotice(
 					data.update_available
-						? { status: 'warning', text: sprintf( __( 'È disponibile la versione %s.', 'wp-5w' ), data.latest ) }
+						? { status: 'warning', text: /* translators: %s: numero di versione (per esempio 0.11.0). */ sprintf( __( 'È disponibile la versione %s.', 'wp-5w' ), data.latest ) }
 						: { status: 'success', text: __( 'Il plugin è aggiornato all\'ultima versione.', 'wp-5w' ) }
 				);
 			} )
@@ -51,7 +51,7 @@ export default function UpdatesCard() {
 		setNotice( null );
 		api( '/admin/update/install', { method: 'POST' } )
 			.then( ( data ) => {
-				setNotice( { status: 'success', text: sprintf( __( 'Aggiornato alla versione %s. Ricarico la pagina…', 'wp-5w' ), data.version ) } );
+				setNotice( { status: 'success', text: /* translators: %s: numero di versione (per esempio 0.11.0). */ sprintf( __( 'Aggiornato alla versione %s. Ricarico la pagina…', 'wp-5w' ), data.version ) } );
 				setTimeout( () => window.location.reload(), 2000 );
 			} )
 			.catch( ( e ) => {
@@ -94,7 +94,7 @@ export default function UpdatesCard() {
 						</Button>
 						{ status.update_available && (
 							<Button variant="primary" isBusy={ 'install' === busy } disabled={ !! busy } onClick={ install }>
-								{ sprintf( __( 'Installa la versione %s', 'wp-5w' ), status.latest ) }
+								{ /* translators: %s: numero di versione (per esempio 0.11.0). */ sprintf( __( 'Installa la versione %s', 'wp-5w' ), status.latest ) }
 							</Button>
 						) }
 					</div>

@@ -22,7 +22,6 @@ use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
-use Mavida\FiveW\Support\Updater;
 use Mavida\FiveW\Support\Visit;
 
 defined( 'ABSPATH' ) || exit;
