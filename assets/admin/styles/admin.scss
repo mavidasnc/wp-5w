@@ -293,6 +293,11 @@
 	}
 }
 
+// Nei quattro box la distanza tra le righe la dà solo il gap della griglia.
+.wp5w-audience-dims .wp5w-columns--4 .wp5w-card {
+	margin-bottom: 0;
+}
+
 .wp5w-chart--bars {
 	height: 220px;
 	margin-bottom: 12px;
