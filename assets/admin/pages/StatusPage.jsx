@@ -4,6 +4,7 @@ import { Button, Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Card from '../components/Card';
 import Compare from '../components/Compare';
+import UpdatesCard from '../components/UpdatesCard';
 
 // Descrizione delle tabelle wp5w_*.
 const TABLES = {
@@ -178,10 +179,7 @@ export default function StatusPage() {
 				</div>
 			</Card>
 
-			<p className="wp5w-note">
-				wp-5w { status.version }
-				{ status.updates?.update_available && ` — ${ __( 'disponibile la', 'wp-5w' ) } ${ status.updates.latest }` }
-			</p>
+			<UpdatesCard />
 		</div>
 	);
 }

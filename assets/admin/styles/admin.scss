@@ -279,6 +279,20 @@
 	}
 }
 
+// Quattro box affiancati (scheda Visitatori, 0.11.0): 4 colonne da 1280 px, 2 fino a 700 px, 1 sotto.
+// Va dopo .wp5w-columns: la regola a 1100 px della classe base ha la stessa specificità e altrimenti vincerebbe.
+.wp5w-columns--4 {
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+
+	@media (max-width: 1279px) {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	@media (max-width: 699px) {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
 .wp5w-chart--bars {
 	height: 220px;
 	margin-bottom: 12px;
@@ -429,5 +443,41 @@
 
 	&__note {
 		grid-column: 1 / -1;
+	}
+}
+
+// Box «Aggiornamenti» della scheda Stato (0.11.0).
+.wp5w-updates {
+	// Dati chiave in colonna (versione installata, ultima versione, ultimo controllo).
+	&__facts {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		gap: 24px;
+		margin: 0 0 16px;
+
+		dt {
+			margin-bottom: 4px;
+			color: #646970;
+			font-size: 12px;
+			text-transform: uppercase;
+			letter-spacing: 0.04em;
+		}
+
+		dd {
+			margin: 0;
+			font-size: 1.25rem;
+			font-weight: 600;
+		}
+	}
+
+	&__badge {
+		display: inline-block;
+		margin-left: 8px;
+		padding: 2px 10px;
+		background: #f0f0f1;
+		border-radius: 999px;
+		font-size: 12px;
+		font-weight: 600;
+		vertical-align: middle;
 	}
 }
