@@ -197,7 +197,7 @@ Stili in `admin.scss`, adattati da `wp-book-a-call/assets/admin/styles/admin.scs
   1. se `wp5w_hits` non esiste, restituisce vero (ci pensa `dbDelta()`);
   2. se `SHOW COLUMNS` contiene già `bot`, restituisce vero senza eseguire nulla;
   3. altrimenti esegue `ALTER TABLE {hits} ADD COLUMN bot varchar(20) NOT NULL DEFAULT '' AFTER os`. Se fallisce, annota l'errore con `error_log()` e restituisce falso: `install()` esce senza aggiornare `wp5w_db_version`.
-- La colonna è nella stessa posizione con la migrazione e con l'installazione nuova, quindi `SHOW CREATE TABLE` è identico nei due casi.
+- La colonna ha la stessa definizione e la stessa posizione con la migrazione e con l'installazione nuova (a parte il contatore `AUTO_INCREMENT`, che dipende dalle righe).
 - Le righe esistenti ricevono `bot = ''`.
 - **Rollback:** la 0.10.0 su un database v6 riesegue `install()`, salva la versione `5` e lascia la colonna (`dbDelta()` non toglie colonne). La sua `INSERT` non nomina `bot`, quindi vale il valore predefinito. Un nuovo deploy della 0.11.x trova la colonna e non esegue `ALTER`.
 - `uninstall.php` e `Deactivator` non cambiano (D14).
@@ -273,7 +273,7 @@ La versione (`wp-5w.php`, `package.json`) la cambia `npm run release`, non la PR
   2. Con il lock tenuto da una seconda connessione (come per la v3), `Schema::maybe_upgrade()` non cambia nulla: versione ancora `5` e nessuna colonna `bot`.
   3. Con il lock libero, `Schema::install()` esegue **esattamente 1** `ALTER TABLE` (contato con il filtro `query`), nessun errore, la colonna esiste dopo `os`, la riga esistente ha `bot = ''`, la versione è `6`.
   4. Rieseguita con la versione forzata a `5`: **0** `ALTER` e `SHOW CREATE TABLE` identico.
-- **Nuovo: installazione senza `wp5w_hits`.** Si salva il contenuto della tabella, la si elimina, si porta la versione a `5`: `install()` la ricrea con la colonna `bot`, senza `ALTER`. `SHOW CREATE TABLE` di `wp5w_hits` è identico a quello ottenuto con la migrazione del punto 3. Poi si ripristinano le righe.
+- **Nuovo: installazione senza `wp5w_hits`.** Si salva il contenuto della tabella, la si elimina, si porta la versione a `5`: `install()` la ricrea con la colonna `bot`, senza `ALTER`. Le **definizioni delle colonne** di `wp5w_hits` (nome, tipo, `IS_NULLABLE`, `COLUMN_DEFAULT` e `ORDINAL_POSITION` da `information_schema.columns`, più gli indici da `information_schema.statistics`) sono identiche a quelle ottenute con la migrazione del punto 3. Non si confronta `SHOW CREATE TABLE`, che dopo le righe contiene `AUTO_INCREMENT=N` e non può coincidere tra una tabella nuova e una migrata. Poi si ripristinano le righe.
 
 ### Sezione 5 (visite simulate)
 
@@ -305,21 +305,27 @@ Dopo `run_hourly()`:
    - senza utente, tutte e tre rispondono `401`;
    - con un abbonato creato dal test, `403`;
    - con un amministratore a cui un filtro `user_has_cap` toglie solo `update_plugins`, `GET` e `check` rispondono `200` e `install` `403` con codice `wp5w_forbidden_update`.
-3. **Risposte di GitHub simulate** con `pre_http_request` per tutti gli URL di `api.github.com`, `github.com` e `raw.githubusercontent.com`. Nessuna richiesta reale: un contatore delle richieste non simulate deve restare a 0. L'ultima release simulata è `v0.10.0`, con lo zip tra gli asset. Lo stato di plugin-update-checker (opzione `external_updates-wp-5w`) si salva prima e si ripristina alla fine.
+3. **Risposte di GitHub simulate** con `pre_http_request` per tutti gli URL di `api.github.com`, `github.com` e `raw.githubusercontent.com`. Nessuna richiesta reale: un contatore delle richieste non simulate deve restare a 0. L'ultima release simulata è `v0.10.0`, con uno zip tra gli asset il cui indirizzo **non può essere risolto** (`https://example.invalid/wp-5w-0.10.0.zip`). Lo stato di plugin-update-checker (opzione `external_updates-wp-5w`) si salva prima. **Per tutta la sezione** resta attivo un filtro su `upgrader_pre_download` che conta le chiamate e restituisce sempre un `WP_Error`: anche per errore, nessun upgrader può scaricare e sovrascrivere il checkout montato da wp-env (D13).
 4. **Con l'amministratore:**
    - `GET /admin/update` risponde `200`, con `current = WP5W_VERSION`, `releases_url` di GitHub e le chiavi `latest`, `update_available` e `checked_at`;
    - `POST /admin/update/check` risponde `200`, con `update_available` falso e `checked_at` non più vecchio di 60 secondi;
    - `POST /admin/update/install` risponde `409` con codice `wp5w_no_update`, e un filtro su `upgrader_pre_download` (che deve restare a 0 chiamate) prova che l'upgrader non è partito.
-5. **Con una release simulata `v99.0.0`:** `check` risponde con `update_available` vero e `latest = '99.0.0'`. Su questo stato **non** si chiama `install`.
+5. **Con una release simulata `v99.0.0`** (zip anche qui su `https://example.invalid/`): `check` risponde con `update_available` vero e `latest = '99.0.0'`. Su questo stato **non** si chiama `install`, e **subito dopo** il controllo si ripristina `external_updates-wp-5w` al valore salvato, senza aspettare la sezione 14: se verify si fermasse più avanti, in wp-env non deve restare un aggiornamento finto in attesa con il pulsante «Installa» visibile.
 6. **Link nella riga del plugin:** `( new AdminMenu() )->add_dashboard_link( array() )` contiene, nell'ordine, «Dashboard» e un link con `page=wp5w&amp;tab=status` e il testo «Verifica aggiornamenti».
-7. **Link di plugin-update-checker:** `apply_filters( 'plugin_row_meta', array(), plugin_basename( WP5W_PLUGIN_FILE ), array(), '' )` non contiene `puc_check_for_updates`. Se il filtro della libreria si aggancia solo in admin, si prova `apply_filters( 'puc_manual_check_link-wp-5w', 'x' )`, che deve dare `''`.
+7. **Link di plugin-update-checker:** `apply_filters( 'puc_manual_check_link-wp-5w', 'x' )` restituisce `''`. È il controllo vincolante: in `wp eval-file` `admin_init` non parte e la libreria non aggancia `plugin_row_meta`, quindi un controllo su quel filtro passerebbe sempre. La pagina Plugin si guarda in wp-env (8.4).
 8. **`GET /admin/status`** risponde `200` senza le chiavi `version` e `updates`, e con le altre chiavi di prima (`sources`, `tables`, `last_run`, `next_run`, `geo`).
 9. **`GET /admin/audience/dimensions?days=30`** ha la stessa forma di prima: `range`, `first_day` e `dims` con `country`, `device`, `browser` e `platform`. Non cambia niente lato server.
 10. **Tracker compilato:** `build/tracker/tracker.js` contiene `webdriver` e la sequenza `"w","1"` (o `'w','1'`, secondo l'output di webpack). È sotto 1.536 byte.
 
+### Sezione 11 (privacy delle colonne)
+
+Il controllo del passo 9 (righe 1324-1330 circa) aggiunge `bot` all'elenco di `CONCAT_WS`: nemmeno la colonna nuova deve contenere un IP o una parte dello user agent dei test.
+
 ### Sezione 14 (pulizia finale)
 
-Toglie anche l'abbonato, i filtri, le simulazioni HTTP della sezione 13, e ripristina `external_updates-wp-5w`.
+Toglie anche l'abbonato, i filtri (compreso quello su `upgrader_pre_download`), le simulazioni HTTP della sezione 13, e ripristina di nuovo `external_updates-wp-5w`.
+
+Le `INSERT` scritte a mano in `wp5w_hits` (per esempio quelle di «Online adesso», riga 1582 circa) nominano le colonne, quindi la colonna nuova prende il valore predefinito e non vanno cambiate. `seed.php` non scrive in `wp5w_hits`.
 
 ---
 
@@ -350,7 +356,7 @@ Ogni criterio va nella checklist della PR, con l'esito.
 6. **Etichette:** la colonna `bot` vale `''` per le visite normali, `webdriver` con `w=1`, `ua-corto` per gli user agent sotto 16 caratteri, e la firma più lunga per i bot dichiarati. Contiene solo valori dell'elenco fisso (verify, sezione 5).
 7. **Aggregati:** le visite segnalate entrano in `site_daily`, `object_daily` e `dim_daily` `own`. L'invariante delle sei dimensioni regge (verify, sezione 6). `OwnSource` non è cambiato (`git diff main -- src/Sources/OwnSource.php` vuoto).
 8. **Query dell'endpoint:** 2 per una visita normale e per una segnalata, 3 per una 404 o una ricerca valida (verify 5 e 12.7-12.10).
-9. **Schema v6:** `Schema::DB_VERSION` vale `'6'`. La migrazione da v5 esegue un solo `ALTER` sotto lock, è idempotente e non parte con il lock occupato. Installazione nuova e migrazione danno lo stesso `SHOW CREATE TABLE` (verify, sezione 2).
+9. **Schema v6:** `Schema::DB_VERSION` vale `'6'`. La migrazione da v5 esegue un solo `ALTER` sotto lock, è idempotente (rieseguita, `SHOW CREATE TABLE` della stessa tabella non cambia) e non parte con il lock occupato. Installazione nuova e migrazione danno le stesse definizioni di colonne e indici di `wp5w_hits` (verify, sezione 2).
 10. **Privacy:** nessuna colonna con `ip` o `agent` nel nome, nessun IP né user agent nelle righe (verify, sezioni 1 e 5).
 11. **Browser automatico in wp-env:** la prova con Playwright di 8.2 registra `bot = 'webdriver'` con uno user agent da browser. La PR riporta il corpo del beacon e la riga.
 12. **Quattro box:** `AudienceDimensions` mostra quattro `section.wp5w-card` («Pubblico (paesi)», «Dispositivi», «Browser», «Sistemi operativi»), senza `Card` riducibile, con un solo `PeriodSwitch` e una sola chiamata a `dimensions` per periodo. I tre screenshot di 8.3 mostrano 4, 2 e 1 colonne. `DimensionList.jsx`, `Campaigns.jsx` e `AudienceQuery.php` non cambiano.
@@ -415,7 +421,12 @@ $WP db query "SELECT reason, n FROM maurizio_wp5w_discards WHERE day = '$D'" > ~
 cat ~/backups/wp5w-nonreg-pre-0.11.0.txt | head -20
 ```
 
-**Riferimento fisso** (`scratchpad/snapshot-pre-fase-1.txt`, intervallo 2026-09-14 → 2026-10-12): `site_daily` 29 righe, 3.532 visitatori, 4.659 visualizzazioni; `object_daily` 576 righe, 4.660 visualizzazioni, 4.111 visitatori. Questi due devono comparire **identici** (righe `wps`) nella cattura. `entry_daily` (371), `referrer_daily` (186) e `dim_daily` (1.110) sono solo un riferimento: il ricalcolo del canale AI della 0.10.0 può averne cambiato il numero di righe. Per queste tre tabelle vale la cattura appena presa. Se `site_daily` o `object_daily` differiscono dallo snapshot già prima del deploy, ci si ferma e si avvisa Maurizio: il problema non è di questa iterazione.
+**Riferimento fisso** (`scratchpad/snapshot-pre-fase-1.txt`, intervallo 2026-09-14 → 2026-10-12): `site_daily` 29 righe, 3.532 visitatori, 4.659 visualizzazioni; `object_daily` 576 righe, 4.660 visualizzazioni, 4.111 visitatori. Questi due si confrontano con la cattura (righe `wps`) e di norma sono **identici**. `entry_daily` (371), `referrer_daily` (186) e `dim_daily` (1.110) sono solo un riferimento: il ricalcolo del canale AI della 0.10.0 può averne cambiato il numero di righe. Il confronto **vincolante** del passo 10.3 resta quello con la cattura appena presa.
+
+Se `site_daily` o `object_daily` differiscono dallo snapshot già prima del deploy, si guarda giorno per giorno (`SELECT day, visitors, views FROM maurizio_wp5w_site_daily WHERE origin = 'wps' AND day BETWEEN '2026-09-14' AND '2026-10-12'`):
+
+- se la differenza sta solo nei giorni che l'ETL notturno rielabora ancora (gli ultimi 7 prima dell'ultimo ETL, cioè fino a circa il 2026-10-19 per i giorni dal 2026-10-08), è il normale aggiornamento di WP Statistics: lo si scrive nella nota e si prosegue;
+- altrimenti ci si ferma e si avvisa Maurizio, senza installare: il problema non è di questa iterazione.
 
 ### 10.2 Installazione, migrazione e colonna `bot`
 
