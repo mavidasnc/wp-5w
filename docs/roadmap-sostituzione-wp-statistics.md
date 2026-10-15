@@ -45,6 +45,7 @@ Ogni fase segue lo stesso ciclo, orchestrato da un Workflow di Claude Code (uno 
 - **Migrazione dello schema alla versione 4:** `ALTER TABLE` esplicito e idempotente sulle chiavi primarie (`dbDelta` non le cambia), con lock contro le esecuzioni concorrenti.
 - **Aggregazione oraria:** lock separato da quello dell'ETL.
 - **Privacy nella fase 4:** ricerche interne e pagine 404 solo come aggregati giornalieri, senza legame con il visitatore.
+- **Bot segnalati, non scartati (deciso il 2026-10-15, versione 0.11.0):** i bot dichiarati, gli user agent vuoti o troppo corti e i browser con `navigator.webdriver` non si scartano più. La visita si registra e la colonna `wp5w_hits.bot` dice perché è sospetta (`webdriver`, `ua-corto` o la firma del bot), senza salvare IP né user agent. Le visite segnalate entrano negli aggregati, così il Confronto con WP Statistics resta omogeneo; lo scarto `bot` resta solo nei dati storici. Do Not Track, firma, IP esclusi, utenti collegati e limite di frequenza non cambiano. Dettagli in [fasi/fase-extra1.md](fasi/fase-extra1.md).
 
 ---
 
