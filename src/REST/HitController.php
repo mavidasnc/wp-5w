@@ -30,8 +30,12 @@ defined( 'ABSPATH' ) || exit;
  * 2 query per una visita normale, 3 per una pagina 404 o una ricerca interna valida (più una INSERT ... ON DUPLICATE KEY UPDATE
  * negli aggregati giornalieri, senza legame con il visitatore). Nessun update_option e nessun transient,
  * a parte la rotazione giornaliera della chiave.
- * Paese (dal database DB-IP, senza query) e dispositivo, browser e sistema (dallo user agent) si calcolano
- * dopo l'ultimo scarto e si salvano nella riga; né l'IP né lo user agent restano da nessuna parte.
+ * Paese (dal database DB-IP, senza query), dispositivo, browser e sistema (dallo user agent) ed etichetta `bot`
+ * (BotFilter::label()) si calcolano dopo l'ultimo scarto e si salvano nella riga; né l'IP né lo user agent restano
+ * da nessuna parte.
+ *
+ * Motivi di scarto: `dnt`, `signature`, `ip`, `user` e `rate`. Dalla 0.11.0 bot e browser automatici non si scartano,
+ * si segnalano nella colonna `bot`: il motivo `bot` resta solo nei dati storici di wp5w_discards.
  */
 final class HitController extends RestController {
 
@@ -113,13 +117,7 @@ final class HitController extends RestController {
 			return;
 		}
 
-		// Passo 3: bot, crawler, user agent vuoti o troppo corti.
-		if ( BotFilter::is_bot( $ua ) ) {
-			$this->discard( 'bot' );
-			return;
-		}
-
-		// Passo 4: tipo, ID e firma (un payload malformato conta come firma errata).
+		// Passo 3: tipo, ID e firma (un payload malformato conta come firma errata).
 		$type = $this->param( $request, 't' );
 		$id   = $this->param( $request, 'id' );
 		if ( 1 !== preg_match( '/^[a-z0-9_]{1,40}$/', $type ) || 1 !== preg_match( '/^\d{1,18}$/', $id ) || ! Visit::check_signature( $type, (int) $id, $this->param( $request, 's' ), wp_salt( 'auth' ) ) ) {
@@ -127,13 +125,13 @@ final class HitController extends RestController {
 			return;
 		}
 
-		// Passo 5: IP escluso dalle Opzioni.
+		// Passo 4: IP escluso dalle Opzioni.
 		if ( Visit::ip_excluded( $ip, $settings['excluded_ips'] ) ) {
 			$this->discard( 'ip' );
 			return;
 		}
 
-		// Passo 6: utente collegato, letto dal cookie (senza nonce la REST riporta l'utente a 0, vedi D1).
+		// Passo 5: utente collegato, letto dal cookie (senza nonce la REST riporta l'utente a 0, vedi D1).
 		if ( 'none' !== $settings['exclude_users'] ) {
 			$user_id = $this->logged_in_user_id();
 			if ( Visit::user_excluded( $settings['exclude_users'], $user_id > 0, $user_id > 0 && user_can( $user_id, 'manage_options' ) ) ) {
@@ -142,10 +140,10 @@ final class HitController extends RestController {
 			}
 		}
 
-		// Passo 7: hash del visitatore con la chiave del giorno. IP e user agent non si salvano.
+		// Passo 6: hash del visitatore con la chiave del giorno. IP e user agent non si salvano.
 		$hash = bin2hex( Visit::visitor_hash( $ip, $ua, $this->daily_key() ) );
 
-		// Passo 8: una sola SELECT per il limite di frequenza e per le visite del giorno (serve per l'ingresso).
+		// Passo 7: una sola SELECT per il limite di frequenza e per le visite del giorno (serve per l'ingresso).
 		$hits   = Schema::table( 'hits' );
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - MINUTE_IN_SECONDS );
 		$row    = $wpdb->get_row(
@@ -156,8 +154,9 @@ final class HitController extends RestController {
 			return;
 		}
 
-		// Passo 9: referrer, canale, sorgente, ingresso, paese e user agent (solo per le visite che si registrano:
+		// Passo 8: referrer, canale, sorgente, ingresso, paese, user agent ed etichetta bot (solo per le visite che si registrano:
 		// gli scarti restano veloci e il paese non può mai bloccare una visita). IP e user agent non si salvano.
+		// Il flag `w` del tracker non è firmato: vale solo se è esattamente '1' e l'etichetta finale viene da un elenco fisso.
 		$site_host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
 		$referrer  = Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), $site_host );
 		$utm       = array(
@@ -168,15 +167,16 @@ final class HitController extends RestController {
 		$channel   = Channels::classify( $referrer, $utm['source'], $utm['medium'] );
 		$is_entry  = Visit::is_entry( (int) ( $row->today ?? 0 ), $referrer );
 		$agent     = UserAgent::parse( $ua );
+		$bot       = BotFilter::label( $ua, '1' === $this->param( $request, 'w' ) );
 		$country   = CountryDatabase::lookup( $ip );
 		$uri       = $this->relative_uri( $this->param( $request, 'u' ) );
 		$day       = wp_date( 'Y-m-d' );
 
-		// Passo 10: scrittura della visita (ts in UTC, day nel fuso del sito).
+		// Passo 9: scrittura della visita (ts in UTC, day nel fuso del sito).
 		$wpdb->query(
 			$wpdb->prepare(
-				"INSERT INTO {$hits} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, is_entry, country, device, browser, os)
-				VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s)",
+				"INSERT INTO {$hits} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, is_entry, country, device, browser, os, bot)
+				VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s)",
 				gmdate( 'Y-m-d H:i:s' ),
 				$day,
 				$hash,
@@ -193,11 +193,12 @@ final class HitController extends RestController {
 				substr( $country, 0, 2 ),
 				substr( $agent['device'], 0, 20 ),
 				substr( $agent['browser'], 0, 40 ),
-				substr( $agent['os'], 0, 40 )
+				substr( $agent['os'], 0, 40 ),
+				substr( $bot, 0, 20 )
 			)
 		);
 
-		// Passo 11: aggregati giornalieri di 404 e ricerche. Solo per le visite registrate (dopo tutti gli scarti)
+		// Passo 10: aggregati giornalieri di 404 e ricerche. Solo per le visite registrate (dopo tutti gli scarti)
 		// e senza legame con il visitatore: né l'hash né l'ID della riga di wp5w_hits.
 		if ( '404' === $type ) {
 			$this->count_not_found( $day, $this->param( $request, 'u' ), substr( Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), '' ), 0, 190 ) );
@@ -279,7 +280,7 @@ final class HitController extends RestController {
 	}
 
 	/**
-	 * Conta uno scarto del giorno per motivo (bot, user, dnt, rate, signature, ip).
+	 * Conta uno scarto del giorno per motivo (user, dnt, rate, signature, ip). Il motivo `bot` non si scrive più dalla 0.11.0.
 	 *
 	 * @param string $reason Motivo.
 	 * @return void

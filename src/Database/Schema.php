@@ -25,7 +25,7 @@ final class Schema {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '5';
+	public const DB_VERSION = '6';
 
 	/**
 	 * Nomi brevi delle tabelle, nell'ordine in cui compaiono nella pagina Stato.
@@ -93,7 +93,7 @@ final class Schema {
 	}
 
 	/**
-	 * Porta lo schema alla versione corrente: migrazione delle chiavi primarie, poi dbDelta (che crea anche le tabelle nuove della versione 5).
+	 * Porta lo schema alla versione corrente: migrazione delle chiavi primarie e della colonna bot, poi dbDelta (che crea anche le tabelle nuove).
 	 *
 	 * Si esegue sotto un lock MySQL: se un'altra richiesta sta già migrando si esce senza toccare nulla
 	 * (nemmeno wp5w_db_version) e si riprova alla richiesta successiva.
@@ -121,10 +121,15 @@ final class Schema {
 				return;
 			}
 
-			// Passo 4: creazione delle tabelle mancanti con le definizioni finali.
+			// Passo 4: colonna bot di wp5w_hits (schema v6). Se fallisce non si aggiorna la versione.
+			if ( ! self::migrate_hits_columns() ) {
+				return;
+			}
+
+			// Passo 5: creazione delle tabelle mancanti con le definizioni finali.
 			self::create_tables();
 
-			// Passo 5: la versione si salva solo a migrazione riuscita.
+			// Passo 6: la versione si salva solo a migrazione riuscita.
 			update_option( 'wp5w_db_version', self::DB_VERSION );
 		} finally {
 			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', self::UPGRADE_LOCK ) );
@@ -174,6 +179,37 @@ final class Schema {
 				error_log( "wp5w: migrazione di {$table} fallita: " . $wpdb->last_error ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il fallimento della migrazione deve restare nel log di PHP.
 				return false;
 			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Aggiunge a wp5w_hits la colonna bot (schema v6), dopo os.
+	 *
+	 * Un solo ALTER TABLE, solo se la colonna manca: rieseguirla su uno schema già migrato non esegue nulla.
+	 * Le righe esistenti ricevono bot = ''.
+	 *
+	 * @return bool Falso se l'ALTER è fallito.
+	 */
+	private static function migrate_hits_columns(): bool {
+		global $wpdb;
+
+		$table = self::table( 'hits' );
+
+		// Su un'installazione nuova la tabella non esiste: ci pensa dbDelta().
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) !== $table ) {
+			return true;
+		}
+
+		// Colonna già presente: niente da fare.
+		if ( in_array( 'bot', $wpdb->get_col( "SHOW COLUMNS FROM {$table}" ), true ) ) {
+			return true;
+		}
+
+		if ( false === $wpdb->query( "ALTER TABLE {$table} ADD COLUMN bot varchar(20) NOT NULL DEFAULT '' AFTER os" ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Migrazione dello schema del plugin.
+			error_log( "wp5w: migrazione di {$table} fallita: " . $wpdb->last_error ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il fallimento della migrazione deve restare nel log di PHP.
+			return false;
 		}
 
 		return true;
@@ -293,6 +329,7 @@ final class Schema {
 
 		// Visite grezze della raccolta propria: nessun IP e nessuno user agent, solo l'hash del giorno (md5 grezzo, 16 byte).
 		// ts è in UTC, day è il giorno del sito. country (ISO a 2 lettere), device, browser e os (nomi di WP Statistics) sono vuoti se non riconosciuti o se il database dei paesi manca.
+		// bot è vuoto per le visite normali e vale ua-corto, webdriver o la firma del bot dichiarato (0.11.0, schema v6).
 		dbDelta(
 			"CREATE TABLE {$hits} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -313,13 +350,14 @@ final class Schema {
 			device varchar(20) NOT NULL DEFAULT '',
 			browser varchar(40) NOT NULL DEFAULT '',
 			os varchar(40) NOT NULL DEFAULT '',
+			bot varchar(20) NOT NULL DEFAULT '',
 			PRIMARY KEY  (id),
 			KEY visitor_ts (visitor,ts),
 			KEY day (day)
 		) {$charset};"
 		);
 
-		// Visite scartate per giorno e motivo: bot, user, dnt, rate, signature, ip.
+		// Visite scartate per giorno e motivo: user, dnt, rate, signature, ip. Il motivo bot non si scrive più dalla 0.11.0 e resta per i giorni storici.
 		dbDelta(
 			"CREATE TABLE {$discards} (
 			day date NOT NULL,
