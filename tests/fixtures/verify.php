@@ -873,8 +873,8 @@ $check(
 	$wpdb->get_var( 'SELECT SUM(visitors) FROM ' . $own_table( 'dim_daily' ) . " WHERE origin = 'own' AND dim = 'channel' AND day = '{$today}'" )
 );
 // Le visite segnalate (colonna bot) entrano negli aggregati own (0.11.0).
-$flagged_visitors = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(DISTINCT visitor) FROM {$hits_table} WHERE day = %s AND bot = ''", $today ) );
-$check( 'own site_daily.visitors comprende le visite segnalate', true, (int) ( $own_site->visitors ?? 0 ) > $flagged_visitors );
+$normal_visitors = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(DISTINCT visitor) FROM {$hits_table} WHERE day = %s AND bot = ''", $today ) );
+$check( 'own site_daily.visitors comprende le visite segnalate', true, (int) ( $own_site->visitors ?? 0 ) > $normal_visitors );
 $dims_total = array();
 foreach ( array( 'channel', 'source', 'country', 'device', 'browser', 'platform' ) as $wp5w_dim ) {
 	$dims_total[ $wp5w_dim ] = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(visitors), 0) FROM ' . $own_table( 'dim_daily' ) . " WHERE origin = 'own' AND day = %s AND dim = %s", $today, $wp5w_dim ) );
@@ -2237,6 +2237,10 @@ wp_set_current_user( 0 );
 // ---------------------------------------------------------------------------
 // 14. Pulizia finale.
 // ---------------------------------------------------------------------------
+// Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
+remove_filter( 'pre_http_request', $github_mock, 10 );
+remove_filter( 'upgrader_pre_download', $block_download );
+remove_filter( 'user_has_cap', $without_update_cap );
 $restore_state();
 foreach ( array( 'wp5w_verify_subscriber3' ) as $wp5w_login ) {
 	$wp5w_user = get_user_by( 'login', $wp5w_login );
