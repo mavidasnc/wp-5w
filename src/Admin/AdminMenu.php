@@ -35,14 +35,21 @@ final class AdminMenu {
 	}
 
 	/**
-	 * Aggiunge il link "Dashboard" nella riga del plugin, nell'elenco dei plugin.
+	 * Aggiunge i link "Dashboard" e "Verifica aggiornamenti" (scheda Stato) nella riga del plugin, nell'elenco dei plugin.
 	 *
 	 * @param array<int|string,string> $links Link esistenti.
 	 * @return array<int|string,string>
 	 */
 	public function add_dashboard_link( array $links ): array {
-		$url = admin_url( 'admin.php?page=' . self::MENU_SLUG );
-		array_unshift( $links, '<a href="' . esc_url( $url ) . '">' . esc_html__( 'Dashboard', 'wp-5w' ) . '</a>' );
+		$url        = admin_url( 'admin.php?page=' . self::MENU_SLUG );
+		$status_url = admin_url( 'admin.php?page=' . self::MENU_SLUG . '&tab=status' );
+
+		// In testa, nell'ordine: Dashboard e Verifica aggiornamenti.
+		array_unshift(
+			$links,
+			'<a href="' . esc_url( $url ) . '">' . esc_html__( 'Dashboard', 'wp-5w' ) . '</a>',
+			'<a href="' . esc_url( $status_url ) . '">' . esc_html__( 'Verifica aggiornamenti', 'wp-5w' ) . '</a>'
+		);
 		return $links;
 	}
 

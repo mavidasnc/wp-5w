@@ -22,7 +22,6 @@ use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\DateRange;
-use Mavida\FiveW\Support\Updater;
 use Mavida\FiveW\Support\Visit;
 
 defined( 'ABSPATH' ) || exit;
@@ -364,8 +363,6 @@ final class AdminController extends RestController {
 				'tables'   => $this->overview->coverage(),
 				'last_run' => Importer::last_state(),
 				'next_run' => $next ? (int) $next : null,
-				'version'  => WP5W_VERSION,
-				'updates'  => Updater::status(),
 				'geo'      => CountryDatabase::status(),
 			)
 		);

@@ -17,12 +17,13 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
   - **Trend:** punteggio da -100 a +100 sulle ultime 4 settimane complete contro le 4 precedenti (visitatori 50%, visibilità su Google 25%, posizione media 25%), per il sito nella Panoramica e per ogni contenuto nelle tabelle.
   - **Articoli:** ultimi 10 pubblicati e 10 più visti (settimana o mese), con il grafico delle visite degli ultimi 7 giorni; poi «Pagine non trovate» (indirizzi inesistenti visitati, con la provenienza) e «Ricerche interne» (termini cercati sul sito e ricerche senza risultati), entrambi su 7, 30 o 90 giorni.
   - **Dettaglio in un modale** (clic sul titolo): KPI, andamento, ricerche su Google, canali e siti di provenienza, con periodo selezionabile.
-  - **Visitatori:** «Online adesso» in cima (visitatori degli ultimi 5 minuti e contenuti che guardano, aggiornato ogni 30 secondi solo a scheda visibile), ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), box «Pubblico» (paesi, dispositivi, browser e sistemi operativi degli ultimi 7, 30 o 90 giorni), box «Campagne» (UTM di campagna, sorgente e mezzo), provenienze (con i nomi leggibili delle app, per esempio «LinkedIn (app)») e keyword degli ultimi 7 giorni.
+  - **Visitatori:** «Online adesso» in cima (visitatori degli ultimi 5 minuti e contenuti che guardano, aggiornato ogni 30 secondi solo a scheda visibile), ultimi 7 giorni e ultimi 6 mesi per mese (totali a barre e medie al giorno a linee), quattro box affiancati «Pubblico (paesi)», «Dispositivi», «Browser» e «Sistemi operativi» (ultimi 7, 30 o 90 giorni, con un solo selettore del periodo: 4 colonne da 1280 px, 2 fino a 700 px, 1 sotto), box «Campagne» (UTM di campagna, sorgente e mezzo), provenienze (con i nomi leggibili delle app, per esempio «LinkedIn (app)») e keyword degli ultimi 7 giorni.
   - I box a riga intera si riducono con un toggle, che resta memorizzato nel browser.
-  - **Stato:** confronto della raccolta propria con WP Statistics (giorni completi, differenze, scarti, contenuti), sorgenti, copertura delle tabelle, database dei paesi, ultimo import, avvio manuale.
+  - **Stato:** confronto della raccolta propria con WP Statistics (giorni completi, differenze, scarti, contenuti), sorgenti, copertura delle tabelle, database dei paesi, ultimo import, avvio manuale e box «Aggiornamenti» (versione installata e ultima, verifica immediata e installazione dalle release di GitHub).
 - **Raccolta propria (dalla 0.7.0):**
   - **Tracker** di meno di 1,5 KB, in `defer`, che funziona anche con le pagine in cache: invia la visita a `POST /wp5w/v1/hit` con `sendBeacon`. Nessun cookie, nessun `localStorage`, nessun IP o user agent salvato (il visitatore è un hash che cambia ogni giorno).
-  - **Esclusioni:** bot e crawler, browser automatici, Do Not Track, amministratori (o tutti gli utenti collegati), IP e intervalli CIDR, oltre 30 visite al minuto per visitatore. Gli scarti si contano per giorno e motivo.
+  - **Esclusioni:** Do Not Track, amministratori (o tutti gli utenti collegati), IP e intervalli CIDR, firma errata, oltre 30 visite al minuto per visitatore. Gli scarti si contano per giorno e motivo.
+  - **Bot e browser automatici (dalla 0.11.0):** non si scartano, si segnalano nella colonna `bot` di `wp5w_hits` (`ua-corto` per gli user agent sotto i 16 caratteri, la firma del bot dichiarato, `webdriver` per `navigator.webdriver`, `''` per le visite normali) e restano nei conteggi: il traffico segnalato si separerà quando si saprà cosa è. Dalla 0.11.0 la raccolta propria può quindi contare più di WP Statistics.
   - **Scheda Opzioni** per raccolta, utenti, IP, DNT, conservazione e data di passaggio (`wp5w_own_since`).
   - Le righe si distinguono con la colonna `origin` (`wps` o `own`) nelle tabelle aggregate.
   - **Paese, dispositivo, browser e sistema operativo (dalla 0.9.0):** il paese si ricava dall'IP con il database DB-IP Lite Country (l'IP non si salva); dispositivo, browser e sistema dallo user agent con regole essenziali, con gli stessi nomi di WP Statistics (`smartphone`, `Mac`, `GNU/Linux`...). Lo user agent non si salva.
@@ -31,7 +32,7 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
   - **404 e ricerche interne (dalla 0.10.0):** solo aggregati giornalieri, senza legame con il visitatore; i termini di ricerca si normalizzano e le email e i numeri lunghi si salvano come «(filtrato)». Le immagini mancanti non compaiono: il server risponde senza passare da WordPress.
 - **Comandi WP-CLI:** `wp 5w status`, `wp 5w etl [--full] [--from=] [--to=]` e `wp 5w gsc-import <file.jsonl>`.
 - **Recupero dello storico di Search Console** dall'API (fino a 16 mesi) con `scripts/gsc-backfill.py`: le credenziali Google restano sul computer, sul server arriva solo il file dei dati.
-- **Aggiornamenti automatici** dalle release di GitHub.
+- **Aggiornamenti dalle release di GitHub:** WordPress propone l'aggiornamento come per ogni plugin; dalla 0.11.0 si può anche verificare e installare dal box «Aggiornamenti» della scheda Stato (chi ha `update_plugins`) o dal link «Verifica aggiornamenti» nella riga del plugin.
 
 ## Tabelle
 
@@ -42,8 +43,8 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
 | `wp5w_entry_daily` | Visitatori entrati da un contenuto, per canale | `statistics_visitor.first_page` → `statistics_pages` |
 | `wp5w_referrer_daily` | Siti di provenienza (host) di chi entra da un contenuto | `statistics_visitor.referred` |
 | `wp5w_dim_daily` | Visitatori per paese, device, browser, sistema, canale e sorgente | `statistics_visitor` |
-| `wp5w_hits` | Visite grezze della raccolta propria (hash del visitatore, contenuto, URI, referrer, canale, UTM, ingresso, paese, dispositivo, browser e sistema): niente IP né user agent | Tracker del plugin |
-| `wp5w_discards` | Visite scartate per giorno e motivo (`bot`, `user`, `dnt`, `rate`, `signature`, `ip`) | Endpoint `/hit` |
+| `wp5w_hits` | Visite grezze della raccolta propria (hash del visitatore, contenuto, URI, referrer, canale, UTM, ingresso, paese, dispositivo, browser e sistema, etichetta `bot`): niente IP né user agent | Tracker del plugin |
+| `wp5w_discards` | Visite scartate per giorno e motivo (`user`, `dnt`, `rate`, `signature`, `ip`; `bot` solo nei giorni fino alla 0.10.0) | Endpoint `/hit` |
 | `wp5w_notfound_daily` | Pagine non trovate per giorno, URI e host del referrer, con visite e ultima visita (UTC): nessun visitatore | Endpoint `/hit` (visite di tipo `404`) |
 | `wp5w_search_daily` | Ricerche interne per giorno e termine normalizzato, con quante senza risultati: nessun orario né visitatore | Endpoint `/hit` (visite di tipo `search`) |
 | `wp5w_gsc_daily` | Click, impression e posizione per giorno, pagina e query; `origin` rankmath o api | `rank_math_analytics_gsc` oppure l'API di Search Console (backfill), collegata ai contenuti tramite `rank_math_analytics_objects` o `url_to_postid()` |

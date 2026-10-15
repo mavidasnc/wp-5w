@@ -2,7 +2,8 @@
  * Tracker di wp-5w: invia la visita all'endpoint REST del plugin.
  *
  * Senza dipendenze, senza cookie e senza localStorage. Nessun controllo sull'utente collegato:
- * la pagina può stare in cache e se ne occupa l'endpoint.
+ * la pagina può stare in cache e se ne occupa l'endpoint. I browser automatici (navigator.webdriver)
+ * si segnalano con il parametro w=1 e non si scartano.
  */
 ( function () {
 	// 1) Dati stampati da PHP nel blocco JSON #wp5w-hit: se mancano o non sono validi, si esce.
@@ -14,18 +15,13 @@
 		return;
 	}
 
-	// 2) Browser automatici: niente visita.
-	if ( navigator.webdriver ) {
-		return;
-	}
-
 	var p = new URLSearchParams();
 
-	// 3) Do Not Track (se l'opzione è attiva): si invia solo dnt=1, senza contenuto, URI, referrer né UTM.
+	// 2) Do Not Track (se l'opzione è attiva): si invia solo dnt=1, senza contenuto, URI, referrer né UTM.
 	if ( d.dnt && ( navigator.doNotTrack === '1' || window.doNotTrack === '1' ) ) {
 		p.set( 'dnt', '1' );
 	} else {
-		// 4) Contenuto firmato, percorso, referrer e parametri UTM dell'URL (se presenti).
+		// 3) Contenuto firmato, percorso, referrer e parametri UTM dell'URL (se presenti).
 		var q = new URLSearchParams( location.search );
 		p.set( 't', d.type );
 		p.set( 'id', d.id );
@@ -37,6 +33,11 @@
 				p.set( k[ 0 ], q.get( k[ 1 ] ) );
 			}
 		} );
+
+		// 4) Browser automatico: la visita si registra e l'endpoint la segnala (il flag non è firmato).
+		if ( navigator.webdriver ) {
+			p.set( 'w', '1' );
+		}
 
 		// 5) Ricerca interna: termine e numero di risultati (solo nella prima pagina dei risultati).
 		if ( d.q ) {

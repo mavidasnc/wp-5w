@@ -2,7 +2,6 @@ import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { Notice, Spinner } from '@wordpress/components';
 import { api, formatDay } from '../api';
-import Card from './Card';
 import DimensionList from './DimensionList';
 import PeriodSwitch from './PeriodSwitch';
 
@@ -32,14 +31,15 @@ const countryLabel = ( code ) => {
 
 // I quattro elenchi: chiave della risposta, titolo e funzione che dà l'etichetta di un valore.
 const LISTS = [
-	{ key: 'country', title: __( 'Paesi', 'wp-5w' ), label: countryLabel },
+	{ key: 'country', title: __( 'Pubblico (paesi)', 'wp-5w' ), label: countryLabel },
 	{ key: 'device', title: __( 'Dispositivi', 'wp-5w' ), label: ( value ) => DEVICES[ value ] ?? value },
 	{ key: 'browser', title: __( 'Browser', 'wp-5w' ), label: ( value ) => value },
 	{ key: 'platform', title: __( 'Sistemi operativi', 'wp-5w' ), label: ( value ) => SYSTEMS[ value ] ?? value },
 ];
 
 /**
- * Box «Pubblico»: paesi, dispositivi, browser e sistemi operativi degli ultimi N giorni; carica da /admin/audience/dimensions.
+ * Quattro box affiancati (paesi, dispositivi, browser e sistemi operativi) degli ultimi N giorni, con un solo
+ * selettore del periodo e una sola chiamata a /admin/audience/dimensions per ogni cambio.
  */
 export default function AudienceDimensions() {
 	const [ days, setDays ] = useState( 30 );
@@ -57,26 +57,22 @@ export default function AudienceDimensions() {
 	const empty = data && LISTS.every( ( { key } ) => data.dims[ key ].total === 0 );
 
 	return (
-		<Card
-			id="audience-dimensions"
-			title={
-				<>
-					{ __( 'Pubblico', 'wp-5w' ) }
-					{ data && (
-						<span className="wp5w-type">
-							{ formatDay( data.range.from ) } – { formatDay( data.range.to ) }
-						</span>
-					) }
-				</>
-			}
-			actions={ <PeriodSwitch days={ days } onChange={ setDays } /> }
-		>
+		<div className="wp5w-audience-dims">
+			{ /* Barra sopra la riga: intervallo (solo con i dati) e selettore del periodo. */ }
+			<div className="wp5w-card__head">
+				<span className="wp5w-type">
+					{ data && `${ formatDay( data.range.from ) } – ${ formatDay( data.range.to ) }` }
+				</span>
+				<PeriodSwitch days={ days } onChange={ setDays } />
+			</div>
 			{ error && <Notice status="error" isDismissible={ false }>{ error }</Notice> }
 			{ ! data && ! error && <Spinner /> }
 			{ data && (
-				<div className="wp5w-columns wp5w-dimensions">
+				<div className="wp5w-columns wp5w-columns--4">
 					{ LISTS.map( ( list ) => (
-						<DimensionList key={ list.key } title={ list.title } dim={ data.dims[ list.key ] } label={ list.label } />
+						<section key={ list.key } className="wp5w-card wp5w-dimensions">
+							<DimensionList title={ list.title } dim={ data.dims[ list.key ] } label={ list.label } />
+						</section>
 					) ) }
 				</div>
 			) }
@@ -87,6 +83,6 @@ export default function AudienceDimensions() {
 					{ empty && ` ${ __( 'Nessun dato nel periodo.', 'wp-5w' ) }` }
 				</p>
 			) }
-		</Card>
+		</div>
 	);
 }

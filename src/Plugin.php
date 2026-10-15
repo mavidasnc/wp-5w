@@ -27,6 +27,7 @@ use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\REST\AdminController;
 use Mavida\FiveW\REST\HitController;
 use Mavida\FiveW\REST\RestController;
+use Mavida\FiveW\REST\UpdateController;
 use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Sources\RankMathSource;
 use Mavida\FiveW\Sources\WpStatisticsSource;
@@ -111,6 +112,7 @@ final class Plugin {
 		add_filter( 'rest_post_dispatch', array( RestController::class, 'no_cache' ), 10, 3 );
 		$search = new SearchQuery();
 		$posts  = new PostsQuery();
+		( new UpdateController() )->register();
 		( new AdminController( $importer, new OverviewQuery(), $posts, $search, new AudienceQuery( $search ), new TrendQuery(), new CompareQuery(), new OnlineQuery(), new OperationsQuery() ) )->register();
 
 		// Visite degli ultimi 30 giorni nell'elenco di articoli e pagine e nella barra di amministrazione (anche nel frontend).

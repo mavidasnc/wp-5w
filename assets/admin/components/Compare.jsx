@@ -108,7 +108,7 @@ export default function Compare() {
 						<p className="wp5w-note wp5w-note--top">
 							{ sprintf(
 								/* translators: %s: soglia di differenza in percentuale. */
-								__( 'La raccolta propria conta un po\' meno, perché esclude bot e amministratori. Una differenza stabile entro il %s è normale; i giorni oltre la soglia sono evidenziati.', 'wp-5w' ),
+								__( 'La raccolta propria può contare un po\' meno, perché esclude gli amministratori; dalla versione 0.11.0 bot e browser automatici si registrano e si segnalano. Una differenza stabile entro il %s è normale; i giorni oltre la soglia sono evidenziati.', 'wp-5w' ),
 								formatNumber( data.threshold, '%' )
 							) }
 						</p>

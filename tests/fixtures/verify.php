@@ -4,11 +4,13 @@
  *
  * Uso: npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php
  *
- * Controlla lo schema v5 e le migrazioni da v3 e da v4, confronta le tabelle wp5w_* con le sorgenti, simula le visite
+ * Controlla lo schema v6 e le migrazioni da v3, da v4 e da v5, confronta le tabelle wp5w_* con le sorgenti, simula le visite
  * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine, le rotte delle opzioni, il confronto con WP Statistics
  * e, dalla fase 3, il box Pubblico, il database dei paesi (download reale e guasti simulati) e paese e user agent delle visite.
  * La fase 4 aggiunge il canale «ai» sulle due origini, le dimensioni UTM, «Online adesso», le pagine 404, le ricerche interne,
  * le visite nell'elenco dei contenuti e nella barra di amministrazione e il modale aperto dall'URL (sezione 12).
+ * L'iterazione 0.11.0 segnala bot e browser automatici nella colonna `bot` senza scartarli (sezioni 5 e 6),
+ * aggiunge la migrazione alla v6 (sezione 2) e controlla le rotte degli aggiornamenti e i link nell'admin (sezione 13).
  *
  * @package Mavida\FiveW
  */
@@ -89,10 +91,10 @@ $v5_keys = array(
 );
 
 // ---------------------------------------------------------------------------
-// 1. Schema v5.
+// 1. Schema v6.
 // ---------------------------------------------------------------------------
 $check( 'schema: wp5w_db_version = Schema::DB_VERSION', Schema::DB_VERSION, get_option( 'wp5w_db_version' ) );
-$check( 'schema: versione 5', '5', Schema::DB_VERSION );
+$check( 'schema: versione 6', '6', Schema::DB_VERSION );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "schema: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 	$check( "schema: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
@@ -104,6 +106,24 @@ foreach ( $v4_keys as $wp5w_name => $wp5w_expected ) {
 foreach ( Schema::RAW_TABLES as $wp5w_name ) {
 	$check( "schema: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 }
+// Colonna bot (0.11.0): varchar(20) NOT NULL con default vuoto, subito dopo os.
+$bot_column  = $wpdb->get_row(
+	$wpdb->prepare(
+		"SELECT column_type, is_nullable, column_default, ordinal_position FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'bot'",
+		Schema::table( 'hits' )
+	),
+	ARRAY_A
+);
+$os_position = (int) $wpdb->get_var(
+	$wpdb->prepare(
+		"SELECT ordinal_position FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'os'",
+		Schema::table( 'hits' )
+	)
+);
+$check( 'schema: wp5w_hits.bot è varchar(20)', 'varchar(20)', $bot_column['column_type'] ?? 'assente' );
+$check( 'schema: wp5w_hits.bot è NOT NULL', 'NO', $bot_column['is_nullable'] ?? 'assente' );
+$check( 'schema: wp5w_hits.bot ha il default vuoto', '', trim( (string) ( $bot_column['column_default'] ?? 'assente' ), "'" ) );
+$check( 'schema: wp5w_hits.bot viene subito dopo os', $os_position + 1, $bot_column['ordinal_position'] ?? 'assente' );
 $check(
 	'schema: wp5w_hits senza colonne ip o agent',
 	0,
@@ -187,7 +207,8 @@ $check( 'migrazione con lock occupato: nessuna colonna origin', 0, count( array_
 $other->query( "SELECT RELEASE_LOCK( 'wp5w_schema_upgrade' )" );
 $other->close();
 Schema::maybe_upgrade();
-$check( 'migrazione da v3: versione 5', '5', get_option( 'wp5w_db_version' ) );
+// Le migrazioni da v3 e da v4 non eseguono ALTER su wp5w_hits solo perché la tabella ha già la colonna bot in questo momento.
+$check( 'migrazione da v3: versione 6', '6', get_option( 'wp5w_db_version' ) );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "migrazione da v3: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 }
@@ -219,7 +240,7 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'install() rieseguito: nessun errore', '', $wpdb->last_error );
 $check( 'install() rieseguito: nessun ALTER', 0, $alters );
-$check( 'install() rieseguito: versione 5', '5', get_option( 'wp5w_db_version' ) );
+$check( 'install() rieseguito: versione 6', '6', get_option( 'wp5w_db_version' ) );
 $check( 'install() rieseguito: SHOW CREATE TABLE identico', md5( $create_before ), md5( $show_create() ) );
 
 // Da v4 a v5: schema v4 completo, senza le due tabelle nuove e con la versione 4. install() le crea, non esegue nessun ALTER e salva 5.
@@ -234,7 +255,7 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'migrazione da v4: nessun errore', '', $wpdb->last_error );
 $check( 'migrazione da v4: nessun ALTER', 0, $alters );
-$check( 'migrazione da v4: versione 5', '5', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v4: versione 6', '6', get_option( 'wp5w_db_version' ) );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "migrazione da v4: creata wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 	$check( "migrazione da v4: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
@@ -243,7 +264,99 @@ $create_v5 = $show_create();
 update_option( 'wp5w_db_version', '4' );
 Schema::install();
 $check( 'migrazione da v4 rieseguita: SHOW CREATE TABLE identico', md5( $create_v5 ), md5( $show_create() ) );
-$check( 'migrazione da v4 rieseguita: versione 5', '5', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v4 rieseguita: versione 6', '6', get_option( 'wp5w_db_version' ) );
+
+// Da v5 a v6: wp5w_hits senza la colonna bot, con almeno una riga.
+$hits_name  = Schema::table( 'hits' );
+$hits_probe = 0 === (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" );
+if ( $hits_probe ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_name} (ts, day, visitor, object_type, object_id, uri) VALUES (%s, %s, UNHEX(%s), 'post', 1, '/wp5w-verify-v6/')", gmdate( 'Y-m-d H:i:s' ), wp_date( 'Y-m-d' ), md5( 'wp5w-verify-v6' ) ) );
+}
+$hits_rows = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" );
+$has_bot   = static fn(): int => count( array_filter( $wpdb->get_col( "SHOW COLUMNS FROM {$hits_name}" ), static fn( $c ) => 'bot' === $c ) );
+$wpdb->query( "ALTER TABLE {$hits_name} DROP COLUMN bot" );
+update_option( 'wp5w_db_version', '5' );
+$check( 'v5 simulata: nessuna colonna bot', 0, $has_bot() );
+
+// Lock tenuto da una seconda connessione: maybe_upgrade() non cambia nulla.
+$other = new mysqli( $wp5w_host, DB_USER, DB_PASSWORD, DB_NAME, (int) $wp5w_port );
+$other->query( "SELECT GET_LOCK( 'wp5w_schema_upgrade', 0 )" );
+Schema::maybe_upgrade();
+$check( 'migrazione v5 con lock occupato: versione ancora 5', '5', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione v5 con lock occupato: nessuna colonna bot', 0, $has_bot() );
+$other->query( "SELECT RELEASE_LOCK( 'wp5w_schema_upgrade' )" );
+$other->close();
+
+// Lock libero: un solo ALTER TABLE, riga esistente con bot vuoto, versione 6.
+$alters = 0;
+add_filter( 'query', $count_alters );
+$wpdb->last_error = '';
+Schema::install();
+remove_filter( 'query', $count_alters );
+$check( 'migrazione da v5: nessun errore', '', $wpdb->last_error );
+$check( 'migrazione da v5: esattamente 1 ALTER', 1, $alters );
+$check( 'migrazione da v5: colonna bot presente', 1, $has_bot() );
+$check( 'migrazione da v5: posizione di bot dopo os', $os_position + 1, (int) $wpdb->get_var( $wpdb->prepare( "SELECT ordinal_position FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'bot'", $hits_name ) ) );
+$check( 'migrazione da v5: righe conservate', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
+$check( 'migrazione da v5: righe esistenti con bot vuoto', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name} WHERE bot = ''" ) );
+$check( 'migrazione da v5: versione 6', '6', get_option( 'wp5w_db_version' ) );
+
+// Idempotenza: con la versione forzata a 5 nessun ALTER e SHOW CREATE TABLE identico.
+$create_hits = (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 );
+update_option( 'wp5w_db_version', '5' );
+$alters = 0;
+add_filter( 'query', $count_alters );
+Schema::install();
+remove_filter( 'query', $count_alters );
+$check( 'migrazione da v5 rieseguita: nessun ALTER', 0, $alters );
+$check( 'migrazione da v5 rieseguita: SHOW CREATE TABLE identico', md5( $create_hits ), md5( (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 ) ) );
+$check( 'migrazione da v5 rieseguita: versione 6', '6', get_option( 'wp5w_db_version' ) );
+
+/**
+ * Definizione di una tabella da information_schema: colonne (nome, tipo, NULL, default, posizione) e indici.
+ *
+ * @param string $table Nome completo della tabella.
+ * @return string
+ */
+$table_definition = static function ( string $table ) use ( $wpdb ): string {
+	$columns = (string) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT GROUP_CONCAT( CONCAT_WS( '|', column_name, column_type, is_nullable, COALESCE( column_default, '<null>' ), ordinal_position ) ORDER BY ordinal_position SEPARATOR ';' ) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s",
+			$table
+		)
+	);
+	$indexes = (string) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT GROUP_CONCAT( CONCAT_WS( '|', index_name, seq_in_index, column_name, non_unique ) ORDER BY index_name, seq_in_index SEPARATOR ';' ) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = %s",
+			$table
+		)
+	);
+	return $columns . ' // ' . $indexes;
+};
+
+// Installazione senza wp5w_hits: la tabella migrata si mette da parte (RENAME), install() ricrea quella nuova con la colonna bot
+// senza ALTER, e le definizioni coincidono con quelle della migrazione. Poi si rimette la tabella migrata (con le sue righe).
+$hits_backup = $hits_name . '_verify_bak';
+$migrated    = $table_definition( $hits_name );
+$wpdb->query( "DROP TABLE IF EXISTS {$hits_backup}" );
+$wpdb->query( "RENAME TABLE {$hits_name} TO {$hits_backup}" );
+update_option( 'wp5w_db_version', '5' );
+$alters = 0;
+add_filter( 'query', $count_alters );
+$wpdb->last_error = '';
+Schema::install();
+remove_filter( 'query', $count_alters );
+$check( 'installazione senza hits: nessun errore', '', $wpdb->last_error );
+$check( 'installazione senza hits: nessun ALTER', 0, $alters );
+$check( 'installazione senza hits: tabella ricreata con bot', 1, $has_bot() );
+$check( 'installazione senza hits: colonne e indici uguali alla migrazione', md5( $migrated ), md5( $table_definition( $hits_name ) ) );
+$check( 'installazione senza hits: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$wpdb->query( "DROP TABLE {$hits_name}" );
+$wpdb->query( "RENAME TABLE {$hits_backup} TO {$hits_name}" );
+$check( 'installazione senza hits: tabella migrata ripristinata', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
+if ( $hits_probe ) {
+	$wpdb->query( "DELETE FROM {$hits_name} WHERE uri = '/wp5w-verify-v6/'" );
+}
 
 // ---------------------------------------------------------------------------
 // 3. Controlli esistenti dell'ETL di WP Statistics e Rank Math (somme sulle sole righe wps).
@@ -483,12 +596,66 @@ $row = $wpdb->get_row( "SELECT * FROM {$hits_table} ORDER BY id DESC LIMIT 1" );
 $check( 'hit interna: is_entry 0', 0, $row->is_entry ?? '' );
 $check( 'hit interna: referrer_host vuoto', '', $row->referrer_host ?? 'x' );
 
-// Bot e user agent vuoto.
-$before = array( $count_hits(), $discarded( 'bot' ) );
-$check( 'bot Googlebot: 204', 204, $send_hit( $payload( $post_a ), '198.51.100.2', 'Googlebot/2.1 (+http://www.google.com/bot.html)' ) );
+// Bot dichiarati, user agent vuoto e browser automatici (0.11.0): si registrano con l'etichetta nella colonna bot, non si scartano.
+$bot_label = static fn(): string => (string) $wpdb->get_var( "SELECT bot FROM {$hits_table} ORDER BY id DESC LIMIT 1" );
+$googlebot = 'Googlebot/2.1 (+http://www.google.com/bot.html)';
+$before    = array( $count_hits(), $discarded( 'bot' ) );
+$check( 'bot Googlebot: 204', 204, $send_hit( $payload( $post_a ), '198.51.100.2', $googlebot ) );
+$check( 'bot Googlebot: una riga', $before[0] + 1, $count_hits() );
+$check( 'bot Googlebot: etichetta bot', 'bot', $bot_label() );
 $check( 'bot UA vuoto: 204', 204, $send_hit( $payload( $post_a ), '198.51.100.3', '' ) );
-$check( 'bot: nessuna riga', $before[0], $count_hits() );
-$check( 'bot: scarti +2', $before[1] + 2, $discarded( 'bot' ) );
+$check( 'bot UA vuoto: una riga in più', $before[0] + 2, $count_hits() );
+$check( 'bot UA vuoto: etichetta ua-corto', 'ua-corto', $bot_label() );
+$check( 'bot: scarti bot invariati', $before[1], $discarded( 'bot' ) );
+
+// Altre etichette: ogni prova usa un IP diverso, così la riga è inequivocabile.
+$send_hit( $payload( $post_a ), '198.51.100.40', 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.0; +https://openai.com/gptbot)' );
+$check( 'GPTBot: etichetta gptbot', 'gptbot', $bot_label() );
+$send_hit( $payload( $post_a, array( 'w' => '1' ) ), '198.51.100.41', $chrome );
+$check( 'Chrome con w=1: etichetta webdriver', 'webdriver', $bot_label() );
+$send_hit( $payload( $post_a, array( 'w' => '0' ) ), '198.51.100.42', $chrome );
+$check( 'Chrome con w=0: etichetta vuota', '', $bot_label() );
+$send_hit( $payload( $post_a, array( 'w' => 'true' ) ), '198.51.100.43', $chrome );
+$check( 'Chrome con w=true: etichetta vuota', '', $bot_label() );
+$warnings = array();
+set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.prevent_path_disclosure_set_error_handler -- Prova isolata, il gestore viene tolto subito dopo.
+	static function ( int $errno, string $errstr ) use ( &$warnings ): bool {
+		$warnings[] = $errstr;
+		return true;
+	}
+);
+$array_w_status = $send_hit( $payload( $post_a, array( 'w' => array( '1' ) ) ), '198.51.100.44', $chrome );
+restore_error_handler();
+$check( 'Chrome con w[]=1: 204', 204, $array_w_status );
+$check( 'Chrome con w[]=1: etichetta vuota', '', $bot_label() );
+$check( 'Chrome con w[]=1: nessun warning', '', implode( ' | ', $warnings ) );
+$send_hit( $payload( $post_a ), '198.51.100.45', $chrome );
+$check( 'Chrome senza w: etichetta vuota', '', $bot_label() );
+$send_hit( $payload( $post_a, array( 'w' => '1' ) ), '198.51.100.46', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36' );
+$check( 'HeadlessChrome con w=1: etichetta headless', 'headless', $bot_label() );
+
+// Gli scarti restano: un bot dichiarato con Do Not Track è dnt, con una firma errata è signature, senza righe.
+$before = array( $count_hits(), $discarded( 'dnt' ), $discarded( 'signature' ) );
+$check( 'bot con dnt=1: 204', 204, $send_hit( array( 'dnt' => '1' ), '198.51.100.47', $googlebot ) );
+$check( 'bot con firma errata: 204', 204, $send_hit( $payload( $post_a, array( 's' => 'firma-sbagliata' ) ), '198.51.100.48', $googlebot ) );
+$check( 'bot con dnt o firma errata: nessuna riga', $before[0], $count_hits() );
+$check( 'bot con dnt=1: scarto dnt +1', $before[1] + 1, $discarded( 'dnt' ) );
+$check( 'bot con firma errata: scarto signature +1', $before[2] + 1, $discarded( 'signature' ) );
+
+// Una visita di un bot dichiarato esegue 2 query su wp5w_hits (una SELECT e una INSERT), come una visita normale.
+$queries = array();
+add_filter(
+	'query',
+	$bot_query_capture = static function ( $query ) use ( &$queries ) {
+		$queries[] = (string) $query;
+		return $query;
+	}
+);
+$send_hit( $payload( $post_a ), '198.51.100.49', $googlebot );
+remove_filter( 'query', $bot_query_capture );
+$on_hits = array_values( array_filter( $queries, static fn( $q ) => str_contains( $q, $hits_table ) ) );
+$check( 'visita di un bot: query su wp5w_hits', 2, count( $on_hits ) );
+$check( 'visita di un bot: una SELECT e una INSERT', '1|1', count( array_filter( $on_hits, static fn( $q ) => 0 === stripos( ltrim( $q ), 'SELECT' ) ) ) . '|' . count( array_filter( $on_hits, static fn( $q ) => 0 === stripos( ltrim( $q ), 'INSERT' ) ) ) );
 
 // Firma errata e tipo non valido.
 $before = array( $count_hits(), $discarded( 'signature' ) );
@@ -625,6 +792,20 @@ for ( $wp5w_i = 0; $wp5w_i < 31; $wp5w_i++ ) {
 $check( 'frequenza: 30 righe', $before[0] + 30, $count_hits() );
 $check( 'frequenza: scarto rate +1', $before[1] + 1, $discarded( 'rate' ) );
 
+// Stesso limite con uno user agent di bot dichiarato: 31 visite, 30 righe e uno scarto rate.
+$before = array( $count_hits(), $discarded( 'rate' ) );
+for ( $wp5w_i = 0; $wp5w_i < 31; $wp5w_i++ ) {
+	$send_hit( $payload( $post_a ), '198.51.100.78', $googlebot );
+}
+$check( 'frequenza con bot dichiarato: 30 righe', $before[0] + 30, $count_hits() );
+$check( 'frequenza con bot dichiarato: scarto rate +1', $before[1] + 1, $discarded( 'rate' ) );
+
+// Colonna bot: solo valori dell'elenco fisso, e lo scarto bot non è mai aumentato in tutta la sezione.
+$allowed_bot = array_merge( array( '', Mavida\FiveW\Support\BotFilter::LABEL_SHORT, Mavida\FiveW\Support\BotFilter::LABEL_WEBDRIVER ), Mavida\FiveW\Support\BotFilter::SIGNATURES );
+$found_bot   = $wpdb->get_col( "SELECT DISTINCT bot FROM {$hits_table}" );
+$check( 'colonna bot: solo valori dell\'elenco fisso', '', implode( ',', array_diff( $found_bot, $allowed_bot ) ) );
+$check( 'sezione 5: nessuno scarto bot', 0, $discarded( 'bot' ) );
+
 // Chiave del giorno: valida per oggi; una chiave di ieri viene rigenerata e non resta salvata.
 $check( 'chiave del giorno: inizia con la data di oggi', true, str_starts_with( (string) get_option( 'wp5w_daily_salt', '' ), $today . '|' ) );
 $yesterday_key = wp_date( 'Y-m-d', time() - DAY_IN_SECONDS ) . '|' . str_repeat( 'ab', 32 );
@@ -690,6 +871,19 @@ $check(
 	'own dim_daily (canale) = visitatori del sito',
 	$own_site->visitors ?? 'nessuna riga',
 	$wpdb->get_var( 'SELECT SUM(visitors) FROM ' . $own_table( 'dim_daily' ) . " WHERE origin = 'own' AND dim = 'channel' AND day = '{$today}'" )
+);
+// Le visite segnalate (colonna bot) entrano negli aggregati own (0.11.0).
+$normal_visitors = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(DISTINCT visitor) FROM {$hits_table} WHERE day = %s AND bot = ''", $today ) );
+$check( 'own site_daily.visitors comprende le visite segnalate', true, (int) ( $own_site->visitors ?? 0 ) > $normal_visitors );
+$dims_total = array();
+foreach ( array( 'channel', 'source', 'country', 'device', 'browser', 'platform' ) as $wp5w_dim ) {
+	$dims_total[ $wp5w_dim ] = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(visitors), 0) FROM ' . $own_table( 'dim_daily' ) . " WHERE origin = 'own' AND day = %s AND dim = %s", $today, $wp5w_dim ) );
+}
+$check( 'own dim_daily: stessa somma per le sei dimensioni', (string) (int) ( $own_site->visitors ?? 0 ), implode( ',', array_unique( array_values( $dims_total ) ) ) );
+$check(
+	'own object_daily.views dell\'articolo di prova comprende le visite segnalate',
+	$wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits_table} WHERE day = %s AND object_type = 'post' AND object_id = %d", $today, $post_a ) ),
+	$wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(views), 0) FROM ' . $own_table( 'object_daily' ) . " WHERE origin = 'own' AND day = %s AND object_type = 'post' AND object_id = %d", $today, $post_a ) )
 );
 $own_checksum = static function () use ( $wpdb ): string {
 	$out = '';
@@ -1304,8 +1498,11 @@ $check( 'visita IT: country, device, browser, os', 'IT|smartphone|Mobile Safari|
 $check( 'visita senza paese né user agent noto: registrata con campi vuoti', '|||', $geo_row( '/wp5w-v11-nd/' ) );
 $before = array( $count_hits(), $discarded( 'bot' ) );
 $check( 'bot da 8.8.8.8: 204', 204, $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v11-bot/' ) ), '8.8.8.8', 'Googlebot/2.1 (+http://www.google.com/bot.html)' ) );
-$check( 'bot da 8.8.8.8: nessuna riga', $before[0], $count_hits() );
-$check( 'bot da 8.8.8.8: scarto bot +1', $before[1] + 1, $discarded( 'bot' ) );
+$check( 'bot da 8.8.8.8: registrato, una riga in più', $before[0] + 1, $count_hits() );
+$check( 'bot da 8.8.8.8: etichetta bot e paese US', 'bot|US', $wpdb->get_var( $wpdb->prepare( "SELECT CONCAT_WS( '|', bot, country ) FROM {$hits_table} WHERE uri = %s", '/wp5w-v11-bot/' ) ) );
+$check( 'bot da 8.8.8.8: scarto bot invariato', $before[1], $discarded( 'bot' ) );
+// La riga di prova si toglie: i controlli seguenti contano le visite per paese.
+$wpdb->query( $wpdb->prepare( "DELETE FROM {$hits_table} WHERE uri = %s", '/wp5w-v11-bot/' ) );
 
 // Passo 8: nessuna query in più. Dopo il riscaldamento (chiave del giorno valida, database presente) una visita registrata
 // esegue solo la SELECT e la INSERT su wp5w_hits: il numero totale di query è 2 e nessuna riguarda wp5w_geo.
@@ -1322,7 +1519,7 @@ if ( 2 !== count( $queries ) ) {
 }
 
 // Passo 9: privacy. Nessuna colonna di wp5w_hits contiene un IP usato nei test o una parte dello user agent.
-$privacy_columns = "CONCAT_WS('|', object_type, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, country, device, browser, os)";
+$privacy_columns = "CONCAT_WS('|', object_type, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, country, device, browser, os, bot)";
 $privacy_hits    = 0;
 foreach ( array( '8.8.8.8', '8.8.4.4', '151.38.1.1', '198.51.100.30', 'Mozilla', 'AppleWebKit' ) as $wp5w_needle ) {
 	$privacy_hits += (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits_table} WHERE {$privacy_columns} LIKE %s", '%' . $wpdb->esc_like( $wp5w_needle ) . '%' ) );
@@ -1633,8 +1830,9 @@ $hit_404( '/manca-diretta/', '', '192.0.2.33', $chrome );
 $check( 'notfound: referrer vuoto', '1', $nf_row( '/manca-diretta/', '' )->hits ?? 'nessuna riga' );
 $nf_total = static fn(): int => (int) $wpdb->get_var( "SELECT COALESCE(SUM(hits), 0) FROM {$notfound_table}" );
 $before   = $nf_total();
-$hit_404( '/manca/', '', '192.0.2.34', 'Googlebot/2.1 (+http://www.google.com/bot.html)' );
-$check( 'notfound: un 404 da Googlebot non cambia la tabella (scarto bot)', $before, $nf_total() );
+$hit_404( '/manca-bot/', '', '192.0.2.34', 'Googlebot/2.1 (+http://www.google.com/bot.html)' );
+$check( 'notfound: un 404 da Googlebot si conta (bot segnalati, non scartati)', $before + 1, $nf_total() );
+$wpdb->query( $wpdb->prepare( "DELETE FROM {$notfound_table} WHERE uri = %s", '/manca-bot/' ) );
 $send_hit( $payload( $post_a, array( 'u' => '/wp5w-v12-articolo/' ) ), '192.0.2.35', $chrome );
 $check( 'notfound: nemmeno una visita a un articolo', $before, $nf_total() );
 
@@ -1875,8 +2073,181 @@ wp_deregister_script( 'wp5w-admin' );
 $admin_user( 0 );
 
 // ---------------------------------------------------------------------------
-// 13. Pulizia finale.
+// 13. Iterazione 0.11.0: aggiornamenti dall'admin, link nell'admin, GET /admin/status e tracker compilato.
 // ---------------------------------------------------------------------------
+// Nessuna richiesta reale a GitHub e nessun download: pre_http_request simula le risposte e upgrader_pre_download
+// (attivo per tutta la sezione) conta le chiamate e fallisce sempre, così nessun upgrader può sovrascrivere il checkout montato da wp-env.
+$update_option = 'external_updates-wp-5w';
+$update_saved  = get_option( $update_option, null );
+$restore_state = static function () use ( $update_option, &$update_saved ): void {
+	if ( null === $update_saved ) {
+		delete_option( $update_option );
+	} else {
+		update_option( $update_option, $update_saved );
+	}
+};
+
+$latest_tag     = 'v0.10.0';
+$unmocked_calls = 0;
+$download_calls = 0;
+$github_mock    = static function ( $pre, $args, $url ) use ( &$latest_tag, &$unmocked_calls ) {
+	$parts = wp_parse_url( (string) $url );
+	if ( ! in_array( $parts['host'] ?? '', array( 'api.github.com', 'github.com', 'raw.githubusercontent.com' ), true ) ) {
+		++$unmocked_calls;
+		return new WP_Error( 'wp5w_verify_blocked', 'Richiesta non simulata: ' . $url );
+	}
+	$path     = (string) ( $parts['path'] ?? '' );
+	$version  = ltrim( $latest_tag, 'v' );
+	$release  = array(
+		'tag_name'    => $latest_tag,
+		'zipball_url' => 'https://example.invalid/zipball/' . $latest_tag,
+		'created_at'  => '2026-10-15T10:00:00Z',
+		'draft'       => false,
+		'prerelease'  => false,
+		'body'        => '',
+		'assets'      => array(
+			array(
+				'name'                 => "wp-5w-{$version}.zip",
+				'url'                  => "https://example.invalid/asset/wp-5w-{$version}.zip",
+				'browser_download_url' => "https://example.invalid/wp-5w-{$version}.zip",
+				'download_count'       => 1,
+			),
+		),
+	);
+	$ok       = array(
+		'headers'  => array(),
+		'cookies'  => array(),
+		'filename' => null,
+		'response' => array( 'code' => 200, 'message' => 'OK' ),
+	);
+	if ( str_ends_with( $path, '/releases/latest' ) ) {
+		return $ok + array( 'body' => (string) wp_json_encode( $release ) );
+	}
+	if ( str_ends_with( $path, '/releases' ) ) {
+		return $ok + array( 'body' => (string) wp_json_encode( array( $release ) ) );
+	}
+	// Ogni altro indirizzo di GitHub (per esempio il file principale del plugin) risponde 404: la versione viene dal tag.
+	return array( 'body' => '', 'response' => array( 'code' => 404, 'message' => 'Not Found' ) ) + $ok;
+};
+$block_download = static function () use ( &$download_calls ) {
+	++$download_calls;
+	return new WP_Error( 'wp5w_verify_no_download', 'Download bloccato dal test.' );
+};
+add_filter( 'pre_http_request', $github_mock, 10, 3 );
+add_filter( 'upgrader_pre_download', $block_download );
+
+// Rotte registrate.
+$routes = rest_get_server()->get_routes();
+foreach ( array( '/wp5w/v1/admin/update', '/wp5w/v1/admin/update/check', '/wp5w/v1/admin/update/install' ) as $wp5w_route ) {
+	$check( "aggiornamenti: rotta {$wp5w_route} registrata", '1', isset( $routes[ $wp5w_route ] ) ? '1' : '0' );
+}
+
+// Permessi: senza utente 401, abbonato 403.
+$update_calls = array(
+	'GET /admin/update'          => array( 'GET', '/wp5w/v1/admin/update' ),
+	'POST /admin/update/check'   => array( 'POST', '/wp5w/v1/admin/update/check' ),
+	'POST /admin/update/install' => array( 'POST', '/wp5w/v1/admin/update/install' ),
+);
+wp_set_current_user( 0 );
+foreach ( $update_calls as $wp5w_label => $wp5w_call ) {
+	$check( "aggiornamenti senza utente, {$wp5w_label}: 401", 401, $rest_call( $wp5w_call[0], $wp5w_call[1] )->get_status() );
+}
+$update_subscriber = (int) wp_insert_user( array( 'user_login' => 'wp5w_verify_subscriber3', 'user_pass' => wp_generate_password(), 'user_email' => 'wp5w-verify3@example.com', 'role' => 'subscriber' ) );
+wp_set_current_user( $update_subscriber );
+foreach ( $update_calls as $wp5w_label => $wp5w_call ) {
+	$check( "aggiornamenti con un abbonato, {$wp5w_label}: 403", 403, $rest_call( $wp5w_call[0], $wp5w_call[1] )->get_status() );
+}
+wp_set_current_user( 0 );
+wp_delete_user( $update_subscriber );
+
+// Amministratore senza la sola capability update_plugins: stato e controllo sì, installazione no.
+$without_update_cap = static function ( array $allcaps ): array {
+	$allcaps['update_plugins'] = false;
+	return $allcaps;
+};
+add_filter( 'user_has_cap', $without_update_cap );
+wp_set_current_user( $admin_id );
+$check( 'aggiornamenti senza update_plugins, GET: 200', 200, $rest_call( 'GET', '/wp5w/v1/admin/update' )->get_status() );
+$check( 'aggiornamenti senza update_plugins, check: 200', 200, $rest_call( 'POST', '/wp5w/v1/admin/update/check' )->get_status() );
+$forbidden = $rest_call( 'POST', '/wp5w/v1/admin/update/install' );
+$check( 'aggiornamenti senza update_plugins, install: 403', 403, $forbidden->get_status() );
+$check( 'aggiornamenti senza update_plugins, install: codice', 'wp5w_forbidden_update', $forbidden->get_data()['code'] ?? '' );
+remove_filter( 'user_has_cap', $without_update_cap );
+
+// Con l'amministratore: stato, controllo e rifiuto dell'installazione senza aggiornamenti.
+$update_get = $rest_call( 'GET', '/wp5w/v1/admin/update' );
+$update_now = (array) $update_get->get_data();
+$check( 'aggiornamenti GET: 200', 200, $update_get->get_status() );
+$check( 'aggiornamenti GET: versione installata', WP5W_VERSION, $update_now['current'] ?? '' );
+$check( 'aggiornamenti GET: releases_url di GitHub', true, str_starts_with( (string) ( $update_now['releases_url'] ?? '' ), 'https://github.com/mavidasnc/wp-5w' ) );
+$check( 'aggiornamenti GET: chiavi latest, update_available e checked_at', '', implode( ',', array_diff( array( 'latest', 'update_available', 'checked_at' ), array_keys( $update_now ) ) ) );
+$update_check = $rest_call( 'POST', '/wp5w/v1/admin/update/check' );
+$check_data   = (array) $update_check->get_data();
+$check( 'aggiornamenti check: 200', 200, $update_check->get_status() );
+$check( 'aggiornamenti check: nessun aggiornamento con la release v0.10.0', false, $check_data['update_available'] ?? 'assente' );
+$check( 'aggiornamenti check: checked_at recente', true, (int) ( $check_data['checked_at'] ?? 0 ) >= time() - 60 );
+$update_install = $rest_call( 'POST', '/wp5w/v1/admin/update/install' );
+$check( 'aggiornamenti install senza aggiornamenti: 409', 409, $update_install->get_status() );
+$check( 'aggiornamenti install senza aggiornamenti: codice', 'wp5w_no_update', $update_install->get_data()['code'] ?? '' );
+$check( 'aggiornamenti install senza aggiornamenti: l\'upgrader non è partito', 0, $download_calls );
+
+// Release simulata v99.0.0: il controllo la trova; install NON si chiama. Lo stato si ripristina subito.
+$latest_tag = 'v99.0.0';
+$fake_check = (array) $rest_call( 'POST', '/wp5w/v1/admin/update/check' )->get_data();
+$check( 'aggiornamenti con v99.0.0: update_available', true, $fake_check['update_available'] ?? 'assente' );
+$check( 'aggiornamenti con v99.0.0: latest', '99.0.0', $fake_check['latest'] ?? '' );
+$restore_state();
+$latest_tag = 'v0.10.0';
+
+$check( 'aggiornamenti: nessuna richiesta HTTP non simulata', 0, $unmocked_calls );
+$check( 'aggiornamenti: nessun download tentato', 0, $download_calls );
+
+// Link nella riga del plugin: «Dashboard» e poi «Verifica aggiornamenti» verso la scheda Stato.
+$plugin_links = ( new AdminMenu() )->add_dashboard_link( array() );
+$check( 'riga del plugin: due link', 2, count( $plugin_links ) );
+$check( 'riga del plugin: il primo è Dashboard', true, str_contains( (string) ( $plugin_links[0] ?? '' ), 'Dashboard' ) );
+$check( 'riga del plugin: il secondo è Verifica aggiornamenti verso la scheda Stato', true, str_contains( html_entity_decode( (string) ( $plugin_links[1] ?? '' ) ), 'page=wp5w&tab=status' ) && str_contains( (string) ( $plugin_links[1] ?? '' ), 'Verifica aggiornamenti' ) );
+
+// Il link «Check for updates» di plugin-update-checker si nasconde. In wp eval-file admin_init non parte e la libreria non aggancia
+// plugin_row_meta, quindi questo controllo sul filtro è quello vincolante (la pagina Plugin si guarda in wp-env).
+$check( 'link Check for updates: il filtro restituisce una stringa vuota', '', apply_filters( 'puc_manual_check_link-wp-5w', 'x' ) );
+
+// GET /admin/status senza version e updates, con le altre chiavi di prima.
+$status_data = (array) $rest_call( 'GET', '/wp5w/v1/admin/status' )->get_data();
+$check( 'status: 200', 200, $rest_call( 'GET', '/wp5w/v1/admin/status' )->get_status() );
+$check( 'status: senza le chiavi version e updates', '', implode( ',', array_intersect( array( 'version', 'updates' ), array_keys( $status_data ) ) ) );
+$check( 'status: le altre chiavi ci sono', '', implode( ',', array_diff( array( 'sources', 'tables', 'last_run', 'next_run', 'geo' ), array_keys( $status_data ) ) ) );
+
+// Box «Pubblico»: la risposta di dimensions ha la stessa forma di prima.
+$dim_data = (array) $rest_call( 'GET', '/wp5w/v1/admin/audience/dimensions', array( 'days' => 30 ) )->get_data();
+$check( 'dimensions: chiavi range, first_day e dims', '', implode( ',', array_diff( array( 'range', 'first_day', 'dims' ), array_keys( $dim_data ) ) ) );
+$check( 'dimensions: country, device, browser e platform', '', implode( ',', array_diff( array( 'country', 'device', 'browser', 'platform' ), array_keys( (array) ( $dim_data['dims'] ?? array() ) ) ) ) );
+
+// Tracker compilato: segnala il webdriver con il parametro w=1 e resta sotto il limite di peso.
+$tracker_js = (string) file_get_contents( WP5W_PLUGIN_DIR . 'build/tracker/tracker.js' );
+$check( 'tracker compilato: contiene webdriver', true, str_contains( $tracker_js, 'webdriver' ) );
+$check( 'tracker compilato: imposta w=1', 1, preg_match( '/["\']w["\']\s*,\s*["\']1["\']/', $tracker_js ) );
+$check( 'tracker compilato: sotto 1.536 byte', true, strlen( $tracker_js ) < 1536 );
+
+// Chiusura della sezione: filtri e utente di prova tolti, stato di plugin-update-checker ripristinato.
+remove_filter( 'pre_http_request', $github_mock, 10 );
+remove_filter( 'upgrader_pre_download', $block_download );
+wp_set_current_user( 0 );
+
+// ---------------------------------------------------------------------------
+// 14. Pulizia finale.
+// ---------------------------------------------------------------------------
+// Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
+remove_filter( 'pre_http_request', $github_mock, 10 );
+remove_filter( 'upgrader_pre_download', $block_download );
+remove_filter( 'user_has_cap', $without_update_cap );
+$restore_state();
+foreach ( array( 'wp5w_verify_subscriber3' ) as $wp5w_login ) {
+	$wp5w_user = get_user_by( 'login', $wp5w_login );
+	if ( $wp5w_user ) {
+		wp_delete_user( $wp5w_user->ID );
+	}
+}
 update_option( Settings::OPTION, Settings::defaults() );
 update_option( Settings::OWN_SINCE, '' );
 $wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'hits' ) );
