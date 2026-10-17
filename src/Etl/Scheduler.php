@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Mavida\FiveW\Etl;
 
 use Mavida\FiveW\Geo\CountryDatabase;
+use Mavida\FiveW\Gsc\Client;
 use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Support\DateRange;
 
@@ -47,6 +48,14 @@ final class Scheduler {
 	 * @var string
 	 */
 	public const GEO_HOOK = 'wp5w_geo_update';
+
+	/**
+	 * Secondi dopo i quali l'import notturno da Search Console non avvia un altro lotto: WP-Cron può girare
+	 * dentro la richiesta di un visitatore, e un processo ucciso lascerebbe il lock fino alla sua scadenza.
+	 *
+	 * @var int
+	 */
+	public const GSC_SECONDS = 20;
 
 	/**
 	 * Giorni rielaborati ogni notte: coprono il ritardo di 2-3 giorni di Search Console.
@@ -108,12 +117,17 @@ final class Scheduler {
 	}
 
 	/**
-	 * Rielabora gli ultimi DAILY_DAYS giorni.
+	 * Rielabora gli ultimi DAILY_DAYS giorni e, se Search Console è collegata, scarica i giorni che mancano.
 	 *
 	 * @return void
 	 */
 	public function run_daily(): void {
 		$this->importer->run( DateRange::last_days( self::DAILY_DAYS, wp_date( 'Y-m-d' ) ), 'daily' );
+
+		// Dopo l'ETL (che ha già rilasciato il lock): l'import dell'API sostituisce le righe di Rank Math dei giorni che scarica.
+		if ( Client::is_connected() ) {
+			( new GscApiImport() )->run_all( self::GSC_SECONDS );
+		}
 	}
 
 	/**

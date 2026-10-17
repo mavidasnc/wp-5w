@@ -34,18 +34,20 @@ final class Importer {
 	public const FULL_FROM = '2016-01-01';
 
 	/**
-	 * Lock per evitare due esecuzioni contemporanee (cron e pulsante, per esempio).
+	 * Lock per evitare due esecuzioni contemporanee (cron e pulsante, per esempio). Lo rispetta anche Etl\GscApiImport,
+	 * perché Rank Math e Search Console scrivono le stesse righe di gsc_daily.
 	 *
 	 * @var string
 	 */
-	private const LOCK = 'wp5w_etl_lock';
+	public const LOCK = 'wp5w_etl_lock';
 
 	/**
 	 * Costruttore.
 	 *
-	 * @param array<int,Source> $sources Sorgenti da importare.
+	 * @param array<int,Source> $sources      Sorgenti da importare.
+	 * @param string            $state_option Opzione dove salvare l'esito (quella dell'ETL generale, se non indicata).
 	 */
-	public function __construct( private readonly array $sources ) {}
+	public function __construct( private readonly array $sources, private readonly string $state_option = self::STATE_OPTION ) {}
 
 	/**
 	 * Sorgenti configurate.
@@ -116,7 +118,7 @@ final class Importer {
 		}
 
 		$state['duration'] = round( microtime( true ) - $started, 2 );
-		update_option( self::STATE_OPTION, $state, false );
+		update_option( $this->state_option, $state, false );
 		delete_transient( self::LOCK );
 
 		return $state;
@@ -125,10 +127,11 @@ final class Importer {
 	/**
 	 * Esito dell'ultima esecuzione.
 	 *
+	 * @param string $option Opzione dello stato (quella dell'ETL generale, se non indicata).
 	 * @return array<string,mixed>|null
 	 */
-	public static function last_state(): ?array {
-		$state = get_option( self::STATE_OPTION );
+	public static function last_state( string $option = self::STATE_OPTION ): ?array {
+		$state = get_option( $option );
 		return is_array( $state ) ? $state : null;
 	}
 }

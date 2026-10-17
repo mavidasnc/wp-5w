@@ -3,6 +3,8 @@ import { __ } from '@wordpress/i18n';
 import { Button, Notice, RadioControl, Spinner, TextControl, TextareaControl, ToggleControl } from '@wordpress/components';
 import { api, formatDay, today } from '../api';
 import Card from '../components/Card';
+import GscCard from '../components/GscCard';
+import RankMathCard from '../components/RankMathCard';
 
 /**
  * Messaggio leggibile di un errore REST: per i parametri non validi (400) è quello della validazione
@@ -183,6 +185,10 @@ export default function OptionsPage() {
 					{ __( 'Salva', 'wp-5w' ) }
 				</Button>
 			</div>
+
+			{ /* Import dei dati di Search Console: indipendenti dal pulsante «Salva» delle opzioni. */ }
+			<GscCard />
+			<RankMathCard />
 		</div>
 	);
 }
