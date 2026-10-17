@@ -2,7 +2,7 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
-## [Unreleased]
+## [0.12.0] — 2026-10-17
 
 Collegamento OAuth a Search Console dalla scheda Opzioni e due import separati. Nessuna tabella nuova e nessuna migrazione dello schema; nessun evento cron nuovo (l'import notturno gira dentro `wp5w_etl_daily`).
 

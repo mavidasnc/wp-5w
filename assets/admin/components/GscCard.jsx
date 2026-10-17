@@ -13,9 +13,8 @@ import Card from './Card';
 function Steps( { redirectUri } ) {
 	// Copia l'indirizzo; se il browser non lo permette l'utente lo seleziona dal campo.
 	const copy = () => {
-		try {
-			window.navigator.clipboard.writeText( redirectUri );
-		} catch {}
+		// writeText restituisce una promise: il rifiuto (permesso negato, pagina non sicura) non passa da un try/catch.
+		window.navigator.clipboard?.writeText( redirectUri ).catch( () => {} );
 	};
 
 	return (
@@ -252,7 +251,7 @@ export default function GscCard() {
 								{ last && last.ok && last.days > 0 && (
 									<span className="wp5w-note">
 										{ ' ' }
-										{ sprintf( _n( '%s giorno', '%s giorni', last.days, 'wp-5w' ), formatNumber( last.days ) ) }
+										{ /* translators: %s: numero di giorni. */ sprintf( _n( '%s giorno', '%s giorni', last.days, 'wp-5w' ), formatNumber( last.days ) ) }
 									</span>
 								) }
 							</dd>
