@@ -208,6 +208,43 @@
 	gap: 8px;
 }
 
+// Box «Search Console» della scheda Opzioni: passaggi della Cloud Console, redirect URI e credenziali.
+.wp5w-gsc {
+	&__steps {
+		margin: 0 0 16px 20px;
+		padding: 0;
+		max-width: 720px;
+
+		li {
+			margin: 0 0 8px;
+		}
+	}
+
+	&__uri {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+		margin-top: 6px;
+		max-width: 640px;
+
+		.components-base-control {
+			flex: 1;
+			max-width: none;
+		}
+	}
+
+	&__credentials {
+		display: grid;
+		gap: 16px;
+		margin-bottom: 16px;
+
+		summary {
+			cursor: pointer;
+			margin-bottom: 8px;
+		}
+	}
+}
+
 // Scheda Opzioni: i campi non devono allargarsi a tutta la riga.
 .wp5w-options {
 	.wp5w-card .components-base-control {

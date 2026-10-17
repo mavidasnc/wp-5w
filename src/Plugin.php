@@ -16,6 +16,7 @@ use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Front\Tracker;
+use Mavida\FiveW\Gsc\OAuthHandler;
 use Mavida\FiveW\Query\CompareQuery;
 use Mavida\FiveW\Query\OnlineQuery;
 use Mavida\FiveW\Query\OperationsQuery;
@@ -25,6 +26,7 @@ use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\REST\AdminController;
+use Mavida\FiveW\REST\GscController;
 use Mavida\FiveW\REST\HitController;
 use Mavida\FiveW\REST\RestController;
 use Mavida\FiveW\REST\UpdateController;
@@ -113,6 +115,7 @@ final class Plugin {
 		$search = new SearchQuery();
 		$posts  = new PostsQuery();
 		( new UpdateController() )->register();
+		( new GscController() )->register();
 		( new AdminController( $importer, new OverviewQuery(), $posts, $search, new AudienceQuery( $search ), new TrendQuery(), new CompareQuery(), new OnlineQuery(), new OperationsQuery() ) )->register();
 
 		// Visite degli ultimi 30 giorni nell'elenco di articoli e pagine e nella barra di amministrazione (anche nel frontend).
@@ -126,6 +129,8 @@ final class Plugin {
 
 		if ( is_admin() ) {
 			( new AdminMenu() )->register();
+			// Partenza e ritorno del collegamento OAuth a Search Console (admin-post.php conta come admin).
+			( new OAuthHandler() )->register();
 		}
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {

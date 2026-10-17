@@ -2,6 +2,23 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.12.0] — 2026-10-17
+
+Collegamento OAuth a Search Console dalla scheda Opzioni e due import separati. Nessuna tabella nuova e nessuna migrazione dello schema; nessun evento cron nuovo (l'import notturno gira dentro `wp5w_etl_daily`).
+
+### Added
+- **Collegamento a Google Search Console** (`Gsc\Client`, `Gsc\OAuthHandler`): ogni sito usa il proprio client OAuth «Applicazione web» (guida passo per passo in Opzioni), scambio e rinnovo dei token con `wp_remote_*` e senza librerie, `state` anti-CSRF per utente, ritorno da Google su `admin-post.php`, scope `webmasters.readonly`, revoca dal pulsante «Scollega Google». Client secret e refresh token cifrati con `sodium_crypto_secretbox` (`Support\Secret`, chiave dalle salt) nell'opzione `wp5w_gsc` senza autoload.
+- **«Importa da Search Console»** (`Etl\GscApiImport`): scarica solo i giorni dei 16 mesi che non hanno righe di origine `api`, a lotti di 30 giorni con una richiesta per lotto, e li scrive con `GscFileImport::replace_day()` (sostituisce le righe di Rank Math di quel giorno). I giorni per cui l'API risponde senza righe si ricordano in `wp5w_gsc_empty_days`. Con una proprietà di dominio filtra le pagine dell'host del sito. Importa anche ogni notte dopo l'ETL (al massimo 20 secondi).
+- **«Importa da Rank Math»** separato, con il proprio stato (`wp5w_rankmath_state`): non cambia `wp5w_etl_state`, da cui legge il Confronto.
+- Rotte REST `GET /admin/gsc`, `POST /admin/gsc/credentials`, `/site`, `/disconnect`, `/import`, `GET /admin/rankmath` e `POST /admin/rankmath/import` (tutte `manage_options`; il secret non si restituisce mai).
+- `Support\GscDays` (finestra di 16 mesi, giorni mancanti, lotti, percorso relativo come lo scriveva `gsc-backfill.py`, filtro degli host, scelta della proprietà) con `GscDaysTest`; `verify.php` sezione 14 con Google simulato (la pulizia finale diventa la 15).
+
+### Changed
+- `Importer::LOCK` è pubblico e lo rispetta anche l'import da Search Console (stesse righe di `gsc_daily`); `Importer` accetta un'opzione di stato (predefinita `wp5w_etl_state`) e `last_state()` un'opzione.
+- `GscFileImport::replace_day()` è pubblico (lo usano i due import).
+- `uninstall.php` toglie sempre `wp5w_gsc` (segreti) e, con `WP5W_DELETE_DATA`, `wp5w_gsc_state`, `wp5w_gsc_empty_days` e `wp5w_rankmath_state`.
+- Per eseguire `GscDaysTest` serve l'estensione sodium (in locale `php -d extension=sodium vendor/bin/phpunit`).
+
 ## [0.11.0] — 2026-10-15
 
 Iterazione extra 1: tracciamento completo, quattro box del pubblico e aggiornamenti dall'admin (specifica in [docs/fasi/fase-extra1.md](docs/fasi/fase-extra1.md)). Lo schema passa alla **versione 6**, con una sola colonna nuova (`bot`) in `wp5w_hits`; nessuna tabella, opzione o evento cron nuovo, quindi `uninstall.php` e `Deactivator` non cambiano.

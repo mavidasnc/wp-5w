@@ -23,6 +23,12 @@ wp_clear_scheduled_hook( 'wp5w_geo_update' );
 // La chiave del giorno dell'hash dei visitatori si toglie sempre, anche senza WP5W_DELETE_DATA.
 delete_option( 'wp5w_daily_salt' );
 
+// Client secret e token di Google sono segreti: si tolgono sempre, anche senza WP5W_DELETE_DATA.
+// Il token non si revoca da qui (serve la rete e può fallire): la revoca è il pulsante «Scollega» di Opzioni.
+delete_option( 'wp5w_gsc' );
+delete_transient( 'wp5w_gsc_access' );
+delete_transient( 'wp5w_gsc_sites' );
+
 // Il database dei paesi è una cache che si riscarica, non uno storico: opzione e cartella si tolgono sempre.
 delete_option( 'wp5w_geo' );
 $wp5w_upload  = wp_upload_dir( null, false );
@@ -48,3 +54,6 @@ delete_option( 'wp5w_db_version' );
 delete_option( 'wp5w_etl_state' );
 delete_option( 'wp5w_settings' );
 delete_option( 'wp5w_own_since' );
+delete_option( 'wp5w_gsc_state' );
+delete_option( 'wp5w_gsc_empty_days' );
+delete_option( 'wp5w_rankmath_state' );

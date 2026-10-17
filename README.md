@@ -31,7 +31,8 @@ Il nome richiama le 5W (who, what, when, where, why): il valore sta nel collegar
   - **Visite nell'admin (dalla 0.10.0):** colonna ordinabile «Visite (30 g)» negli elenchi di articoli e pagine e dato «5W: N visite (30 g)» nella barra di amministrazione sui contenuti singoli, con un clic che apre il dettaglio (`admin.php?page=wp5w&tab=posts&detail=<ID>`). Solo per chi ha `manage_options`.
   - **404 e ricerche interne (dalla 0.10.0):** solo aggregati giornalieri, senza legame con il visitatore; i termini di ricerca si normalizzano e le email e i numeri lunghi si salvano come «(filtrato)». Le immagini mancanti non compaiono: il server risponde senza passare da WordPress.
 - **Comandi WP-CLI:** `wp 5w status`, `wp 5w etl [--full] [--from=] [--to=]` e `wp 5w gsc-import <file.jsonl>`.
-- **Recupero dello storico di Search Console** dall'API (fino a 16 mesi) con `scripts/gsc-backfill.py`: le credenziali Google restano sul computer, sul server arriva solo il file dei dati.
+- **Collegamento a Search Console dalla scheda Opzioni (dalla 0.12.0):** si collega il proprio account Google (OAuth, sola lettura) e il pulsante **«Importa da Search Console»** scarica dall'API i giorni che mancano (fino a 16 mesi, circa il 60% di query in più di Rank Math), senza toccare i giorni già scaricati; ogni notte, dopo l'ETL, si scaricano da soli quelli nuovi. Il pulsante **«Importa da Rank Math»** è separato e copia lo storico che Rank Math ha nel database. Vedi [Collegare Search Console](#collegare-search-console).
+- **Recupero dello storico di Search Console da riga di comando** con `scripts/gsc-backfill.py` e `wp 5w gsc-import`: le credenziali Google restano sul computer, sul server arriva solo il file dei dati. Utile se non vuoi salvare un segreto Google sul server.
 - **Aggiornamenti dalle release di GitHub:** WordPress propone l'aggiornamento come per ogni plugin; dalla 0.11.0 si può anche verificare e installare dal box «Aggiornamenti» della scheda Stato (chi ha `update_plugins`) o dal link «Verifica aggiornamenti» nella riga del plugin.
 
 ## Tabelle
@@ -62,6 +63,17 @@ Il paese delle visite proprie si calcola con **DB-IP Lite Country**, un file `.m
 - **Licenza e attribuzione:** i dati sono [IP Geolocation by DB-IP](https://db-ip.com), con licenza [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): il link è in fondo alla pagina 5W e nella card «Database dei paesi».
 - **Il file si cancella sempre** alla disinstallazione (è una cache che si riscarica, non uno storico).
 
+## Collegare Search Console
+
+Ogni sito usa il proprio client OAuth di Google, creato una volta nella Google Cloud Console (nessun dato passa da server di terzi). La scheda **Opzioni › Search Console** mostra i passaggi con i link e l'indirizzo da copiare:
+
+1. Nella [Google Cloud Console](https://console.cloud.google.com/) crea un progetto e abilita la **Google Search Console API**.
+2. In **Google Auth Platform** configura la schermata di consenso (tipo «Esterno») e **pubblica l'app «In produzione»**: in «Test» il collegamento scade dopo 7 giorni. Google mostra l'avviso «app non verificata» (Avanzate › Continua): è normale, l'app è tua e chiede solo la sola lettura (`webmasters.readonly`).
+3. Crea un client OAuth di tipo **Applicazione web** e come «URI di reindirizzamento autorizzato» incolla l'indirizzo mostrato nella scheda (`…/wp-admin/admin-post.php?action=wp5w_gsc_oauth`).
+4. Copia ID client e segreto nella scheda, premi **Collega Google**, scegli la proprietà (se ne trova una per il sito la sceglie da sola) e premi **Importa da Search Console**.
+
+Il segreto e il token di rinnovo si salvano cifrati (sodium, chiave derivata dalle salt di `wp-config.php`: se cambiano, il collegamento va rifatto). **Scollega Google** revoca il token. L'import va a lotti di 30 giorni e riprende da dove si era fermato; con una proprietà di dominio (`sc-domain:`) si tengono solo le pagine dell'host del sito.
+
 ## Requisiti
 
 - WordPress 6.5 o superiore, PHP 8.3 o superiore.
@@ -80,7 +92,7 @@ All'attivazione l'import completo parte da solo dopo un minuto; con WP-CLI lo si
 
 ## Disinstallazione
 
-Le tabelle `wp5w_*` sono spesso l'unica copia dello storico, quindi la disinstallazione **non le cancella**. Per eliminarle (comprese `wp5w_hits` e `wp5w_discards`) e togliere le opzioni `wp5w_settings` e `wp5w_own_since`, definisci `WP5W_DELETE_DATA` a `true` in `wp-config.php` prima di disinstallare. L'opzione `wp5w_daily_salt` e il database dei paesi (opzione `wp5w_geo`, cartella `uploads/wp5w/`) si tolgono sempre.
+Le tabelle `wp5w_*` sono spesso l'unica copia dello storico, quindi la disinstallazione **non le cancella**. Per eliminarle (comprese `wp5w_hits` e `wp5w_discards`) e togliere le opzioni `wp5w_settings`, `wp5w_own_since`, `wp5w_gsc_state`, `wp5w_gsc_empty_days` e `wp5w_rankmath_state`, definisci `WP5W_DELETE_DATA` a `true` in `wp-config.php` prima di disinstallare. Client secret e token di Google (opzione `wp5w_gsc`) si tolgono sempre, ma senza revocare il token: prima di disinstallare usa **Scollega Google**. L'opzione `wp5w_daily_salt` e il database dei paesi (opzione `wp5w_geo`, cartella `uploads/wp5w/`) si tolgono sempre.
 
 ## Sviluppo
 

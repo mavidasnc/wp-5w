@@ -1,4 +1,5 @@
 import apiFetch from '@wordpress/api-fetch';
+import { __ } from '@wordpress/i18n';
 
 const { apiRoot, nonce, today } = window.wp5wAdmin;
 
@@ -15,6 +16,21 @@ export const api = ( path, options = {} ) =>
 	apiFetch( { url: apiRoot + path, ...options } );
 
 export { today };
+
+/**
+ * Messaggio di un errore REST: `message` (WP_Error) oppure `error` (risposta dei nostri import con ok falso).
+ *
+ * @param {Object} error Errore di apiFetch.
+ */
+export const errorText = ( error ) => error?.message ?? error?.error ?? __( 'Errore sconosciuto.', 'wp-5w' );
+
+/**
+ * Data e ora da timestamp UNIX (secondi), oppure «mai».
+ *
+ * @param {?number} ts Timestamp in secondi.
+ */
+export const formatTime = ( ts ) =>
+	ts ? new Date( ts * 1000 ).toLocaleString( 'it-IT', { dateStyle: 'medium', timeStyle: 'short' } ) : __( 'mai', 'wp-5w' );
 
 const numberFormat = new Intl.NumberFormat( 'it-IT' );
 

@@ -18,9 +18,13 @@
 // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 use Mavida\FiveW\Database\Schema;
+use Mavida\FiveW\Etl\GscApiImport;
 use Mavida\FiveW\Etl\Importer;
+use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Front\Tracker;
 use Mavida\FiveW\Geo\CountryDatabase;
+use Mavida\FiveW\Gsc\Client as GscClient;
+use Mavida\FiveW\Gsc\OAuthHandler;
 use Mavida\FiveW\Plugin;
 use Mavida\FiveW\Admin\AdminMenu;
 use Mavida\FiveW\Admin\PostViews;
@@ -31,6 +35,7 @@ use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
+use Mavida\FiveW\REST\GscController;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Support\DateRange;
@@ -2235,7 +2240,390 @@ remove_filter( 'upgrader_pre_download', $block_download );
 wp_set_current_user( 0 );
 
 // ---------------------------------------------------------------------------
-// 14. Pulizia finale.
+// 14. Iterazione 0.12.0: collegamento OAuth a Search Console, import della differenza e import separato di Rank Math.
+// ---------------------------------------------------------------------------
+// Google è simulato con pre_http_request (token, proprietà, Search Analytics e revoca): nessuna richiesta di rete.
+$gsc_day         = static fn( int $ago ): string => wp_date( 'Y-m-d', time() - $ago * DAY_IN_SECONDS );
+$gsc_home        = home_url( '/' );
+$gsc_last_final  = $gsc_day( 3 );
+$gsc_foreign     = false;
+$gsc_secret      = 'SEGRETO-DEL-CLIENT-9f2';
+$gsc_client_id   = '1234567890-abc.apps.googleusercontent.com';
+$gsc_state       = array(
+	'scope_ok'      => true,
+	'invalid_grant' => false,
+	'fail_query'    => false,
+);
+$gsc_calls       = array(
+	'query'  => array(),
+	'token'  => array(),
+	'revoke' => array(),
+	'bearer' => '',
+	'other'  => 0,
+);
+
+// Giorni di prova: 7, 6, 5 (vuoto), 4 e 3 giorni fa; l'ultimo è anche l'ultimo giorno definitivo. Pagina => query => click, impressioni, posizione.
+$gsc_data = array(
+	$gsc_day( 7 ) => array(
+		array( $gsc_home . 'blog/', 'uno', 3, 30, 4.0 ),
+		array( $gsc_home . 'guida/#indice', 'due', 1, 10, 2.0 ),
+		array( $gsc_home . 'guida/', 'due', 2, 20, 6.0 ),
+	),
+	$gsc_day( 6 ) => array( array( $gsc_home . 'blog/', 'uno', 1, 5, 3.0 ) ),
+	$gsc_day( 5 ) => array(),
+	$gsc_day( 4 ) => array( array( $gsc_home, 'tre', 2, 8, 1.0 ) ),
+	$gsc_day( 3 ) => array( array( $gsc_home . 'blog/', 'uno', 1, 2, 5.0 ) ),
+);
+
+$google_mock = static function ( $pre, $args, $url ) use ( &$gsc_calls, &$gsc_state, &$gsc_data, &$gsc_last_final, &$gsc_foreign, $gsc_home ) {
+	$parts = wp_parse_url( (string) $url );
+	$host  = (string) ( $parts['host'] ?? '' );
+	$path  = (string) ( $parts['path'] ?? '' );
+	$reply = static fn( $data, int $code = 200 ): array => array(
+		'headers'  => array(),
+		'body'     => wp_json_encode( $data ),
+		'response' => array(
+			'code'    => $code,
+			'message' => '',
+		),
+		'cookies'  => array(),
+		'filename' => null,
+	);
+
+	if ( 'oauth2.googleapis.com' === $host && '/token' === $path ) {
+		$body = (array) $args['body'];
+		if ( 'authorization_code' === $body['grant_type'] ) {
+			$gsc_calls['token'][] = $body;
+			return $reply(
+				array(
+					'access_token'  => 'AT-1',
+					'expires_in'    => 3600,
+					'refresh_token' => 'RT-segreto-1',
+					'scope'         => $gsc_state['scope_ok'] ? 'https://www.googleapis.com/auth/webmasters.readonly' : 'openid',
+				)
+			);
+		}
+		if ( $gsc_state['invalid_grant'] ) {
+			return $reply( array( 'error' => 'invalid_grant' ), 400 );
+		}
+		return $reply(
+			array(
+				'access_token' => 'AT-2',
+				'expires_in'   => 3600,
+			)
+		);
+	}
+
+	if ( 'oauth2.googleapis.com' === $host && '/revoke' === $path ) {
+		$gsc_calls['revoke'][] = (array) $args['body'];
+		return $reply( array() );
+	}
+
+	if ( 'searchconsole.googleapis.com' === $host ) {
+		$gsc_calls['bearer'] = (string) ( $args['headers']['Authorization'] ?? '' );
+
+		if ( '/webmasters/v3/sites' === $path ) {
+			return $reply(
+				array(
+					'siteEntry' => array(
+						array(
+							'siteUrl'         => $gsc_home,
+							'permissionLevel' => 'siteOwner',
+						),
+						array(
+							'siteUrl'         => 'sc-domain:altro-dominio.example',
+							'permissionLevel' => 'siteOwner',
+						),
+						array(
+							'siteUrl'         => 'https://non-verificato.example/',
+							'permissionLevel' => 'siteUnverifiedUser',
+						),
+					),
+				)
+			);
+		}
+
+		if ( str_ends_with( $path, '/searchAnalytics/query' ) ) {
+			$req = json_decode( (string) $args['body'], true );
+			$gsc_calls['query'][] = array(
+				'dims'   => $req['dimensions'],
+				'start'  => $req['startDate'],
+				'end'    => $req['endDate'],
+				'filter' => $req['dimensionFilterGroups'][0]['filters'][0]['expression'] ?? '',
+			);
+			if ( $gsc_state['fail_query'] ) {
+				return $reply( array( 'error' => array( 'message' => 'Quota esaurita' ) ), 429 );
+			}
+
+			$rows = array();
+			foreach ( $gsc_data as $day => $items ) {
+				if ( $day < $req['startDate'] || $day > $req['endDate'] || $day > $gsc_last_final || array() === $items ) {
+					continue;
+				}
+				// La richiesta con la sola data serve a trovare l'ultimo giorno definitivo.
+				if ( array( 'date' ) === $req['dimensions'] ) {
+					$rows[] = array(
+						'keys'        => array( $day ),
+						'clicks'      => 1,
+						'impressions' => 1,
+						'position'    => 1,
+					);
+					continue;
+				}
+				foreach ( $items as $item ) {
+					$rows[] = array(
+						'keys'        => array( $day, $item[0], $item[1] ),
+						'clicks'      => $item[2],
+						'impressions' => $item[3],
+						'position'    => $item[4],
+					);
+				}
+				if ( $gsc_foreign ) {
+					$rows[] = array(
+						'keys'        => array( $day, 'https://www.altro-sito.example/', 'altro sito' ),
+						'clicks'      => 9,
+						'impressions' => 9,
+						'position'    => 1,
+					);
+				}
+			}
+			return $reply( array( 'rows' => $rows ) );
+		}
+	}
+
+	++$gsc_calls['other'];
+	return new WP_Error( 'wp5w_verify_blocked', 'Richiesta non simulata: ' . $url );
+};
+add_filter( 'pre_http_request', $google_mock, 10, 3 );
+
+// Giorni di prova puliti (tutte le origini) e una riga di Rank Math da sostituire: i giorni 4 e 6 giorni fa.
+$gsc_table = Schema::table( 'gsc_daily' );
+$gsc_clean = static function () use ( $wpdb, $gsc_table, $gsc_day ): void {
+	$wpdb->query( $wpdb->prepare( "DELETE FROM {$gsc_table} WHERE day BETWEEN %s AND %s", $gsc_day( 9 ), $gsc_day( 1 ) ) );
+};
+$gsc_clean();
+delete_option( GscClient::OPTION );
+GscApiImport::reset();
+delete_transient( 'wp5w_gsc_access' );
+delete_transient( 'wp5w_gsc_sites' );
+$wpdb->query(
+	$wpdb->prepare(
+		"INSERT INTO {$gsc_table} (day, page_hash, query_hash, object_id, page, query, clicks, impressions, pos_x_impr, origin) VALUES (%s, MD5('/'), MD5('vecchia'), 0, '/', 'vecchia', 1, 1, 1, 'rankmath')",
+		$gsc_day( 4 )
+	)
+);
+
+$admin_user( $admin_id );
+
+// Prima del collegamento: niente configurato, niente collegato, nessuna chiamata a Google.
+$status = $rest_call( 'GET', '/wp5w/v1/admin/gsc' )->get_data();
+$check( 'GSC: non configurata all\'inizio', 0, (int) $status['configured'] );
+$check( 'GSC: non collegata all\'inizio', 0, (int) $status['connected'] );
+$check( 'GSC: giorni da importare senza collegamento', 'null', null === $status['pending_days'] ? 'null' : 'altro' );
+$check( 'GSC: redirect URI mostrato = admin-post.php', admin_url( 'admin-post.php?action=wp5w_gsc_oauth' ), $status['redirect_uri'] );
+$check( 'GSC: import senza collegamento: 500', 500, $rest_call( 'POST', '/wp5w/v1/admin/gsc/import' )->get_status() );
+$check( 'GSC: nessuna richiesta a Google senza collegamento', 0, count( $gsc_calls['query'] ) + count( $gsc_calls['token'] ) );
+
+// Credenziali: formato dell'ID, secret obbligatorio la prima volta, secret cifrato e mai restituito.
+$check( 'POST credenziali con ID non valido: 400', 400, $rest_call( 'POST', '/wp5w/v1/admin/gsc/credentials', array( 'client_id' => 'abc', 'client_secret' => $gsc_secret ) )->get_status() );
+$check( 'POST credenziali senza secret: 400', 400, $rest_call( 'POST', '/wp5w/v1/admin/gsc/credentials', array( 'client_id' => $gsc_client_id ) )->get_status() );
+$saved = $rest_call( 'POST', '/wp5w/v1/admin/gsc/credentials', array( 'client_id' => $gsc_client_id, 'client_secret' => $gsc_secret ) );
+$check( 'POST credenziali: 200', 200, $saved->get_status() );
+$check( 'GSC: configurata dopo il salvataggio', 1, (int) $saved->get_data()['configured'] );
+$check( 'GSC: la risposta non contiene il secret', 0, (int) str_contains( wp_json_encode( $saved->get_data() ), $gsc_secret ) );
+$stored = (string) wp_json_encode( get_option( GscClient::OPTION ) );
+$check( 'GSC: secret cifrato nell\'opzione', 0, (int) str_contains( $stored, $gsc_secret ) );
+// Da WordPress 6.6 l'autoload spento si salva come «off» (prima «no»).
+$check( 'GSC: autoload spento per l\'opzione dei segreti', 1, (int) in_array( (string) $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", GscClient::OPTION ) ), array( 'off', 'no' ), true ) );
+
+// Link di consenso.
+$auth_url = GscClient::auth_url();
+parse_str( (string) wp_parse_url( $auth_url, PHP_URL_QUERY ), $auth_query );
+$check( 'consenso: redirect_uri', admin_url( 'admin-post.php?action=wp5w_gsc_oauth' ), $auth_query['redirect_uri'] ?? '' );
+$check( 'consenso: access_type offline', 'offline', $auth_query['access_type'] ?? '' );
+$check( 'consenso: prompt consent', 'consent', $auth_query['prompt'] ?? '' );
+$check( 'consenso: scope in sola lettura', 'https://www.googleapis.com/auth/webmasters.readonly', $auth_query['scope'] ?? '' );
+$check( 'consenso: client_id', $gsc_client_id, $auth_query['client_id'] ?? '' );
+$check( 'consenso: state di 32 caratteri', 32, strlen( (string) ( $auth_query['state'] ?? '' ) ) );
+
+// Ritorno da Google: state sbagliato, consenso annullato, permesso tolto, poi collegamento riuscito.
+$check( 'ritorno con state sbagliato: errore', 1, (int) ( null !== OAuthHandler::finish( array( 'code' => 'CODE-1', 'state' => 'sbagliato' ) ) ) );
+$check( 'ritorno con state sbagliato: non collegata', 0, (int) GscClient::is_connected() );
+$check( 'ritorno con state sbagliato: nessuna richiesta di token', 0, count( $gsc_calls['token'] ) );
+$check( 'ritorno con consenso annullato: errore', 1, (int) ( null !== OAuthHandler::finish( array( 'error' => 'access_denied' ) ) ) );
+
+$auth_url = GscClient::auth_url();
+parse_str( (string) wp_parse_url( $auth_url, PHP_URL_QUERY ), $auth_query );
+$gsc_state['scope_ok'] = false;
+$check( 'ritorno senza il permesso di Search Console: errore', 1, (int) ( null !== OAuthHandler::finish( array( 'code' => 'CODE-1', 'state' => $auth_query['state'] ) ) ) );
+$check( 'ritorno senza il permesso: non collegata', 0, (int) GscClient::is_connected() );
+$gsc_state['scope_ok'] = true;
+
+$auth_url = GscClient::auth_url();
+parse_str( (string) wp_parse_url( $auth_url, PHP_URL_QUERY ), $auth_query );
+$check( 'ritorno corretto: nessun errore', 1, (int) ( null === OAuthHandler::finish( array( 'code' => 'CODE-1', 'state' => $auth_query['state'] ) ) ) );
+$check( 'ritorno corretto: collegata', 1, (int) GscClient::is_connected() );
+$check( 'ritorno corretto: richiesta di token con il redirect URI', admin_url( 'admin-post.php?action=wp5w_gsc_oauth' ), $gsc_calls['token'][ count( $gsc_calls['token'] ) - 1 ]['redirect_uri'] ?? '' );
+$check( 'ritorno corretto: richiesta di token con il secret in chiaro (solo verso Google)', $gsc_secret, $gsc_calls['token'][ count( $gsc_calls['token'] ) - 1 ]['client_secret'] ?? '' );
+$check( 'ritorno corretto: proprietà scelta da sola (prefisso URL della home)', $gsc_home, GscClient::config()['site'] );
+$check( 'ritorno corretto: richiesta alle proprietà con il token', 'Bearer AT-1', $gsc_calls['bearer'] );
+$check( 'ritorno corretto: refresh token cifrato', 0, (int) str_contains( (string) wp_json_encode( get_option( GscClient::OPTION ) ), 'RT-segreto-1' ) );
+$check( 'lo state si usa una volta sola', 1, (int) ( null !== OAuthHandler::finish( array( 'code' => 'CODE-1', 'state' => $auth_query['state'] ) ) ) );
+
+$status = $rest_call( 'GET', '/wp5w/v1/admin/gsc' )->get_data();
+$check( 'GSC: proprietà elencate senza quelle non verificate', 2, count( $status['sites'] ) );
+$check( 'GSC: la risposta non contiene il refresh token né il secret', 0, (int) ( str_contains( wp_json_encode( $status ), 'RT-segreto-1' ) || str_contains( wp_json_encode( $status ), $gsc_secret ) ) );
+$check( 'GSC: giorni da importare prima dell\'import (16 mesi)', 1, (int) ( $status['pending_days'] > 400 ) );
+$check( 'POST proprietà non accessibile: 400', 400, $rest_call( 'POST', '/wp5w/v1/admin/gsc/site', array( 'site' => 'https://non-verificato.example/' ) )->get_status() );
+
+// Lock condiviso con l'ETL: con l'ETL in corso l'import si rifiuta e non chiama Google.
+set_transient( Importer::LOCK, 1, 60 );
+$queries_before = count( $gsc_calls['query'] );
+$busy           = $rest_call( 'POST', '/wp5w/v1/admin/gsc/import' );
+$check( 'import con l\'ETL in corso: 409', 409, $busy->get_status() );
+$check( 'import con l\'ETL in corso: nessuna chiamata a Google', $queries_before, count( $gsc_calls['query'] ) );
+delete_transient( Importer::LOCK );
+
+// Primo import: tutti i lotti da 30 giorni fino a zero giorni mancanti (nel mock Google ha righe solo per una settimana).
+// Richieste con pagina e query (la closure legge $gsc_calls per riferimento: una arrow function ne catturerebbe una copia).
+$page_calls = static function () use ( &$gsc_calls ): array {
+	return array_values( array_filter( $gsc_calls['query'], static fn( array $call ): bool => 3 === count( $call['dims'] ) ) );
+};
+$first      = ( new GscApiImport() )->run_all( 60 );
+$check( 'import: esito ok', 1, (int) $first['ok'] );
+$check( 'import: nessun giorno rimasto', 0, $first['remaining'] );
+$check( 'import: quattro giorni con righe', 4, $first['days'] );
+$check( 'import: lotti di al massimo 30 giorni', 1, (int) ( count( array_filter( $page_calls(), static fn( array $call ): bool => ( new DateRange( $call['start'], $call['end'] ) )->days() > 30 ) ) === 0 ) );
+$check( 'import: righe dell\'API nei giorni di prova', 5, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE origin = 'api' AND day BETWEEN %s AND %s", $gsc_day( 9 ), $gsc_day( 1 ) ) ) );
+$check( 'import: la riga di Rank Math del giorno importato è sostituita', 0, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE origin = 'rankmath' AND day = %s", $gsc_day( 4 ) ) ) );
+$check( 'import: pagina con #frammento unita alla stessa pagina (click sommati)', 3, $wpdb->get_var( $wpdb->prepare( "SELECT clicks FROM {$gsc_table} WHERE day = %s AND page = '/guida/' AND query = 'due'", $gsc_day( 7 ) ) ) );
+$check( 'import: pagina con #frammento (impressioni sommate)', 30, $wpdb->get_var( $wpdb->prepare( "SELECT impressions FROM {$gsc_table} WHERE day = %s AND page = '/guida/' AND query = 'due'", $gsc_day( 7 ) ) ) );
+$check( 'import: pagina relativa senza host', 1, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE day = %s AND page = '/blog/' AND query = 'uno'", $gsc_day( 6 ) ) ) );
+$check( 'import: il giorno senza righe non ha righe', 0, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE day = %s", $gsc_day( 5 ) ) ) );
+$check( 'import: il giorno senza righe è ricordato come vuoto', 1, (int) in_array( $gsc_day( 5 ), (array) get_option( GscApiImport::EMPTY_OPTION ), true ) );
+$check( 'import: i giorni importati non sono tra i vuoti', 0, (int) in_array( $gsc_day( 4 ), (array) get_option( GscApiImport::EMPTY_OPTION ), true ) );
+$check( 'import: giorni da importare dopo l\'import', 0, (int) GscApiImport::pending_days() );
+$check( 'import: ultimo giorno definitivo salvato', $gsc_last_final, (string) ( GscApiImport::state()['last_final'] ?? '' ) );
+$check( 'import: nessuna richiesta fuori dai mock di Google', 0, $gsc_calls['other'] );
+
+// Secondo import: nessun giorno mancante, quindi nessuna richiesta di righe (solo la richiesta con la data).
+$pages_before = count( $page_calls() );
+$again        = $rest_call( 'POST', '/wp5w/v1/admin/gsc/import' );
+$check( 'secondo import: 200', 200, $again->get_status() );
+$check( 'secondo import: zero giorni e zero righe', 0, $again->get_data()['days'] + $again->get_data()['rows'] );
+$check( 'secondo import: nessuna richiesta di pagine e query', $pages_before, count( $page_calls() ) );
+$check( 'secondo import: righe dell\'API invariate', 5, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE origin = 'api' AND day BETWEEN %s AND %s", $gsc_day( 9 ), $gsc_day( 1 ) ) ) );
+
+// Un giorno nuovo (Google lo rende definitivo): si scarica solo quello, dai suoi estremi.
+$gsc_last_final           = $gsc_day( 2 );
+$gsc_data[ $gsc_day( 2 ) ] = array( array( $gsc_home . 'blog/', 'nuovo', 4, 40, 2.0 ) );
+$pages_before             = count( $page_calls() );
+$next                     = ( new GscApiImport() )->run_batch();
+$check( 'giorno nuovo: un giorno importato', 1, $next['days'] );
+$check( 'giorno nuovo: una sola richiesta di pagine', $pages_before + 1, count( $page_calls() ) );
+$last_call = $page_calls()[ count( $page_calls() ) - 1 ];
+$check( 'giorno nuovo: la richiesta parte e finisce in quel giorno', $gsc_day( 2 ) . '|' . $gsc_day( 2 ), $last_call['start'] . '|' . $last_call['end'] );
+$check( 'giorno nuovo: righe dell\'API', 1, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE origin = 'api' AND day = %s", $gsc_day( 2 ) ) ) );
+
+// Errore di Google (429): nessun giorno ricordato come vuoto e il giorno resta da importare.
+$gsc_last_final           = $gsc_day( 1 );
+$gsc_data[ $gsc_day( 1 ) ] = array( array( $gsc_home . 'blog/', 'ieri', 1, 1, 1.0 ) );
+$empty_before             = (array) get_option( GscApiImport::EMPTY_OPTION );
+$gsc_state['fail_query']  = true;
+$failed                   = $rest_call( 'POST', '/wp5w/v1/admin/gsc/import' );
+$check( 'errore di Google: 500', 500, $failed->get_status() );
+$check( 'errore di Google: messaggio di Google', 1, (int) str_contains( (string) ( $failed->get_data()['error'] ?? '' ), 'Quota esaurita' ) );
+$check( 'errore di Google: stato salvato con ok falso', 0, (int) GscApiImport::state()['ok'] );
+$check( 'errore di Google: giorni vuoti invariati', count( $empty_before ), count( (array) get_option( GscApiImport::EMPTY_OPTION ) ) );
+$check( 'errore di Google: il lock è rilasciato', 0, (int) (bool) get_transient( Importer::LOCK ) );
+$gsc_state['fail_query']  = false;
+
+// L'ETL notturno scarica da solo la differenza (e lascia a Rank Math solo i giorni che l'API non ha).
+( new Scheduler( Plugin::importer() ) )->run_daily();
+$check( 'notte: il giorno rimasto indietro è importato dal cron', 1, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE origin = 'api' AND day = %s", $gsc_day( 1 ) ) ) );
+$check( 'notte: giorni da importare', 0, (int) GscApiImport::pending_days() );
+
+// Proprietà di dominio: le pagine di altri host non entrano (altrimenti «/» di un altro sito si fonderebbe con la nostra).
+$gsc_domain_day                = $gsc_day( 0 );
+$gsc_last_final                = $gsc_domain_day;
+$gsc_data[ $gsc_domain_day ]   = array( array( $gsc_home . 'blog/', 'nostra', 1, 1, 1.0 ) );
+$gsc_foreign                   = true;
+$check( 'POST proprietà di dominio: 200', 200, $rest_call( 'POST', '/wp5w/v1/admin/gsc/site', array( 'site' => 'sc-domain:altro-dominio.example' ) )->get_status() );
+$check( 'cambio di proprietà: stato e giorni vuoti azzerati', 0, (int) ( false !== get_option( GscApiImport::EMPTY_OPTION, false ) ) );
+// Il giorno 0 non è tra i giorni importati: la finestra, con la proprietà nuova, riparte da zero e ricontrolla tutti i giorni.
+$wpdb->query( $wpdb->prepare( "DELETE FROM {$gsc_table} WHERE day >= %s", $gsc_day( 2 ) ) );
+$domain = ( new GscApiImport() )->run_all( 60 );
+$check( 'proprietà di dominio: esito ok', 1, (int) $domain['ok'] );
+$domain_host_ok = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE day = %s AND query = 'nostra'", $gsc_domain_day ) );
+$check( 'proprietà di dominio: la nostra pagina c\'è', 1, $domain_host_ok );
+$check( 'proprietà di dominio: nessuna riga di un altro host', 0, $wpdb->get_var( "SELECT COUNT(*) FROM {$gsc_table} WHERE query = 'altro sito'" ) );
+$domain_calls = array_filter( $page_calls(), static fn( array $call ): bool => '' !== $call['filter'] );
+$check( 'proprietà di dominio: filtro sull\'host nella richiesta', 1, (int) ( count( $domain_calls ) > 0 ) );
+$gsc_foreign = false;
+
+// Collegamento revocato da Google: invalid_grant segna il collegamento da rifare e l'ETL notturno non insiste.
+GscClient::select_site( $gsc_home );
+delete_transient( 'wp5w_gsc_access' );
+$gsc_state['invalid_grant'] = true;
+$revoked                    = ( new GscApiImport() )->run_batch();
+$check( 'revoca: l\'import fallisce', 0, (int) $revoked['ok'] );
+$check( 'revoca: collegamento da rifare', 1, (int) GscClient::needs_reauth() );
+$check( 'revoca: non risulta collegata', 0, (int) GscClient::is_connected() );
+$check( 'revoca: lo stato REST lo segnala', 1, (int) $rest_call( 'GET', '/wp5w/v1/admin/gsc' )->get_data()['reauth'] );
+$queries_before = count( $gsc_calls['query'] );
+( new Scheduler( Plugin::importer() ) )->run_daily();
+$check( 'revoca: l\'ETL notturno non chiama Google', $queries_before, count( $gsc_calls['query'] ) );
+$gsc_state['invalid_grant'] = false;
+
+$auth_url = GscClient::auth_url();
+parse_str( (string) wp_parse_url( $auth_url, PHP_URL_QUERY ), $auth_query );
+$check( 'ricollegamento: nessun errore', 1, (int) ( null === OAuthHandler::finish( array( 'code' => 'CODE-2', 'state' => $auth_query['state'] ) ) ) );
+$check( 'ricollegamento: collegata e senza revoca pendente', '1|0', (int) GscClient::is_connected() . '|' . (int) GscClient::needs_reauth() );
+
+// Import di Rank Math dal pulsante: stato proprio, l'ETL generale (e il Confronto) non cambiano.
+$etl_before = get_option( Importer::STATE_OPTION );
+$rm_status  = $rest_call( 'GET', '/wp5w/v1/admin/rankmath' );
+$check( 'Rank Math: sorgente disponibile', 1, (int) $rm_status->get_data()['available'] );
+$rm_import = $rest_call( 'POST', '/wp5w/v1/admin/rankmath/import' );
+$check( 'Rank Math: import 200', 200, $rm_import->get_status() );
+$check( 'Rank Math: esito della sorgente ok', 'ok', $rm_import->get_data()['sources']['rank_math']['status'] ?? '' );
+$check( 'Rank Math: stato nella sua opzione', 'rankmath', (string) ( get_option( GscController::RANKMATH_STATE )['mode'] ?? '' ) );
+$check( 'Rank Math: stato dell\'ETL generale invariato', 1, (int) ( $etl_before === get_option( Importer::STATE_OPTION ) ) );
+$check( 'Rank Math: GET con l\'ultimo import', 'rankmath', (string) ( $rest_call( 'GET', '/wp5w/v1/admin/rankmath' )->get_data()['last']['mode'] ?? '' ) );
+$check( 'Rank Math: i giorni dell\'API non sono toccati', 2, $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$gsc_table} WHERE origin = 'api' AND day = %s", $gsc_day( 7 ) ) ) );
+$check( 'Rank Math: nessun giorno dell\'API ha righe di Rank Math', 0, $wpdb->get_var( "SELECT COUNT(*) FROM {$gsc_table} r WHERE r.origin = 'rankmath' AND r.day IN ( SELECT DISTINCT day FROM {$gsc_table} WHERE origin = 'api' )" ) );
+
+// Permessi: senza un utente con manage_options tutte le rotte rifiutano.
+wp_set_current_user( 0 );
+foreach ( array( array( 'GET', '/admin/gsc' ), array( 'POST', '/admin/gsc/import' ), array( 'POST', '/admin/gsc/credentials' ), array( 'POST', '/admin/gsc/disconnect' ), array( 'GET', '/admin/rankmath' ), array( 'POST', '/admin/rankmath/import' ) ) as $gsc_route ) {
+	$check( "permessi {$gsc_route[0]} {$gsc_route[1]}: " . rest_authorization_required_code(), rest_authorization_required_code(), $rest_call( $gsc_route[0], '/wp5w/v1' . $gsc_route[1], array( 'client_id' => $gsc_client_id ) )->get_status() );
+}
+$admin_user( $admin_id );
+
+// Scollegamento: revoca il token salvato, toglie token e proprietà e tiene client ID e secret.
+$disconnect = $rest_call( 'POST', '/wp5w/v1/admin/gsc/disconnect' );
+$check( 'scollegamento: 200', 200, $disconnect->get_status() );
+$check( 'scollegamento: token revocato presso Google', 'RT-segreto-1', $gsc_calls['revoke'][ count( $gsc_calls['revoke'] ) - 1 ]['token'] ?? '' );
+$check( 'scollegamento: non collegata', 0, (int) $disconnect->get_data()['connected'] );
+$check( 'scollegamento: client ID e secret restano', 1, (int) ( GscClient::is_configured() && $gsc_client_id === GscClient::config()['client_id'] ) );
+$check( 'scollegamento: proprietà e refresh token tolti', '|', GscClient::config()['site'] . '|' . GscClient::config()['refresh_token'] );
+$check( 'scollegamento: esito dell\'import azzerato', 'null', null === GscApiImport::state() ? 'null' : 'altro' );
+$check( 'scollegamento: nessuna richiesta fuori dai mock di Google', 0, $gsc_calls['other'] );
+
+// Chiusura della sezione: simulazione tolta, giorni di prova e opzioni ripulite.
+remove_filter( 'pre_http_request', $google_mock, 10 );
+$gsc_clean();
+$wpdb->query( $wpdb->prepare( "DELETE FROM {$gsc_table} WHERE day >= %s", $gsc_day( 9 ) ) );
+delete_option( GscClient::OPTION );
+delete_option( GscController::RANKMATH_STATE );
+GscApiImport::reset();
+foreach ( array( 'wp5w_gsc_access', 'wp5w_gsc_sites', 'wp5w_gsc_flash_' . $admin_id, 'wp5w_gsc_state_' . $admin_id ) as $gsc_transient ) {
+	delete_transient( $gsc_transient );
+}
+wp_set_current_user( 0 );
+
+// ---------------------------------------------------------------------------
+// 15. Pulizia finale.
 // ---------------------------------------------------------------------------
 // Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
 remove_filter( 'pre_http_request', $github_mock, 10 );

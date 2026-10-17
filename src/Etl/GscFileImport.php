@@ -21,7 +21,7 @@ defined( 'ABSPATH' ) || exit;
  * Serve a recuperare lo storico che Rank Math non ha (scripts/gsc-backfill.py produce il file).
  *
  * Ogni riga: {"day":"Y-m-d","page":"/percorso/","query":"...","clicks":1,"impressions":10,"position":3.2}.
- * Ogni giorno presente nel file sostituisce per intero le righe di quel giorno e diventa di origine "api":
+ * Anche Etl\GscApiImport scrive i giorni con replace_day(). Ogni giorno presente nel file sostituisce per intero le righe di quel giorno e diventa di origine "api":
  * l'API restituisce più query di Rank Math, quindi da lì in poi l'ETL di Rank Math non tocca quel giorno.
  * Rilanciare l'import con lo stesso file dà lo stesso risultato.
  */
@@ -90,7 +90,7 @@ final class GscFileImport {
 	 * @return int Righe scritte.
 	 * @throws \RuntimeException Se una query fallisce.
 	 */
-	private function replace_day( string $day, array $items ): int {
+	public function replace_day( string $day, array $items ): int {
 		global $wpdb;
 
 		$table = Schema::table( 'gsc_daily' );
