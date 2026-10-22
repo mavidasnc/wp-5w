@@ -6,7 +6,8 @@
   "plugins": [
     ".",
     "./.wp-env-plugins/wp-statistics",
-    "./.wp-env-plugins/seo-by-rank-math"
+    "./.wp-env-plugins/seo-by-rank-math",
+    "./.wp-env-plugins/independent-analytics"
   ],
   "config": {
     "WP_DEBUG": true,

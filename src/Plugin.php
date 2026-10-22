@@ -30,6 +30,7 @@ use Mavida\FiveW\REST\GscController;
 use Mavida\FiveW\REST\HitController;
 use Mavida\FiveW\REST\RestController;
 use Mavida\FiveW\REST\UpdateController;
+use Mavida\FiveW\Sources\IndependentAnalyticsSource;
 use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Sources\RankMathSource;
 use Mavida\FiveW\Sources\WpStatisticsSource;
@@ -79,7 +80,7 @@ final class Plugin {
 	 * @return Importer
 	 */
 	public static function importer(): Importer {
-		return new Importer( array( new WpStatisticsSource(), new RankMathSource(), new OwnSource() ) );
+		return new Importer( array( new WpStatisticsSource(), new RankMathSource(), new OwnSource(), new IndependentAnalyticsSource() ) );
 	}
 
 	/**

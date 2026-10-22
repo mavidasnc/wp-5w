@@ -57,7 +57,7 @@ final class Updater {
 		// Si installa lo zip allegato alla release (con vendor/ e build/), non il sorgente di GitHub.
 		$checker->getVcsApi()->enableReleaseAssets();
 
-		// Il link «Check for updates» della libreria si nasconde: il controllo si fa dal box Aggiornamenti della scheda Stato.
+		// Il link «Check for updates» della libreria si nasconde: il controllo si fa dal box «Versione del plugin» della scheda Aggiornamenti.
 		add_filter( $checker->getUniqueName( 'manual_check_link' ), '__return_empty_string' );
 		self::$checker = $checker;
 	}

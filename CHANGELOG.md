@@ -2,6 +2,23 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.13.0] — 2026-10-22
+
+Independent Analytics come terza origine del Confronto e nuova scheda «Aggiornamenti». Nessuna tabella nuova e nessuna migrazione dello schema (`origin` è già `varchar(8)` nella chiave primaria); nessun evento cron nuovo.
+
+### Added
+- **`IndependentAnalyticsSource`** (origine `ia`): legge le tabelle `independent_analytics_*` (versione da `IAWP_VERSION`) e scrive solo righe `ia` di `site_daily`, `object_daily`, `entry_daily` e della dimensione `channel` di `dim_daily`. Le righe `ia` non sono selezionate da `Origin::where()`: solo il Confronto le legge. Il giorno del sito si calcola in SQL (`Support\LocalTime::shift_sql()`, transizioni di `wp_timezone()`, ora legale compresa); tipo e ID dei contenuti riproducono `Tracker::current_object()`; il canale viene dal tipo di referrer (`Channels::from_iawp()`) e da `Channels::ai_sql()`.
+- **Confronto a tre origini** nella scheda Stato: con Independent Analytics attivo e con righe `ia` compaiono le sue colonne e la differenza rispetto a WP Statistics (giorni, totali, ingressi diretti sulla home, canali, contenuti). La finestra usa solo i giorni completi coperti da tutte le origini (nuovi motivi di esclusione `ia_partial` e `no_ia`). Senza dati di IA la risposta è quella a due origini. Chiavi JSON solo aggiuntive: `ia_available`, `ia`, `diff_ia` e simili.
+- **Scheda «Aggiornamenti»** (`UpdatesPage`) con tutti i pulsanti che aggiornano i dati e la spiegazione di cosa importano: «Dati di traffico» (`EtlCard`), «Search Console da Google» (`GscImportCard`, il pulsante «Importa da Search Console» con i giorni mancanti e l'ultimo import), «Search Console da Rank Math» (`RankMathCard`) e «Versione del plugin» (`UpdatesCard`).
+- `Support\LocalTime`, `Channels::from_iawp()`, `.wp5w-table-scroll` (le tabelle larghe del Confronto scorrono in orizzontale), `scripts/gsc-sync.ps1` (scarica da Search Console gli ultimi giorni e li importa sul blog; si lancia a mano o si pianifica con `-Register`), `independent-analytics` in `.wp-env.json`, e `verify.php` sezione 15 (la pulizia finale diventa la 16).
+
+### Changed
+- Il pulsante di import da Search Console e il box Rank Math lasciano la scheda Opzioni (resta il collegamento a Google); il box «Import» e il box degli aggiornamenti lasciano la scheda Stato. Il link «Verifica aggiornamenti» nella riga del plugin porta alla scheda Aggiornamenti.
+- `Comparison::plan()` accetta in coda `$ia_first_day` e `$ia_days`; `Comparison::top_differences()` accetta la chiave facoltativa `ia`.
+
+### Fixed
+- `CompareQuery::top()` sommava a WP Statistics qualunque origine diversa da `own`: ora ignora le origini che non sono nel confronto.
+
 ## [0.12.0] — 2026-10-17
 
 Collegamento OAuth a Search Console dalla scheda Opzioni e due import separati. Nessuna tabella nuova e nessuna migrazione dello schema; nessun evento cron nuovo (l'import notturno gira dentro `wp5w_etl_daily`).

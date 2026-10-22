@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Button, Notice, Spinner } from '@wordpress/components';
+import { Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Card from '../components/Card';
 import Compare from '../components/Compare';
-import UpdatesCard from '../components/UpdatesCard';
 
 // Descrizione delle tabelle wp5w_*.
 const TABLES = {
@@ -40,7 +39,6 @@ const formatMonth = ( month ) =>
 
 export default function StatusPage() {
 	const [ status, setStatus ] = useState( null );
-	const [ running, setRunning ] = useState( false );
 	const [ notice, setNotice ] = useState( null );
 
 	const load = useCallback( () => {
@@ -51,29 +49,9 @@ export default function StatusPage() {
 
 	useEffect( load, [ load ] );
 
-	// Avvia l'ETL (ultimi giorni o completo) e ricarica lo stato.
-	const runEtl = ( full ) => {
-		setRunning( true );
-		setNotice( null );
-		api( '/admin/etl', { method: 'POST', data: { full } } )
-			.then( ( state ) =>
-				setNotice( {
-					status: 'success',
-					text: `${ __( 'Import completato in', 'wp-5w' ) } ${ state.duration } s.`,
-				} )
-			)
-			.catch( ( e ) => setNotice( { status: 'error', text: e.message } ) )
-			.finally( () => {
-				setRunning( false );
-				load();
-			} );
-	};
-
 	if ( ! status ) {
 		return notice ? <Notice status="error" isDismissible={ false }>{ notice.text }</Notice> : <Spinner />;
 	}
-
-	const last = status.last_run;
 
 	return (
 		<div className="wp5w-status">
@@ -155,31 +133,6 @@ export default function StatusPage() {
 					({ __( 'licenza CC BY 4.0', 'wp-5w' ) })
 				</p>
 			</Card>
-
-			<Card id="status-import" title={ __( 'Import', 'wp-5w' ) }>
-				{ last ? (
-					<p>
-						{ __( 'Ultimo import:', 'wp-5w' ) } { formatTime( last.started ) } ({ last.mode },{ ' ' }
-						{ formatDay( last.from ) } – { formatDay( last.to ) }, { last.duration } s)
-						{ last.ok ? '' : ` — ${ __( 'con errori', 'wp-5w' ) }` }
-					</p>
-				) : (
-					<p>{ __( 'Nessun import eseguito.', 'wp-5w' ) }</p>
-				) }
-				<p>
-					{ __( 'Prossimo aggiornamento automatico:', 'wp-5w' ) } { formatTime( status.next_run ) }
-				</p>
-				<div className="wp5w-actions">
-					<Button variant="primary" isBusy={ running } disabled={ running } onClick={ () => runEtl( false ) }>
-						{ __( 'Aggiorna gli ultimi 7 giorni', 'wp-5w' ) }
-					</Button>
-					<Button variant="secondary" isBusy={ running } disabled={ running } onClick={ () => runEtl( true ) }>
-						{ __( 'Reimporta tutto lo storico', 'wp-5w' ) }
-					</Button>
-				</div>
-			</Card>
-
-			<UpdatesCard />
 		</div>
 	);
 }
