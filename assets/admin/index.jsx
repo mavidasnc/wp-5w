@@ -6,6 +6,7 @@ import PostsPage from './pages/PostsPage';
 import AudiencePage from './pages/AudiencePage';
 import OptionsPage from './pages/OptionsPage';
 import StatusPage from './pages/StatusPage';
+import UpdatesPage from './pages/UpdatesPage';
 import './styles/admin.scss';
 
 const TABS = [
@@ -13,6 +14,7 @@ const TABS = [
 	{ name: 'posts', title: __( 'Articoli', 'wp-5w' ) },
 	{ name: 'audience', title: __( 'Visitatori', 'wp-5w' ) },
 	{ name: 'options', title: __( 'Opzioni', 'wp-5w' ) },
+	{ name: 'updates', title: __( 'Aggiornamenti', 'wp-5w' ) },
 	{ name: 'status', title: __( 'Stato', 'wp-5w' ) },
 ];
 
@@ -38,6 +40,7 @@ function App() {
 						posts: PostsPage,
 						audience: AudiencePage,
 						options: OptionsPage,
+						updates: UpdatesPage,
 						status: StatusPage,
 					};
 					const Page = pages[ tab.name ] ?? OverviewPage;

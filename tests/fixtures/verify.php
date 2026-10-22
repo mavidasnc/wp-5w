@@ -2211,7 +2211,7 @@ $check( 'aggiornamenti: nessun download tentato', 0, $download_calls );
 $plugin_links = ( new AdminMenu() )->add_dashboard_link( array() );
 $check( 'riga del plugin: due link', 2, count( $plugin_links ) );
 $check( 'riga del plugin: il primo è Dashboard', true, str_contains( (string) ( $plugin_links[0] ?? '' ), 'Dashboard' ) );
-$check( 'riga del plugin: il secondo è Verifica aggiornamenti verso la scheda Stato', true, str_contains( html_entity_decode( (string) ( $plugin_links[1] ?? '' ) ), 'page=wp5w&tab=status' ) && str_contains( (string) ( $plugin_links[1] ?? '' ), 'Verifica aggiornamenti' ) );
+$check( 'riga del plugin: il secondo è Verifica aggiornamenti verso la scheda Aggiornamenti', true, str_contains( html_entity_decode( (string) ( $plugin_links[1] ?? '' ) ), 'page=wp5w&tab=updates' ) && str_contains( (string) ( $plugin_links[1] ?? '' ), 'Verifica aggiornamenti' ) );
 
 // Il link «Check for updates» di plugin-update-checker si nasconde. In wp eval-file admin_init non parte e la libreria non aggancia
 // plugin_row_meta, quindi questo controllo sul filtro è quello vincolante (la pagina Plugin si guarda in wp-env).
@@ -2623,7 +2623,292 @@ foreach ( array( 'wp5w_gsc_access', 'wp5w_gsc_sites', 'wp5w_gsc_flash_' . $admin
 wp_set_current_user( 0 );
 
 // ---------------------------------------------------------------------------
-// 15. Pulizia finale.
+// 15. Iterazione 0.13.0: Independent Analytics come terza origine (`ia`) e Confronto a tre.
+// ---------------------------------------------------------------------------
+// Le tabelle di IA si creano solo se mancano (in wp-env le migrazioni di IA partono dalla sua pagina in wp-admin): con le tabelle
+// vere già presenti la sezione si salta, per non toccare dati di IA.
+$ia_prefix = $p . 'independent_analytics_';
+$ia_ddl    = array(
+	'views'          => 'id bigint NOT NULL AUTO_INCREMENT, resource_id bigint NOT NULL, viewed_at datetime NOT NULL, page bigint NOT NULL DEFAULT 1, session_id bigint DEFAULT NULL, PRIMARY KEY (id)',
+	'sessions'       => 'session_id bigint NOT NULL AUTO_INCREMENT, visitor_id bigint NOT NULL, created_at datetime NOT NULL, initial_view_id bigint DEFAULT NULL, referrer_id bigint DEFAULT NULL, PRIMARY KEY (session_id)',
+	'resources'      => 'id bigint NOT NULL AUTO_INCREMENT, resource varchar(64) NOT NULL, singular_id bigint DEFAULT NULL, term_id bigint DEFAULT NULL, author_id bigint DEFAULT NULL, cached_url varchar(2083) DEFAULT NULL, PRIMARY KEY (id)',
+	'referrers'      => 'id bigint NOT NULL AUTO_INCREMENT, domain varchar(128) NOT NULL, referrer_type_id bigint DEFAULT NULL, PRIMARY KEY (id)',
+	'referrer_types' => 'id bigint NOT NULL AUTO_INCREMENT, referrer_type varchar(20) NOT NULL, PRIMARY KEY (id)',
+);
+$ia_real   = (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $ia_prefix . 'views' ) ) );
+
+if ( $ia_real ) {
+	WP_CLI::log( 'SKIP sezione 15: le tabelle di Independent Analytics esistono già (dati veri).' );
+} else {
+	foreach ( $ia_ddl as $wp5w_name => $wp5w_columns ) {
+		$wpdb->query( "CREATE TABLE {$ia_prefix}{$wp5w_name} ( {$wp5w_columns} )" );
+	}
+
+	// Il fuso del sito è Europe/Rome, come sul blog: l'ora legale cambia il giorno delle visite di mezzanotte.
+	$ia_tz_backup = array( get_option( 'timezone_string' ), get_option( 'gmt_offset' ) );
+	update_option( 'timezone_string', 'Europe/Rome' );
+
+	// Passo 1: tipi di referrer, referrer e risorse. Home con «Gli ultimi articoli» (show_on_front = posts): ID 0.
+	$ia_types = array( 'Direct', 'Search', 'Social', 'Referrer', 'AI', 'Ad' );
+	foreach ( $ia_types as $wp5w_type ) {
+		$wpdb->insert( $ia_prefix . 'referrer_types', array( 'referrer_type' => $wp5w_type ) );
+	}
+	$ia_type_id = array_flip( $ia_types );
+	$ia_ref     = array();
+	foreach ( array(
+		'direct'  => array( '', 'Direct' ),
+		'google'  => array( 'www.google.com', 'Search' ),
+		'claude'  => array( 'claude.ai', 'Referrer' ), // IA lo chiama «Referrer»: il canale `ai` lo decide ai_sql().
+		'annuncio' => array( 'ads.example.org', 'Ad' ),
+	) as $wp5w_key => [ $wp5w_domain, $wp5w_type ] ) {
+		$wpdb->insert(
+			$ia_prefix . 'referrers',
+			array(
+				'domain'           => $wp5w_domain,
+				'referrer_type_id' => $ia_type_id[ $wp5w_type ] + 1,
+			)
+		);
+		$ia_ref[ $wp5w_key ] = (int) $wpdb->insert_id;
+	}
+	$ia_res = array();
+	foreach ( array(
+		'post'    => array( 'singular', $post_a, null, null, home_url( '/articolo-prova/' ) ),
+		'home'    => array( 'home', null, null, null, home_url( '/' ) ),
+		'cat'     => array( 'term_archive', null, 1, null, home_url( '/category/uncategorized/' ) ),
+		'e404'    => array( '404', null, null, null, home_url( '/non-esiste/' ) ),
+		'virtual' => array( 'virtual_page', null, null, null, home_url( '/virtuale/' ) ),
+	) as $wp5w_key => [ $wp5w_resource, $wp5w_singular, $wp5w_term, $wp5w_author, $wp5w_url ] ) {
+		$wpdb->insert(
+			$ia_prefix . 'resources',
+			array(
+				'resource'    => $wp5w_resource,
+				'singular_id' => $wp5w_singular,
+				'term_id'     => $wp5w_term,
+				'author_id'   => $wp5w_author,
+				'cached_url'  => $wp5w_url,
+			)
+		);
+		$ia_res[ $wp5w_key ] = (int) $wpdb->insert_id;
+	}
+
+	/**
+	 * Inserisce una sessione di IA con le sue visite (orari UTC) e restituisce l'ID della sessione.
+	 *
+	 * @param int                           $visitor  Visitatore.
+	 * @param string                        $start    Inizio della sessione (UTC).
+	 * @param int|null                      $referrer Referrer.
+	 * @param array<int,array{0:int,1:string}> $views Visite: risorsa e orario UTC; la prima è quella d'ingresso.
+	 * @return int
+	 */
+	$ia_session = static function ( int $visitor, string $start, ?int $referrer, array $views ) use ( $wpdb, $ia_prefix ): int {
+		$wpdb->insert(
+			$ia_prefix . 'sessions',
+			array(
+				'visitor_id'  => $visitor,
+				'created_at'  => $start,
+				'referrer_id' => $referrer,
+			)
+		);
+		$session = (int) $wpdb->insert_id;
+		$first   = 0;
+		foreach ( $views as [ $resource, $at ] ) {
+			$wpdb->insert(
+				$ia_prefix . 'views',
+				array(
+					'resource_id' => $resource,
+					'viewed_at'   => $at,
+					'session_id'  => $session,
+				)
+			);
+			$first = $first ?: (int) $wpdb->insert_id;
+		}
+		$wpdb->update( $ia_prefix . 'sessions', array( 'initial_view_id' => $first ), array( 'session_id' => $session ) );
+		return $session;
+	};
+
+	// Passo 2: visite d'estate (+02:00) e d'inverno (+01:00), alcune a cavallo della mezzanotte locale.
+	// 14/07: s1 (visitatore 1, Google) 10:00 articolo, categoria, pagina virtuale; s3 (visitatore 1, claude.ai) 12:00 articolo.
+	// 14/07 alle 22:30 UTC è già il 15/07 in Italia (s2, visitatore 2, diretto, home).
+	$ia_session( 1, '2026-07-14 10:00:00', $ia_ref['google'], array( array( $ia_res['post'], '2026-07-14 10:00:00' ), array( $ia_res['cat'], '2026-07-14 10:05:00' ), array( $ia_res['virtual'], '2026-07-14 11:00:00' ) ) );
+	$ia_session( 2, '2026-07-14 22:30:00', $ia_ref['direct'], array( array( $ia_res['home'], '2026-07-14 22:30:00' ) ) );
+	$ia_session( 1, '2026-07-14 12:00:00', $ia_ref['claude'], array( array( $ia_res['post'], '2026-07-14 12:00:00' ) ) );
+	// D'inverno 14/01 alle 23:30 UTC è il 15/01 locale (404); alle 22:30 UTC è ancora il 14/01 locale (articolo, referrer a pagamento).
+	$ia_session( 3, '2026-01-14 23:30:00', $ia_ref['direct'], array( array( $ia_res['e404'], '2026-01-14 23:30:00' ) ) );
+	$ia_session( 4, '2026-01-14 22:30:00', $ia_ref['annuncio'], array( array( $ia_res['post'], '2026-01-14 22:30:00' ) ) );
+
+	// Passo 3: sorgente riconosciuta e import. Le righe wps e own non devono cambiare.
+	$ia_source = new Mavida\FiveW\Sources\IndependentAnalyticsSource();
+	$ia_detect = $ia_source->detect();
+	$check( 'IA: sorgente riconosciuta', true, $ia_detect['ok'] );
+	$check( 'IA: versione = IAWP_VERSION', defined( 'IAWP_VERSION' ) ? IAWP_VERSION : '', (string) $ia_detect['version'] );
+
+	$origin_counts = static function () use ( $wpdb ): string {
+		$parts = array();
+		foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
+			foreach ( array( 'wps', 'own' ) as $wp5w_origin ) {
+				$parts[] = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = '{$wp5w_origin}'" );
+			}
+		}
+		return implode( ',', $parts );
+	};
+	$before = $origin_counts();
+	$ia_source->import( new DateRange( '2026-01-01', '2026-07-31' ) );
+	$check( 'IA: le righe wps e own non cambiano', $before, $origin_counts() );
+
+	$ia_rows = static function ( string $table, string $columns, string $where = '1=1' ) use ( $wpdb ): array {
+		return $wpdb->get_col( "SELECT CONCAT_WS('|', {$columns}) FROM " . Schema::table( $table ) . " WHERE origin = 'ia' AND {$where} ORDER BY day, 1" );
+	};
+	$check( 'IA: site_daily (giorno del sito, ora legale, pagina virtuale nei totali)', '2026-01-14|1|1;2026-01-15|1|1;2026-07-14|1|4;2026-07-15|1|1', implode( ';', $ia_rows( 'site_daily', 'day, visitors, views' ) ) );
+	$ia_uri = wp_make_link_relative( home_url( '/articolo-prova/' ) );
+	$check(
+		'IA: object_daily (tipi e ID come il Tracker, senza pagine virtuali)',
+		implode( ';', array( "2026-01-14|post|{$post_a}|1|1|{$ia_uri}", '2026-01-15|404|0|1|1|' . wp_make_link_relative( home_url( '/non-esiste/' ) ), "2026-07-14|category|1|1|1|" . wp_make_link_relative( home_url( '/category/uncategorized/' ) ), "2026-07-14|post|{$post_a}|2|1|{$ia_uri}", '2026-07-15|home|0|1|1|' . wp_make_link_relative( home_url( '/' ) ) ) ),
+		implode( ';', $ia_rows( 'object_daily', 'day, object_type, object_id, views, visitors, uri' ) )
+	);
+	$check(
+		'IA: entry_daily (canale: Ad non assegnato, claude.ai è ai)',
+		"2026-01-14|post|{$post_a}|unassigned|1;2026-01-15|404|0|direct|1;2026-07-14|post|{$post_a}|ai|1;2026-07-14|post|{$post_a}|search|1;2026-07-15|home|0|direct|1",
+		implode( ';', $ia_rows( 'entry_daily', 'day, object_type, object_id, channel, visitors' ) )
+	);
+	$check( 'IA: dim_daily solo il canale, un visitatore per giorno con la prima sessione', '2026-01-14|channel|unassigned|1;2026-01-15|channel|direct|1;2026-07-14|channel|search|1;2026-07-15|channel|direct|1', implode( ';', $ia_rows( 'dim_daily', 'day, dim, value, visitors' ) ) );
+	$check( 'IA: referrer_daily non scritta', 0, (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'ia'" ) );
+
+	// Passo 4: idempotenza.
+	$ia_before = md5( implode( ';', array_merge( $ia_rows( 'site_daily', 'day, visitors, views' ), $ia_rows( 'entry_daily', 'day, object_type, object_id, channel, visitors' ) ) ) );
+	$ia_source->import( new DateRange( '2026-01-01', '2026-07-31' ) );
+	$check( 'IA: reimportare dà le stesse righe', $ia_before, md5( implode( ';', array_merge( $ia_rows( 'site_daily', 'day, visitors, views' ), $ia_rows( 'entry_daily', 'day, object_type, object_id, channel, visitors' ) ) ) ) );
+
+	// Passo 5: le righe ia sono invisibili alle altre schermate (Origin::where seleziona solo wps e own).
+	foreach ( array( '', '2026-03-01' ) as $wp5w_since ) {
+		$where = Mavida\FiveW\Support\Origin::where( $wp5w_since, 's' );
+		$check( "IA: Origin::where('{$wp5w_since}') non seleziona righe ia", 0, (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( 'site_daily' ) . " s WHERE s.origin = 'ia' AND {$where}" ) );
+	}
+
+	// Passo 6: l'Importer salta IA se la sorgente non è riconosciuta, e la scrive con il suo stato se lo è.
+	$ia_state = 'wp5w_verify_ia_state';
+	$ia_run   = ( new Importer( array( $ia_source ), $ia_state ) )->run( new DateRange( '2026-07-01', '2026-07-31' ), 'test' );
+	$check( 'IA: Importer ok', true, $ia_run['ok'] ?? false );
+	delete_option( $ia_state );
+
+	// Passo 7: Confronto a tre. D = oggi. wps su D-4..D-1; own da D-4 (primo giorno parziale); ia da D-3 (installato dopo, quindi parziale).
+	$ia_backup = array();
+	foreach ( array( 'site_daily', 'object_daily', 'entry_daily', 'dim_daily' ) as $wp5w_name ) {
+		$ia_backup[ $wp5w_name ] = $wpdb->get_results( 'SELECT * FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own') AND day >= '{$d[4]}'", ARRAY_A );
+		$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own','ia','xx') AND day >= '{$d[4]}'" );
+	}
+	$ia_state_backup = get_option( Importer::STATE_OPTION, false );
+	$ia_discards     = $wpdb->get_results( 'SELECT * FROM ' . Schema::table( 'discards' ), ARRAY_A );
+	$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'discards' ) );
+	// Le righe ia dei passi precedenti (date del 2026 passato) si tolgono: per il confronto servono righe ia solo da D-3.
+	foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
+		$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'ia'" );
+	}
+
+	$set = array(
+		'site_daily'   => array(
+			array( 'wps', $d[2], array( 'visitors' => 10, 'views' => 20 ) ),
+			array( 'wps', $d[1], array( 'visitors' => 20, 'views' => 40 ) ),
+			array( 'own', $d[4], array( 'visitors' => 1, 'views' => 1 ) ),
+			array( 'own', $d[3], array( 'visitors' => 5, 'views' => 5 ) ),
+			array( 'own', $d[2], array( 'visitors' => 9, 'views' => 18 ) ),
+			array( 'own', $d[1], array( 'visitors' => 19, 'views' => 38 ) ),
+			array( 'ia', $d[3], array( 'visitors' => 2, 'views' => 2 ) ),
+			array( 'ia', $d[2], array( 'visitors' => 5, 'views' => 10 ) ),
+			array( 'ia', $d[1], array( 'visitors' => 20, 'views' => 40 ) ),
+		),
+		'object_daily' => array(
+			array( 'wps', $d[2], array( 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $ia_uri, 'views' => 10, 'visitors' => 5 ) ),
+			array( 'wps', $d[1], array( 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $ia_uri, 'views' => 20, 'visitors' => 9 ) ),
+			array( 'own', $d[2], array( 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $ia_uri, 'views' => 9, 'visitors' => 4 ) ),
+			array( 'own', $d[1], array( 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $ia_uri, 'views' => 19, 'visitors' => 9 ) ),
+			array( 'ia', $d[2], array( 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $ia_uri, 'views' => 4, 'visitors' => 3 ) ),
+			array( 'ia', $d[1], array( 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $ia_uri, 'views' => 8, 'visitors' => 5 ) ),
+			// Un'origine sconosciuta non deve finire nelle visualizzazioni di WP Statistics.
+			array( 'xx', $d[2], array( 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $ia_uri, 'views' => 100, 'visitors' => 50 ) ),
+		),
+		'entry_daily'  => array(
+			array( 'wps', $d[2], array( 'object_type' => 'home', 'object_id' => 0, 'channel' => 'direct', 'visitors' => 4 ) ),
+			array( 'own', $d[2], array( 'object_type' => 'home', 'object_id' => 0, 'channel' => 'direct', 'visitors' => 3 ) ),
+			array( 'ia', $d[2], array( 'object_type' => 'home', 'object_id' => 0, 'channel' => 'direct', 'visitors' => 6 ) ),
+		),
+		'dim_daily'    => array(
+			array( 'wps', $d[2], array( 'dim' => 'channel', 'value' => 'direct', 'visitors' => 10 ) ),
+			array( 'own', $d[2], array( 'dim' => 'channel', 'value' => 'direct', 'visitors' => 9 ) ),
+			array( 'ia', $d[2], array( 'dim' => 'channel', 'value' => 'direct', 'visitors' => 5 ) ),
+			array( 'ia', $d[2], array( 'dim' => 'channel', 'value' => 'ai', 'visitors' => 2 ) ),
+		),
+	);
+	foreach ( $set as $wp5w_name => $wp5w_list ) {
+		foreach ( $wp5w_list as [ $wp5w_origin, $wp5w_day_value, $wp5w_row ] ) {
+			$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row + array( 'day' => $wp5w_day_value, 'origin' => $wp5w_origin ) );
+		}
+	}
+	// L'ultimo ETL è partito adesso con `to` = oggi: ieri è completo per WP Statistics.
+	update_option( Importer::STATE_OPTION, array( 'mode' => 'daily', 'from' => $d[4], 'to' => $d[0], 'started' => time(), 'ok' => true ), false );
+
+	$admin_user( $admin_id );
+	$three = $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data();
+	$ia_excluded = array_map( static fn( $item ) => $item['day'] . ':' . $item['reason'], $three['coverage']['excluded'] ?? array() );
+	$check( 'tre origini: ia_available', true, $three['ia_available'] ?? false );
+	$check( 'tre origini: finestra da D-2 a D-1', $d[2] . ',' . $d[1], implode( ',', array_column( $three['days'] ?? array(), 'day' ) ) );
+	$check( 'tre origini: D-4 partial, D-3 ia_partial, oggi today', true, in_array( $d[4] . ':partial', $ia_excluded, true ) && in_array( $d[3] . ':ia_partial', $ia_excluded, true ) && in_array( $d[0] . ':today', $ia_excluded, true ) );
+	$check( 'tre origini: totali wps', '30|60', ( $three['totals']['wps']['visitors'] ?? '' ) . '|' . ( $three['totals']['wps']['views'] ?? '' ) );
+	$check( 'tre origini: totali own', '28|56', ( $three['totals']['own']['visitors'] ?? '' ) . '|' . ( $three['totals']['own']['views'] ?? '' ) );
+	$check( 'tre origini: totali ia', '25|50', ( $three['totals']['ia']['visitors'] ?? '' ) . '|' . ( $three['totals']['ia']['views'] ?? '' ) );
+	$check( 'tre origini: differenze own su wps', '-6.7|-6.7', ( $three['totals']['diff']['visitors'] ?? '' ) . '|' . ( $three['totals']['diff']['views'] ?? '' ) );
+	$check( 'tre origini: differenze ia su wps', '-16.7|-16.7', ( $three['totals']['diff_ia']['visitors'] ?? '' ) . '|' . ( $three['totals']['diff_ia']['views'] ?? '' ) );
+	$check( 'tre origini: D-2 ia 5|10, diff_ia -50|-50', '5|10|-50|-50', ( $three['days'][0]['ia']['visitors'] ?? '' ) . '|' . ( $three['days'][0]['ia']['views'] ?? '' ) . '|' . ( $three['days'][0]['diff_ia']['visitors'] ?? '' ) . '|' . ( $three['days'][0]['diff_ia']['views'] ?? '' ) );
+	$check( 'tre origini: D-2 segnalato (ia oltre soglia), D-1 no', '1|0', (int) ( $three['days'][0]['flagged'] ?? 0 ) . '|' . (int) ( $three['days'][1]['flagged'] ?? 0 ) );
+	$check( 'tre origini: ingressi diretti sulla home 4|3|6', '4|3|6', ( $three['home_direct']['wps'] ?? '' ) . '|' . ( $three['home_direct']['own'] ?? '' ) . '|' . ( $three['home_direct']['ia'] ?? '' ) );
+	$channels_by_name = array_column( $three['channels'] ?? array(), null, 'channel' );
+	$check( 'tre origini: canale direct 10|9|5', '10|9|5', ( $channels_by_name['direct']['wps'] ?? '' ) . '|' . ( $channels_by_name['direct']['own'] ?? '' ) . '|' . ( $channels_by_name['direct']['ia'] ?? '' ) );
+	$check( 'tre origini: canale ai solo di ia (0|0|2)', '0|0|2', ( $channels_by_name['ai']['wps'] ?? '' ) . '|' . ( $channels_by_name['ai']['own'] ?? '' ) . '|' . ( $channels_by_name['ai']['ia'] ?? '' ) );
+	$top_row = $three['top'][0] ?? array();
+	$check( 'tre origini: contenuto in testa 30|28|12', '30|28|12', ( $top_row['wps_views'] ?? '' ) . '|' . ( $top_row['own_views'] ?? '' ) . '|' . ( $top_row['ia_views'] ?? '' ) );
+	$check( 'tre origini: differenza assoluta ia e % (-60)', '18|-60', ( $top_row['diff_abs_ia'] ?? '' ) . '|' . ( $top_row['diff_ia'] ?? '' ) );
+	$check( 'tre origini: un\'origine sconosciuta non entra in wps_views', 30, $top_row['wps_views'] ?? '' );
+
+	// Passo 8: un giorno senza righe ia esce dalla finestra come no_ia.
+	$wpdb->delete( Schema::table( 'site_daily' ), array( 'day' => $d[1], 'origin' => 'ia' ) );
+	$partial = $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data();
+	$check( 'tre origini: senza ia su D-1 la finestra è solo D-2', $d[2], implode( ',', array_column( $partial['days'] ?? array(), 'day' ) ) );
+	$check( 'tre origini: D-1 escluso come no_ia', true, in_array( $d[1] . ':no_ia', array_map( static fn( $item ) => $item['day'] . ':' . $item['reason'], $partial['coverage']['excluded'] ?? array() ), true ) );
+
+	// Passo 9: senza nessuna riga ia la risposta è quella a due origini (stesse chiavi di prima, finestra da D-3).
+	$wpdb->query( 'DELETE FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'ia'" );
+	$wpdb->insert( Schema::table( 'site_daily' ), array( 'day' => $d[3], 'origin' => 'wps', 'visitors' => 6, 'views' => 6 ) );
+	$two = $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data();
+	$check( 'due origini: ia_available falso', false, $two['ia_available'] ?? true );
+	$check( 'due origini: finestra da D-3 a D-1', $d[3] . ',' . $d[2] . ',' . $d[1], implode( ',', array_column( $two['days'] ?? array(), 'day' ) ) );
+	$check( 'due origini: nessuna chiave ia nei giorni, nei totali e nei canali', '0|0|0', (int) isset( $two['days'][0]['ia'] ) . '|' . (int) isset( $two['totals']['ia'] ) . '|' . (int) isset( $two['channels'][0]['ia'] ) );
+	$check( 'due origini: nessuna chiave ia nei contenuti', 0, (int) isset( $two['top'][0]['ia_views'] ) );
+
+	// Passo 10: ripristino.
+	foreach ( array( 'site_daily', 'object_daily', 'entry_daily', 'dim_daily' ) as $wp5w_name ) {
+		$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own','ia','xx') AND day >= '{$d[4]}'" );
+		foreach ( $ia_backup[ $wp5w_name ] as $wp5w_row ) {
+			$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row );
+		}
+	}
+	$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( 'discards' ) );
+	foreach ( $ia_discards as $wp5w_row ) {
+		$wpdb->insert( Schema::table( 'discards' ), $wp5w_row );
+	}
+	if ( false === $ia_state_backup ) {
+		delete_option( Importer::STATE_OPTION );
+	} else {
+		update_option( Importer::STATE_OPTION, $ia_state_backup, false );
+	}
+	foreach ( array_keys( $ia_ddl ) as $wp5w_name ) {
+		$wpdb->query( "DROP TABLE IF EXISTS {$ia_prefix}{$wp5w_name}" );
+	}
+	update_option( 'timezone_string', (string) $ia_tz_backup[0] );
+	update_option( 'gmt_offset', $ia_tz_backup[1] );
+	$admin_user( 0 );
+}
+
+// ---------------------------------------------------------------------------
+// 16. Pulizia finale.
 // ---------------------------------------------------------------------------
 // Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
 remove_filter( 'pre_http_request', $github_mock, 10 );

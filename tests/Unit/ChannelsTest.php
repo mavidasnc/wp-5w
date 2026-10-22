@@ -199,4 +199,18 @@ final class ChannelsTest extends TestCase {
 			Channels::classify( 'claude.ai', '', '' )
 		);
 	}
+
+	public function test_iawp_referrer_types_map_to_wp_statistics_channels(): void {
+		$this->assertSame( 'direct', Channels::from_iawp( 'Direct' ) );
+		$this->assertSame( 'search', Channels::from_iawp( 'Search' ) );
+		$this->assertSame( 'social', Channels::from_iawp( 'Social' ) );
+		$this->assertSame( 'referral', Channels::from_iawp( 'Referrer' ) );
+		$this->assertSame( 'ai', Channels::from_iawp( 'AI' ) );
+	}
+
+	public function test_iawp_ad_and_unknown_types_are_unassigned(): void {
+		$this->assertSame( 'unassigned', Channels::from_iawp( 'Ad' ) );
+		$this->assertSame( 'unassigned', Channels::from_iawp( '' ) );
+		$this->assertSame( 'unassigned', Channels::from_iawp( 'qualcosa' ) );
+	}
 }

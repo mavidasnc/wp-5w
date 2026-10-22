@@ -218,6 +218,26 @@ final class Channels {
 	}
 
 	/**
+	 * Canale di WP Statistics per un tipo di referrer di Independent Analytics (`referrer_types.referrer_type`).
+	 *
+	 * Il canale `ai` non passa di qui: si decide in aggregazione con ai_sql(), come per le altre due origini.
+	 * Un tipo sconosciuto (o `Ad`, che WP Statistics non ha) diventa `unassigned`.
+	 *
+	 * @param string $type Tipo di referrer: Direct, Search, Social, Referrer, AI o Ad.
+	 * @return string
+	 */
+	public static function from_iawp( string $type ): string {
+		return match ( strtolower( trim( $type ) ) ) {
+			'direct'   => 'direct',
+			'search'   => 'search',
+			'social'   => 'social',
+			'referrer' => 'referral',
+			'ai'       => 'ai',
+			default    => 'unassigned',
+		};
+	}
+
+	/**
 	 * Minuscolo e senza "www." iniziale.
 	 *
 	 * @param string $host Host.

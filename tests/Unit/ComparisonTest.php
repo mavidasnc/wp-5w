@@ -83,6 +83,79 @@ final class ComparisonTest extends TestCase {
 		$this->assertSame( array( '2026-10-14' => 'partial', '2026-10-28' => 'today' ), self::reasons( $plan ) );
 	}
 
+	public function test_plan_with_ia_starts_after_its_first_day_and_marks_it_partial(): void {
+		// Raccolta propria dal 14/10, Independent Analytics installato il 20/10: la finestra parte il 21.
+		$etl  = array(
+			'day' => '2026-10-28',
+			'to'  => '2026-10-27',
+		);
+		$all  = self::range( '2026-10-14', '2026-10-28' );
+		$plan = Comparison::plan( '2026-10-14', $etl, '2026-10-28', $all, $all, '2026-10-20', self::range( '2026-10-20', '2026-10-28' ) );
+
+		$this->assertSame( '2026-10-21', $plan['from'] );
+		$this->assertSame( '2026-10-27', $plan['to'] );
+		$this->assertCount( 7, $plan['days'] );
+		$this->assertSame(
+			array(
+				'2026-10-14' => 'partial',
+				'2026-10-20' => 'ia_partial',
+				'2026-10-28' => 'today',
+			),
+			self::reasons( $plan )
+		);
+	}
+
+	public function test_plan_with_ia_installed_before_own_uses_own_window(): void {
+		// IA c'era già prima della raccolta propria: il suo primo giorno non è un limite e non compare tra gli esclusi.
+		$etl  = array(
+			'day' => '2026-10-28',
+			'to'  => '2026-10-27',
+		);
+		$all  = self::range( '2026-10-10', '2026-10-28' );
+		$plan = Comparison::plan( '2026-10-14', $etl, '2026-10-28', $all, $all, '2026-10-10', $all );
+
+		$this->assertSame( '2026-10-15', $plan['from'] );
+		$this->assertSame( array( '2026-10-14' => 'partial', '2026-10-28' => 'today' ), self::reasons( $plan ) );
+	}
+
+	public function test_plan_with_ia_same_first_day_as_own_has_a_single_partial(): void {
+		$etl  = array(
+			'day' => '2026-10-28',
+			'to'  => '2026-10-27',
+		);
+		$all  = self::range( '2026-10-14', '2026-10-28' );
+		$plan = Comparison::plan( '2026-10-14', $etl, '2026-10-28', $all, $all, '2026-10-14', $all );
+
+		$this->assertSame( '2026-10-15', $plan['from'] );
+		$this->assertSame( array( '2026-10-14' => 'partial', '2026-10-28' => 'today' ), self::reasons( $plan ) );
+	}
+
+	public function test_plan_with_ia_marks_days_without_ia_rows(): void {
+		$etl  = array(
+			'day' => '2026-10-28',
+			'to'  => '2026-10-27',
+		);
+		$all  = self::range( '2026-10-14', '2026-10-28' );
+		$ia   = array_values( array_diff( self::range( '2026-10-14', '2026-10-28' ), array( '2026-10-22' ) ) );
+		$plan = Comparison::plan( '2026-10-14', $etl, '2026-10-28', $all, $all, '2026-10-14', $ia );
+
+		$this->assertSame( 'no_ia', self::reasons( $plan )['2026-10-22'] );
+		$this->assertNotContains( '2026-10-22', $plan['days'] );
+	}
+
+	public function test_plan_with_ia_first_day_today_has_empty_window(): void {
+		$etl  = array(
+			'day' => '2026-10-28',
+			'to'  => '2026-10-27',
+		);
+		$all  = self::range( '2026-10-14', '2026-10-28' );
+		$plan = Comparison::plan( '2026-10-14', $etl, '2026-10-28', $all, $all, '2026-10-28', array( '2026-10-28' ) );
+
+		$this->assertNull( $plan['to'] );
+		$this->assertSame( array(), $plan['days'] );
+		$this->assertArrayNotHasKey( '2026-10-28', array_filter( self::reasons( $plan ), static fn( string $r ): bool => 'ia_partial' === $r ) );
+	}
+
 	public function test_plan_etl_not_yet_run_today_leaves_yesterday_pending(): void {
 		// ETL di ieri (27/10), oggi 28/10: la riga `wps` del 27 è ancora parziale.
 		$etl  = array(
@@ -250,6 +323,29 @@ final class ComparisonTest extends TestCase {
 			'wps'  => $wps,
 			'own'  => $own,
 		);
+	}
+
+	public function test_top_with_ia_adds_ia_differences_and_ranks_by_the_largest(): void {
+		$rows = array(
+			array( 'type' => 'post', 'id' => 1, 'uri' => '/a/', 'wps' => 100, 'own' => 98, 'ia' => 60 ),
+			array( 'type' => 'post', 'id' => 2, 'uri' => '/b/', 'wps' => 100, 'own' => 90, 'ia' => 95 ),
+			array( 'type' => 'post', 'id' => 3, 'uri' => '/c/', 'wps' => 5, 'own' => 4, 'ia' => 12 ),
+			array( 'type' => 'post', 'id' => 4, 'uri' => '/d/', 'wps' => 3, 'own' => 2, 'ia' => 1 ),
+		);
+		$top  = Comparison::top_differences( $rows );
+
+		// L'ultimo non arriva a MIN_VIEWS in nessuna origine; il terzo ci arriva solo con IA.
+		$this->assertSame( array( 1, 2, 3 ), array_column( $top, 'id' ) );
+		$this->assertSame( 40, $top[0]['diff_abs_ia'] );
+		$this->assertSame( -40.0, $top[0]['diff_ia'] );
+		$this->assertSame( 2, $top[0]['diff_abs'] );
+	}
+
+	public function test_top_without_ia_has_no_ia_keys(): void {
+		$top = Comparison::top_differences( array( array( 'type' => 'post', 'id' => 1, 'uri' => '/a/', 'wps' => 20, 'own' => 10 ) ) );
+
+		$this->assertArrayNotHasKey( 'diff_ia', $top[0] );
+		$this->assertArrayNotHasKey( 'diff_abs_ia', $top[0] );
 	}
 
 	public function test_top_applies_minimum_views(): void {

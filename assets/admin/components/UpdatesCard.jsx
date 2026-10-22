@@ -13,7 +13,7 @@ const checkedAt = ( ts ) =>
 	ts ? new Date( ts * 1000 ).toLocaleString( 'it-IT', { dateStyle: 'medium', timeStyle: 'short' } ) : __( 'mai', 'wp-5w' );
 
 /**
- * Box «Aggiornamenti» della scheda Stato: versione installata e ultima, verifica immediata e installazione dalle release di GitHub.
+ * Box «Versione del plugin» della scheda Aggiornamenti: versione installata e ultima, verifica immediata e installazione dalle release di GitHub.
  */
 export default function UpdatesCard() {
 	const [ status, setStatus ] = useState( null );
@@ -61,7 +61,7 @@ export default function UpdatesCard() {
 	};
 
 	return (
-		<Card id="status-updates" title={ __( 'Aggiornamenti', 'wp-5w' ) }>
+		<Card id="updates-plugin" title={ __( 'Versione del plugin', 'wp-5w' ) }>
 			{ error && <Notice status="error" isDismissible={ false }>{ error }</Notice> }
 			{ ! status && ! error && <Spinner /> }
 			{ notice && (

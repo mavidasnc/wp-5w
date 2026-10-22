@@ -153,6 +153,11 @@
 	}
 }
 
+// Tabelle larghe (il Confronto a tre origini ha fino a 11 colonne): scorrono in orizzontale invece di rompere la card.
+.wp5w-table-scroll {
+	overflow-x: auto;
+}
+
 .wp5w-table,
 .wp5w-status table {
 	.num {
@@ -488,7 +493,7 @@
 	}
 }
 
-// Box «Aggiornamenti» della scheda Stato (0.11.0).
+// Scheda Aggiornamenti: box «Versione del plugin» (0.11.0) e dati chiave dei box di import.
 .wp5w-updates {
 	// Dati chiave in colonna (versione installata, ultima versione, ultimo controllo).
 	&__facts {

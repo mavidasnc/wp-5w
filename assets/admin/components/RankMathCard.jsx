@@ -5,7 +5,7 @@ import { api, errorText, formatNumber, formatTime } from '../api';
 import Card from './Card';
 
 /**
- * Box «Rank Math»: import dello storico di Search Console che Rank Math ha nel database, separato da quello di Google.
+ * Box «Search Console da Rank Math» della scheda Aggiornamenti: import dello storico di Search Console che Rank Math ha nel database, separato da quello di Google.
  */
 export default function RankMathCard() {
 	const [ status, setStatus ] = useState( null );
@@ -36,7 +36,7 @@ export default function RankMathCard() {
 	const source = last?.sources?.rank_math;
 
 	return (
-		<Card id="options-rankmath" title={ __( 'Rank Math Analytics', 'wp-5w' ) }>
+		<Card id="updates-rankmath" title={ __( 'Search Console da Rank Math', 'wp-5w' ) }>
 			{ notice && (
 				<Notice status={ notice.status } onRemove={ () => setNotice( null ) }>
 					{ notice.text }
@@ -46,7 +46,7 @@ export default function RankMathCard() {
 			{ status && (
 				<>
 					<p className="wp5w-note wp5w-note--top">
-						{ __( 'Copia nel plugin lo storico di Search Console che Rank Math ha nel database (la versione gratuita ne tiene 90 giorni). Succede già ogni notte: qui puoi farlo subito.', 'wp-5w' ) }
+						{ __( 'Copia nel plugin i dati di Search Console (clic, impression e posizione per pagina e query) che Rank Math Analytics ha già scaricato nel database del sito: la versione gratuita ne tiene solo 90 giorni e con meno query rispetto all\'API di Google. Succede già ogni notte: qui puoi farlo subito.', 'wp-5w' ) }
 					</p>
 					{ ! status.available && (
 						<Notice status="warning" isDismissible={ false }>
