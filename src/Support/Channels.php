@@ -218,6 +218,28 @@ final class Channels {
 	}
 
 	/**
+	 * Nome dell'assistente AI di una visita, o `''` se non è un assistente: la stessa regola di ai_sql(), in PHP,
+	 * per le sorgenti che classificano in memoria invece che in SQL (log di accesso).
+	 *
+	 * @param string $host       Host del referrer (vedi host()).
+	 * @param string $utm_source Parametro utm_source.
+	 * @return string
+	 */
+	public static function ai( string $host, string $utm_source = '' ): string {
+		$utm = self::strip_www( trim( $utm_source ) );
+
+		foreach ( self::AI as $assistant => $domains ) {
+			foreach ( $domains as $domain ) {
+				if ( $host === $domain || str_ends_with( $host, '.' . $domain ) || $utm === $domain ) {
+					return $assistant;
+				}
+			}
+		}
+
+		return '';
+	}
+
+	/**
 	 * Canale di WP Statistics per un tipo di referrer di Independent Analytics (`referrer_types.referrer_type`).
 	 *
 	 * Il canale `ai` non passa di qui: si decide in aggregazione con ai_sql(), come per le altre due origini.

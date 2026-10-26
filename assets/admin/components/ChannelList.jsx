@@ -10,6 +10,7 @@ export const LABELS = {
 	video: __( 'Video', 'wp-5w' ),
 	email: __( 'Email', 'wp-5w' ),
 	ai: __( 'Assistenti AI', 'wp-5w' ),
+	bot: __( 'Bot e browser automatici', 'wp-5w' ),
 	unassigned: __( 'Non assegnato', 'wp-5w' ),
 	'(n/d)': __( 'Non assegnato', 'wp-5w' ),
 };

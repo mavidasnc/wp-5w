@@ -37,6 +37,7 @@ use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\REST\GscController;
 use Mavida\FiveW\Settings;
+use Mavida\FiveW\Sources\AccessLogSource;
 use Mavida\FiveW\Sources\OwnSource;
 use Mavida\FiveW\Support\DateRange;
 
@@ -514,8 +515,12 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 	$r30      = DateRange::last_days( 30, $today );
 	$r60      = DateRange::last_days( 60, $today );
 
+	// `tools` (le serie dei tre strumenti) legge di proposito tutte le origini: non fa parte del confronto prima/dopo le righe own.
+	$overview_data = $overview->get( $r30 );
+	unset( $overview_data['tools'] );
+
 	return array(
-		'overview'     => (string) wp_json_encode( $overview->get( $r30 ) ),
+		'overview'     => (string) wp_json_encode( $overview_data ),
 		'top all'      => (string) wp_json_encode( $overview->top( $r30, 'all' ) ),
 		'top post'     => (string) wp_json_encode( $overview->top( $r30, 'post' ) ),
 		'latest'       => (string) wp_json_encode( $posts->latest() ),
@@ -970,7 +975,7 @@ $check( 'POST settings: purge di LiteSpeed alla modifica di own_tracking', 1, $p
 $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'retention_days' => 61 ) );
 $check( 'POST settings: nessun purge se own_tracking e DNT non cambiano', 1, $purges );
 $get = $rest_call( 'GET', '/wp5w/v1/admin/settings' )->get_data();
-$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
+$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,log_glob,log_excluded_paths,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
 $check( 'GET settings: own_first_day', $today, $get['own_first_day'] ?? '' );
 $check( 'GET settings: own_since', $today, $get['own_since'] ?? '' );
 update_option( Settings::OPTION, Settings::defaults() );
@@ -1605,7 +1610,7 @@ foreach ( array( 'hits', 'discards', 'notfound_daily', 'search_daily' ) as $wp5w
 	$wpdb->query( 'TRUNCATE TABLE ' . Schema::table( $wp5w_name ) );
 }
 foreach ( Mavida\FiveW\Support\Origin::TABLES as $wp5w_name ) {
-	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin = 'own'" );
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('own','log','logbot')" );
 }
 delete_option( 'wp5w_daily_salt' );
 
@@ -1674,6 +1679,20 @@ $check( 'ai own: entry_daily con visitatori ai', 4, $wpdb->get_var( $wpdb->prepa
 $check( 'ai own: referrer_daily con tre siti ai (quello senza referrer non c\'è)', 3, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND channel = 'ai'", $today ) ) );
 $check( 'ai own: referrer_daily claude.ai con sorgente Claude', 'Claude', $wpdb->get_var( $wpdb->prepare( 'SELECT source FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND referrer = 'claude.ai'", $today ) ) );
 
+// Passo 2b (0.14.0): canale «bot». Un crawler AI (claudebot, con referrer claude.ai) va in `bot` e non in `ai`; la visita si toglie subito dopo,
+// così i controlli seguenti ripartono dagli stessi numeri.
+$send_hit( $payload( $post_a, array( 'r' => 'https://claude.ai/chat/x', 'u' => '/wp5w-v14-bot/' ) ), '192.0.2.9', 'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' );
+( new OwnSource() )->run_hourly();
+$check( 'bot own: etichetta della visita', 'claudebot', $wpdb->get_var( "SELECT bot FROM {$hits_table} WHERE uri = '/wp5w-v14-bot/'" ) );
+$check( 'bot own: canale bot di oggi', 1, $dim_value( 'own', $today, 'channel', 'bot' ) );
+$check( 'bot own: il canale ai resta a 4 (il crawler non ci entra)', 4, $dim_value( 'own', $today, 'channel', 'ai' ) );
+$check( 'bot own: entry_daily con un visitatore bot', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(visitors), 0) FROM ' . Schema::table( 'entry_daily' ) . " WHERE origin = 'own' AND day = %s AND channel = 'bot'", $today ) ) );
+$bot_visitors = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT visitors FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) );
+$check( 'bot own: somma di channel = visitatori own del sito', $bot_visitors, $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = 'own' AND day = %s AND dim = 'channel'", $today ) ) );
+$wpdb->query( "DELETE FROM {$hits_table} WHERE uri = '/wp5w-v14-bot/'" );
+( new OwnSource() )->run_hourly();
+$check( 'bot own: tolta la visita, il canale bot sparisce', 0, $dim_value( 'own', $today, 'channel', 'bot' ) );
+
 /**
  * Controlla che le sei dimensioni dell'invariante (senza le utm_*) abbiano la stessa somma, uguale ai visitatori own del sito.
  *
@@ -1687,6 +1706,17 @@ $check_six_dims = static function ( string $label ) use ( $wpdb, $dim_table, $to
 	}
 };
 $check_six_dims( 'ai own' );
+
+// Passo 2c (0.14.0): serie dei tre strumenti della Panoramica (`tools`). Legge le tre origini insieme (eccezione alla regola dell'origine);
+// il giorno senza riga di uno strumento resta null, non zero.
+$tools_range  = DateRange::last_days( 30, $today );
+$tools        = ( new OverviewQuery() )->get( $tools_range )['tools'];
+$tools_by_day = array_column( $tools, null, 'day' );
+$check( 'tools: un punto per giorno del periodo', 30, count( $tools ) );
+$check( 'tools: visitatori own di oggi = site_daily own', (int) $wpdb->get_var( $wpdb->prepare( 'SELECT visitors FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) ), $tools_by_day[ $today ]['visitors_own'] );
+$check( 'tools: visualizzazioni wps del giorno del seed = site_daily wps', (int) $wpdb->get_var( $wpdb->prepare( 'SELECT views FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'wps' AND day = %s", $seed_day ) ), $tools_by_day[ $seed_day ]['views_wps'] );
+$check( 'tools: own prima della raccolta è null (non zero)', null, $tools_by_day[ $tools_range->from ]['visitors_own'] );
+$check( 'tools: senza righe ia i visitatori ia sono null', null, $tools_by_day[ $today ]['visitors_ia'] );
 
 // Passo 3: confronto. Giorni con righe ai in entrambe le origini, simulati come nella sezione 10.
 $compare_backup = array();
@@ -2908,7 +2938,242 @@ if ( $ia_real ) {
 }
 
 // ---------------------------------------------------------------------------
-// 16. Pulizia finale.
+// 16. Iterazione 0.14.0: log di accesso del server (origini `log` e `logbot`).
+// ---------------------------------------------------------------------------
+// Tre archivi tar.gz sintetici (con il numero della rotazione nel nome, come quelli del server) con visitatori di ogni tipo.
+$log_tz_backup = array( get_option( 'timezone_string' ), get_option( 'gmt_offset' ) );
+update_option( 'timezone_string', 'Europe/Rome' );
+$log_tz  = new DateTimeZone( 'Europe/Rome' );
+$log_dir = sys_get_temp_dir() . '/wp5w-verify-log-' . uniqid();
+mkdir( $log_dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- Cartella di prova.
+
+// Giorni: A..D consecutivi (D-6..D-3). Gli archivi ruotano a mezzanotte e 45: solo B e C sono giorni interi.
+$log_day  = array();
+foreach ( array( 6, 5, 4, 3 ) as $wp5w_n ) {
+	$log_day[] = ( new DateTimeImmutable( $today, $log_tz ) )->modify( "-{$wp5w_n} day" )->format( 'Y-m-d' );
+}
+[ $log_a, $log_b, $log_c, $log_d ] = $log_day;
+
+/**
+ * Riga di un log di accesso (combined con il vhost in coda).
+ *
+ * @param string $ip     IP.
+ * @param string $local  Data e ora locali (Europe/Rome).
+ * @param string $method Metodo.
+ * @param string $uri    URI.
+ * @param int    $status Stato.
+ * @param string $ref    Referrer.
+ * @param string $ua     User agent.
+ * @return string
+ */
+$log_line = static function ( string $ip, string $local, string $method, string $uri, int $status = 200, string $ref = '-', string $ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' ) use ( $log_tz ): string {
+	$time = ( new DateTimeImmutable( $local, $log_tz ) )->format( 'd/M/Y:H:i:s O' );
+	return "{$ip} - - [{$time}] \"{$method} {$uri} HTTP/2\" {$status} 100 \"{$ref}\" \"{$ua}\" www.example.test";
+};
+
+/**
+ * Scrive un archivo tar.gz con un log di accesso e uno degli errori.
+ *
+ * @param string            $path  Percorso.
+ * @param array<int,string> $lines Righe del log di accesso.
+ * @param int               $mtime Data del file (la rotazione).
+ * @return void
+ */
+$log_write = static function ( string $path, array $lines, int $mtime ): void {
+	$member = static function ( string $name, string $data ): string {
+		$header = str_pad( $name, 100, "\0" ) . "0000644\0" . "0000000\0" . "0000000\0" . sprintf( '%011o', strlen( $data ) ) . "\0" . sprintf( '%011o', 0 ) . "\0" . '        ' . '0' . str_repeat( "\0", 100 ) . "ustar\0" . '00';
+		return str_pad( $header, 512, "\0" ) . str_pad( $data, (int) ( 512 * ceil( strlen( $data ) / 512 ) ), "\0" );
+	};
+	$tar = $member( 'example.test.error.log', "[error] niente\n" ) . $member( 'example.test.log', implode( "\n", $lines ) . "\n" ) . str_repeat( "\0", 1024 );
+	file_put_contents( $path, gzencode( $tar ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- File di prova.
+	touch( $path, $mtime );
+};
+
+$ua_bot    = 'Mozilla/5.0 (compatible; GPTBot/1.1; +https://openai.com/gptbot)';
+$ua_gbot   = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+$content   = (string) wp_parse_url( content_url(), PHP_URL_PATH );
+$core      = rtrim( (string) wp_parse_url( site_url(), PHP_URL_PATH ), '/' );
+$chrome_ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
+
+// Archivio A: dalle 00:45 del giorno A alle 00:45 del giorno B.
+$log_lines_a = array(
+	$log_line( '198.51.100.99', "{$log_a} 00:45:00", 'GET', "{$content}/riempitivo.css" ),
+	$log_line( '198.51.100.10', "{$log_a} 12:00:00", 'GET', '/' ), // Giorno A: incompleto, non si scrive.
+	$log_line( '198.51.100.2', "{$log_b} 00:30:00", 'GET', '/post-a/', 200, '-', $ua_bot ), // Primo accesso di GPTBot, nell'archivio A.
+	$log_line( '198.51.100.99', "{$log_b} 00:45:00", 'GET', "{$content}/riempitivo.css" ),
+);
+// Archivio B: dalle 00:45:10 del giorno B alle 00:45 del giorno C.
+$log_lines_b = array(
+	$log_line( '198.51.100.99', "{$log_b} 00:45:10", 'GET', "{$content}/riempitivo.css" ),
+	// V1: persona da Google, con il tracker e la pagina chiesta due volte (guest mode di LiteSpeed).
+	$log_line( '198.51.100.1', "{$log_b} 10:00:00", 'GET', '/', 200, 'https://www.google.com/' ),
+	$log_line( '198.51.100.1', "{$log_b} 10:00:01", 'POST', '/public/plugins/litespeed-cache/guest.vary.php' ),
+	$log_line( '198.51.100.1', "{$log_b} 10:00:05", 'GET', '/', 200, 'https://www.example.test/' ),
+	$log_line( '198.51.100.1', "{$log_b} 10:00:06", 'POST', '/wp-json/wp5w/v1/hit', 204 ),
+	$log_line( '198.51.100.1', "{$log_b} 10:01:00", 'GET', '/post-a/', 200, 'https://www.example.test/' ),
+	// GPTBot torna di giorno: stessa persona digitale, stesso giorno, due visualizzazioni in tutto.
+	$log_line( '198.51.100.2', "{$log_b} 12:00:00", 'GET', '/post-b/', 200, '-', $ua_bot ),
+	// V3: nessuna prova di essere un browser.
+	$log_line( '198.51.100.3', "{$log_b} 11:00:00", 'GET', '/post-a/' ),
+	// V4: amministratore (apre wp-admin e poi il sito).
+	$log_line( '198.51.100.4', "{$log_b} 13:00:00", 'GET', "{$core}/wp-admin/index.php" ),
+	$log_line( '198.51.100.4', "{$log_b} 13:00:30", 'GET', '/' ),
+	$log_line( '198.51.100.4', "{$log_b} 13:00:31", 'POST', '/wp-json/wp5w/v1/hit', 204 ),
+	// V5: il server stesso (cron e loopback).
+	$log_line( '185.201.65.29', "{$log_b} 14:00:00", 'GET', '/', 200, '-', 'WordPress/7.1.3; https://example.test' ),
+	$log_line( '127.0.0.1', "{$log_b} 14:00:01", 'GET', '/' ),
+	// V6: l'altra applicazione sotto /dashboard/.
+	$log_line( '198.51.100.6', "{$log_b} 15:00:00", 'GET', '/dashboard/public/api/usage' ),
+	$log_line( '198.51.100.6', "{$log_b} 15:00:10", 'GET', '/dashboard/public/api/usage' ),
+	// V7: persona che arriva da un assistente AI.
+	$log_line( '198.51.100.7', "{$log_b} 09:00:00", 'GET', '/post-a/', 200, 'https://claude.ai/chat/x' ),
+	$log_line( '198.51.100.7', "{$log_b} 09:00:01", 'GET', "{$content}/litespeed/css/a.css" ),
+	// Righe che non sono pagine: 404, reindirizzamento, feed, REST, file statici.
+	$log_line( '198.51.100.11', "{$log_b} 16:00:00", 'GET', '/non-esiste/', 404 ),
+	$log_line( '198.51.100.11', "{$log_b} 16:00:01", 'GET', '/vecchio/', 301 ),
+	$log_line( '198.51.100.11', "{$log_b} 16:00:02", 'GET', '/feed/' ),
+	$log_line( '198.51.100.11', "{$log_b} 16:00:03", 'GET', '/robots.txt' ),
+	'riga che non è un log',
+	// Giorno C, fino alle 00:45 del giorno C.
+	$log_line( '198.51.100.8', "{$log_c} 00:10:00", 'GET', '/' ),
+	$log_line( '198.51.100.99', "{$log_c} 00:45:00", 'GET', "{$content}/riempitivo.css" ),
+);
+// Archivio C: dalle 00:46 del giorno C alle 00:45 del giorno D.
+$log_lines_c = array(
+	$log_line( '198.51.100.99', "{$log_c} 00:46:00", 'GET', "{$content}/riempitivo.css" ),
+	// V8: persona diretta (asset in cache, 304) il giorno C.
+	$log_line( '198.51.100.8', "{$log_c} 14:00:00", 'GET', "{$content}/uploads/foto.webp", 304 ),
+	$log_line( '198.51.100.8', "{$log_c} 14:00:01", 'GET', '/post-b/' ),
+	// V9: Googlebot.
+	$log_line( '198.51.100.9', "{$log_c} 15:00:00", 'GET', '/', 200, '-', $ua_gbot ),
+	// Giorno D: incompleto, non si scrive.
+	$log_line( '198.51.100.12', "{$log_d} 08:00:00", 'GET', '/' ),
+	$log_line( '198.51.100.99', "{$log_d} 00:45:00", 'GET', "{$content}/riempitivo.css" ),
+);
+
+$log_path_a = $log_dir . '/Oct-2026.example.tar.gz.2';
+$log_path_b = $log_dir . '/Oct-2026.example.tar.gz.1';
+$log_path_c = $log_dir . '/Oct-2026.example.tar.gz';
+$log_write( $log_path_a, $log_lines_a, ( new DateTimeImmutable( "{$log_b} 00:45:00", $log_tz ) )->getTimestamp() );
+$log_write( $log_path_b, $log_lines_b, ( new DateTimeImmutable( "{$log_c} 00:45:00", $log_tz ) )->getTimestamp() );
+$log_write( $log_path_c, $log_lines_c, ( new DateTimeImmutable( "{$log_d} 00:45:00", $log_tz ) )->getTimestamp() );
+file_put_contents( $log_dir . '/mavida.example.error.log', "non va letto\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- File di prova.
+
+$log_glob = $log_dir . '/Oct-2026.example.tar.gz*';
+$log_rows = static fn( string $table, string $day, string $origin ) => $GLOBALS['wpdb']->get_results(
+	$GLOBALS['wpdb']->prepare( 'SELECT * FROM ' . Schema::table( $table ) . ' WHERE day = %s AND origin = %s ORDER BY dim, value', $day, $origin ),
+	ARRAY_A
+);
+$log_dim_of = static function ( string $day, string $origin, string $dim ) use ( $wpdb, $dim_table ): string {
+	$rows = $wpdb->get_results( $wpdb->prepare( "SELECT value, visitors FROM {$dim_table} WHERE day = %s AND origin = %s AND dim = %s ORDER BY value", $day, $origin, $dim ), ARRAY_A );
+	return implode( ',', array_map( static fn( $row ) => $row['value'] . '=' . $row['visitors'], $rows ) );
+};
+$log_site = static function ( string $day, string $origin ) use ( $wpdb ): string {
+	$row = $wpdb->get_row( $wpdb->prepare( 'SELECT visitors, views FROM ' . Schema::table( 'site_daily' ) . ' WHERE day = %s AND origin = %s', $day, $origin ), ARRAY_A );
+	return $row ? $row['visitors'] . '|' . $row['views'] : 'nessuna riga';
+};
+
+// Passo 1: opzioni. Percorso non valido = 400, percorso valido e percorsi da ignorare = salvati.
+$admin_user( $admin_id );
+$bad_glob = $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'log_glob' => $log_dir . '/non-esiste*.tar.gz' ) );
+$check( 'log: percorso senza file leggibili = 400', 400, $bad_glob->get_status() );
+$relative = $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'log_glob' => 'logs/*.tar.gz' ) );
+$check( 'log: percorso non assoluto = 400', 400, $relative->get_status() );
+$good_glob = $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'log_glob' => $log_glob, 'log_excluded_paths' => array( '/dashboard/', 'senza-barra', '/dashboard/' ) ) );
+$check( 'log: percorso valido salvato', $log_glob, $good_glob->get_data()['log_glob'] ?? '' );
+$check( 'log: percorsi da ignorare puliti (solo con «/», senza doppioni)', '/dashboard/', implode( ',', $good_glob->get_data()['log_excluded_paths'] ?? array() ) );
+$admin_user( 0 );
+
+$log_files = AccessLogSource::files( $log_glob );
+$check( 'log: i tre archivi sono riconosciuti (non l\'error log)', 3, count( $log_files ) );
+$check( 'log: la sorgente risulta attiva', '3 file', ( new AccessLogSource() )->version() );
+
+// Passo 2: import dei quattro giorni. Solo B e C sono coperti per intero; l'import non cambia le letture con Origin::where().
+$log_before = $ui_snapshot();
+$wpdb->query( 'DELETE FROM ' . Schema::table( 'site_daily' ) . " WHERE origin IN ('log','logbot')" );
+$wpdb->query( "DELETE FROM {$dim_table} WHERE origin IN ('log','logbot')" );
+$log_result = ( new AccessLogSource() )->import( new DateRange( $log_a, $log_d ) );
+$check( 'log: righe scritte in site_daily (log e logbot di B e C)', 4, $log_result['log:site_daily'] ?? 0 );
+$check( 'log: giorno B, browser (V1 e V7: 3 visualizzazioni, la doppia GET conta una volta)', '2|3', $log_site( $log_b, 'log' ) );
+$check( 'log: giorno B, bot (GPTBot con 2 visualizzazioni e V3 «senza-js»)', '2|3', $log_site( $log_b, 'logbot' ) );
+$check( 'log: giorno B, canali dei browser (ai e search)', 'ai=1,search=1', $log_dim_of( $log_b, 'log', 'channel' ) );
+$check( 'log: giorno B, canali dei bot', 'direct=2', $log_dim_of( $log_b, 'logbot', 'channel' ) );
+$check( 'log: giorno B, etichette dei bot', 'gptbot=1,senza-js=1', $log_dim_of( $log_b, 'logbot', 'bot' ) );
+$check( 'log: giorno C, browser (V8 con asset in cache e due pagine)', '1|2', $log_site( $log_c, 'log' ) );
+$check( 'log: giorno C, bot (Googlebot)', '1|1', $log_site( $log_c, 'logbot' ) );
+$check( 'log: giorno C, etichetta del bot', 'bot=1', $log_dim_of( $log_c, 'logbot', 'bot' ) );
+$check( 'log: giorno A incompleto non scritto', 'nessuna riga|nessuna riga', $log_site( $log_a, 'log' ) . '|' . $log_site( $log_a, 'logbot' ) );
+$check( 'log: giorno D incompleto non scritto', 'nessuna riga|nessuna riga', $log_site( $log_d, 'log' ) . '|' . $log_site( $log_d, 'logbot' ) );
+$check( 'log: somma dei canali = visitatori (browser, giorno B)', 2, $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE day = %s AND origin = 'log' AND dim = 'channel'", $log_b ) ) );
+$check( 'log: l\'import non cambia nessuna lettura con Origin::where()', md5( (string) wp_json_encode( $log_before ) ), md5( (string) wp_json_encode( $ui_snapshot() ) ) );
+
+// Passo 3: rieseguire l'import è idempotente, e un import con meno archivi non cancella i giorni che i log non coprono più.
+( new AccessLogSource() )->import( new DateRange( $log_a, $log_d ) );
+$check( 'log: reimport idempotente (giorno B)', '2|3', $log_site( $log_b, 'log' ) );
+unlink( $log_path_a ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- File di prova.
+( new AccessLogSource() )->import( new DateRange( $log_a, $log_d ) );
+$check( 'log: senza l\'archivio A il giorno B resta com\'era', '2|3', $log_site( $log_b, 'log' ) );
+$check( 'log: senza l\'archivio A il giorno C è ancora scritto', '1|2', $log_site( $log_c, 'log' ) );
+
+// Passo 4: Confronto. Il giorno B e C hanno wps e own (inseriti qui se mancano), i log aggiungono le loro chiavi senza spostare la finestra.
+$log_backup = array();
+foreach ( array( 'site_daily', 'dim_daily' ) as $wp5w_name ) {
+	$log_backup[ $wp5w_name ] = $wpdb->get_results( 'SELECT * FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own') AND day BETWEEN '{$log_a}' AND '{$log_c}'", ARRAY_A );
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own') AND day BETWEEN '{$log_a}' AND '{$log_c}'" );
+}
+$log_state_backup = get_option( Importer::STATE_OPTION, false );
+foreach ( array( $log_a, $log_b, $log_c ) as $wp5w_day ) {
+	$wpdb->insert( Schema::table( 'site_daily' ), array( 'day' => $wp5w_day, 'visitors' => 10, 'views' => 20, 'origin' => 'wps' ) );
+	$wpdb->insert( Schema::table( 'site_daily' ), array( 'day' => $wp5w_day, 'visitors' => 8, 'views' => 12, 'origin' => 'own' ) );
+}
+$wpdb->insert( $dim_table, array( 'day' => $log_b, 'dim' => 'channel', 'value' => 'search', 'visitors' => 4, 'origin' => 'wps' ) );
+update_option( Importer::STATE_OPTION, array( 'mode' => 'daily', 'from' => $log_a, 'to' => $today, 'started' => time(), 'ok' => true ), false );
+$admin_user( $admin_id );
+$log_compare = $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data();
+$admin_user( 0 );
+$log_days = array_column( $log_compare['days'] ?? array(), null, 'day' );
+$check( 'log confronto: log_available', true, $log_compare['log_available'] ?? false );
+$check( 'log confronto: la finestra è quella di wps e own (B e C)', $log_b . ',' . $log_c, implode( ',', array_keys( array_intersect_key( $log_days, array_flip( array( $log_a, $log_b, $log_c ) ) ) ) ) );
+$check( 'log confronto: giorno B, browser e bot', '2|3|2|3', ( $log_days[ $log_b ]['log']['visitors'] ?? '' ) . '|' . ( $log_days[ $log_b ]['log']['views'] ?? '' ) . '|' . ( $log_days[ $log_b ]['logbot']['visitors'] ?? '' ) . '|' . ( $log_days[ $log_b ]['logbot']['views'] ?? '' ) );
+$check( 'log confronto: differenza dei browser rispetto a wps (2 contro 10 = −80%)', -80.0, $log_days[ $log_b ]['diff_log']['visitors'] ?? 'nessuna' );
+$check( 'log confronto: totali dei browser sui due giorni (3 visitatori, 5 visualizzazioni)', '3|5|2', ( $log_compare['totals']['log']['visitors'] ?? '' ) . '|' . ( $log_compare['totals']['log']['views'] ?? '' ) . '|' . ( $log_compare['totals']['log_days'] ?? '' ) );
+$check( 'log confronto: totali dei bot (3 visitatori, 4 visualizzazioni)', '3|4', ( $log_compare['totals']['logbot']['visitors'] ?? '' ) . '|' . ( $log_compare['totals']['logbot']['views'] ?? '' ) );
+$check( 'log confronto: i giorni con differenza oltre la soglia non dipendono dai log (flagged solo da own e ia)', $log_days[ $log_b ]['flagged'] ?? 'x', \Mavida\FiveW\Support\Comparison::flagged( $log_days[ $log_b ]['diff']['visitors'] ?? null, $log_days[ $log_b ]['diff']['views'] ?? null ) );
+$log_bots = array_column( $log_compare['bots'] ?? array(), 'visitors', 'label' );
+$check( 'log confronto: elenco dei bot', 'bot=1,gptbot=1,senza-js=1', implode( ',', array_map( static fn( $label, $n ) => "{$label}={$n}", array_keys( $log_bots ), $log_bots ) ) );
+$log_channels = array_column( $log_compare['channels'] ?? array(), null, 'channel' );
+$check( 'log confronto: colonna log nei canali (ai 1, search 1)', '1|1', ( $log_channels['ai']['log'] ?? '' ) . '|' . ( $log_channels['search']['log'] ?? '' ) );
+
+// Passo 5: senza righe `log` la risposta non ha nessuna chiave dei log.
+$wpdb->query( 'DELETE FROM ' . Schema::table( 'site_daily' ) . " WHERE origin IN ('log','logbot')" );
+$wpdb->query( "DELETE FROM {$dim_table} WHERE origin IN ('log','logbot')" );
+$admin_user( $admin_id );
+$no_log = $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data();
+$admin_user( 0 );
+$check( 'senza log: log_available falso e nessuna chiave dei log', '0|0|0|0', (int) ( $no_log['log_available'] ?? true ) . '|' . (int) isset( $no_log['days'][0]['log'] ) . '|' . (int) isset( $no_log['totals']['log'] ) . '|' . (int) isset( $no_log['bots'] ) );
+
+// Passo 6: ripristino.
+foreach ( array( 'site_daily', 'dim_daily' ) as $wp5w_name ) {
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own') AND day BETWEEN '{$log_a}' AND '{$log_c}'" );
+	foreach ( $log_backup[ $wp5w_name ] as $wp5w_row ) {
+		$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row );
+	}
+}
+if ( false === $log_state_backup ) {
+	delete_option( Importer::STATE_OPTION );
+} else {
+	update_option( Importer::STATE_OPTION, $log_state_backup, false );
+}
+foreach ( glob( $log_dir . '/*' ) ?: array() as $wp5w_file ) {
+	unlink( $wp5w_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- File di prova.
+}
+rmdir( $log_dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Cartella di prova.
+update_option( Settings::OPTION, Settings::defaults() );
+update_option( 'timezone_string', (string) $log_tz_backup[0] );
+update_option( 'gmt_offset', $log_tz_backup[1] );
+
+// ---------------------------------------------------------------------------
+// 17. Pulizia finale.
 // ---------------------------------------------------------------------------
 // Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
 remove_filter( 'pre_http_request', $github_mock, 10 );

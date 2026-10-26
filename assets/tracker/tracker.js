@@ -46,8 +46,12 @@
 		}
 	}
 
-	// 6) Invio: sendBeacon, oppure fetch con keepalive se manca o rifiuta la richiesta. Gli errori si ignorano.
-	if ( ! ( navigator.sendBeacon && navigator.sendBeacon( d.url, p ) ) ) {
+	// 6) Invio con fetch (keepalive: la richiesta sopravvive alla chiusura della pagina), come fanno WP Statistics e
+	// Independent Analytics. sendBeacon solo se fetch manca: molti browser automatici lo bloccano e la visita andava persa.
+	// Mai tutti e due, per non contare la visita due volte. Gli errori si ignorano.
+	if ( window.fetch ) {
 		fetch( d.url, { method: 'POST', body: p, keepalive: true, credentials: 'same-origin' } ).catch( function () {} );
+	} else if ( navigator.sendBeacon ) {
+		navigator.sendBeacon( d.url, p );
 	}
 } )();

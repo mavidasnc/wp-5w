@@ -23,6 +23,8 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Confronta la raccolta propria (`own`) e, se ha dati, Independent Analytics (`ia`) con WP Statistics (`wps`) sui giorni completi.
+ * Con i log di accesso (`log`: i client da browser; `logbot`: i bot) aggiunge le loro colonne, senza cambiare la finestra dei giorni:
+ * un buco negli archivi dei log non deve togliere giorni al confronto tra gli altri strumenti.
  *
  * ECCEZIONE ALLA REGOLA DELL'ORIGINE: è l'unica classe di src/Query/ che legge le tabelle aggregate
  * senza Origin::where(), perché confrontare le origini è il suo scopo. Legge solo tabelle wp5w_*
@@ -53,9 +55,10 @@ final class CompareQuery {
 		// Passo 2: senza righe `own` non c'è nulla da mostrare.
 		if ( null === $own_first ) {
 			return array(
-				'available'    => false,
-				'ia_available' => false,
-				'coverage'     => $this->coverage( Comparison::plan( null, null, wp_date( 'Y-m-d' ), array(), array() ), null, null, null ),
+				'available'     => false,
+				'ia_available'  => false,
+				'log_available' => false,
+				'coverage'      => $this->coverage( Comparison::plan( null, null, wp_date( 'Y-m-d' ), array(), array() ), null, null, null ),
 			);
 		}
 
@@ -77,6 +80,9 @@ final class CompareQuery {
 		$with_ia  = null !== ( new IndependentAnalyticsSource() )->version() && ! empty( $site['ia'] );
 		$ia_days  = $with_ia ? array_keys( $site['ia'] ) : array();
 		$ia_first = $with_ia ? min( $ia_days ) : null;
+
+		// Passo 3c: i log di accesso entrano se ci sono righe `log` (la scrittura la fa AccessLogSource solo con un percorso nelle Opzioni).
+		$with_log = ! empty( $site['log'] );
 
 		// Passo 4: finestra e copertura.
 		$plan = Comparison::plan(
@@ -107,6 +113,13 @@ final class CompareQuery {
 		if ( $with_ia ) {
 			$totals['ia'] = $empty;
 		}
+		// Log: i totali sommano solo i giorni che hanno righe `log`, e la differenza è rispetto a WP Statistics su quegli stessi giorni.
+		$log_totals = array(
+			'log'    => $empty,
+			'logbot' => $empty,
+			'wps'    => $empty,
+			'days'   => 0,
+		);
 		foreach ( $days as $day ) {
 			$wps = $site['wps'][ $day ];
 			$own = $site['own'][ $day ];
@@ -145,6 +158,26 @@ final class CompareQuery {
 				$row['flagged']           = $row['flagged'] || Comparison::flagged( $row['diff_ia']['visitors'], $row['diff_ia']['views'] );
 				$row['home_direct']['ia'] = $home_direct[ $day ]['ia'] ?? 0;
 			}
+
+			// Log di accesso: `log` e `logbot` del giorno (null se i log non lo coprono), differenza di `log` rispetto a WP Statistics.
+			// `flagged` non li guarda: i log contano anche ciò che WP Statistics non conta e la soglia non è fatta per loro.
+			if ( $with_log ) {
+				$log             = $site['log'][ $day ] ?? null;
+				$row['log']      = $log;
+				$row['logbot']   = $site['logbot'][ $day ] ?? null;
+				$row['diff_log'] = null === $log ? null : array(
+					'visitors' => Metrics::change( $log['visitors'], $wps['visitors'] ),
+					'views'    => Metrics::change( $log['views'], $wps['views'] ),
+				);
+				if ( null !== $log ) {
+					++$log_totals['days'];
+					foreach ( array( 'visitors', 'views' ) as $key ) {
+						$log_totals['log'][ $key ]    += $log[ $key ];
+						$log_totals['wps'][ $key ]    += $wps[ $key ];
+						$log_totals['logbot'][ $key ] += $row['logbot'][ $key ] ?? 0;
+					}
+				}
+			}
 			$day_rows[] = $row;
 		}
 
@@ -166,13 +199,14 @@ final class CompareQuery {
 		}
 
 		$response = array(
-			'available'    => true,
-			'ia_available' => $with_ia,
-			'threshold'    => (int) Comparison::THRESHOLD,
-			'min_views'    => Comparison::MIN_VIEWS,
-			'coverage'     => $this->coverage( $plan, $own_first, $etl, $last ),
-			'days'         => $day_rows,
-			'totals'       => array(
+			'available'     => true,
+			'ia_available'  => $with_ia,
+			'log_available' => $with_log,
+			'threshold'     => (int) Comparison::THRESHOLD,
+			'min_views'     => Comparison::MIN_VIEWS,
+			'coverage'      => $this->coverage( $plan, $own_first, $etl, $last ),
+			'days'          => $day_rows,
+			'totals'        => array(
 				'wps'               => $totals['wps'],
 				'own'               => $totals['own'],
 				'diff'              => array(
@@ -184,16 +218,16 @@ final class CompareQuery {
 					'own' => self::per_visitor( $totals['own'] ),
 				),
 			),
-			'home_direct'  => array(
+			'home_direct'   => array(
 				'wps'       => $home_totals['wps'],
 				'own'       => $home_totals['own'],
 				'diff'      => Metrics::change( $home_totals['own'], $home_totals['wps'] ),
 				'share_wps' => self::share( $home_totals['wps'], $totals['wps']['visitors'] ),
 				'share_own' => self::share( $home_totals['own'], $totals['own']['visitors'] ),
 			),
-			'channels'     => $this->channels( $days, $with_ia ),
-			'discards'     => Comparison::discard_shares( $per_reason, $totals['own']['views'] ),
-			'top'          => $this->top( $days, $with_ia ),
+			'channels'      => $this->channels( $days, $with_ia, $with_log ),
+			'discards'      => Comparison::discard_shares( $per_reason, $totals['own']['views'] ),
+			'top'           => $this->top( $days, $with_ia ),
 		);
 
 		// Independent Analytics: chiavi in più, la forma delle altre resta quella del confronto a due origini.
@@ -207,6 +241,19 @@ final class CompareQuery {
 			$response['home_direct']['ia']                 = $home_totals['ia'];
 			$response['home_direct']['diff_ia']            = Metrics::change( $home_totals['ia'], $home_totals['wps'] );
 			$response['home_direct']['share_ia']           = self::share( $home_totals['ia'], $totals['ia']['visitors'] );
+		}
+
+		// Log di accesso: totali dei giorni coperti, differenza di `log` rispetto a WP Statistics sugli stessi giorni, bot per etichetta.
+		if ( $with_log ) {
+			$response['totals']['log']                      = $log_totals['log'];
+			$response['totals']['logbot']                   = $log_totals['logbot'];
+			$response['totals']['log_days']                 = $log_totals['days'];
+			$response['totals']['diff_log']                 = array(
+				'visitors' => Metrics::change( $log_totals['log']['visitors'], $log_totals['wps']['visitors'] ),
+				'views'    => Metrics::change( $log_totals['log']['views'], $log_totals['wps']['views'] ),
+			);
+			$response['totals']['views_per_visitor']['log'] = self::per_visitor( $log_totals['log'] );
+			$response['bots']                               = $this->bots( $days );
 		}
 
 		return $response;
@@ -303,10 +350,11 @@ final class CompareQuery {
 	 * Visitatori per canale nelle origini, dal più grande al più piccolo.
 	 *
 	 * @param array<int,string> $days    Giorni completi.
-	 * @param bool              $with_ia Aggiunge le colonne di Independent Analytics.
+	 * @param bool              $with_ia  Aggiunge le colonne di Independent Analytics.
+	 * @param bool              $with_log Aggiunge la colonna dei log di accesso (client da browser).
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function channels( array $days, bool $with_ia ): array {
+	private function channels( array $days, bool $with_ia, bool $with_log = false ): array {
 		global $wpdb;
 
 		if ( ! $days ) {
@@ -328,6 +376,11 @@ final class CompareQuery {
 			$channel = '(n/d)' === $row['value'] ? 'unassigned' : (string) $row['value'];
 			$origin  = (string) $row['origin'];
 
+			// I bot dei log (`logbot`) non sono una colonna del confronto: un canale presente solo lì darebbe una riga di zeri.
+			if ( 'logbot' === $origin ) {
+				continue;
+			}
+
 			$by_channel[ $channel ][ $origin ] = ( $by_channel[ $channel ][ $origin ] ?? 0 ) + (int) $row['visitors'];
 		}
 
@@ -347,12 +400,47 @@ final class CompareQuery {
 				$item['ia']      = $ia;
 				$item['diff_ia'] = Metrics::change( $ia, $wps );
 			}
+			if ( $with_log ) {
+				$log              = $values['log'] ?? 0;
+				$item['log']      = $log;
+				$item['diff_log'] = Metrics::change( $log, $wps );
+			}
 			$channels[] = $item;
 		}
-		$largest = static fn( array $row ): int => max( $row['wps'], $row['own'], $row['ia'] ?? 0 );
+		$largest = static fn( array $row ): int => max( $row['wps'], $row['own'], $row['ia'] ?? 0, $row['log'] ?? 0 );
 		usort( $channels, static fn( array $a, array $b ): int => array( $largest( $b ), $a['channel'] ) <=> array( $largest( $a ), $b['channel'] ) );
 
 		return $channels;
+	}
+
+	/**
+	 * Bot dei log di accesso per etichetta (BotFilter::label() o `senza-js`), dal più frequente: visitatori sommati sui giorni completi.
+	 *
+	 * @param array<int,string> $days Giorni completi.
+	 * @return array<int,array{label:string,visitors:int}>
+	 */
+	private function bots( array $days ): array {
+		global $wpdb;
+
+		if ( ! $days ) {
+			return array();
+		}
+
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT value, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'bot' AND origin = 'logbot' AND day IN (" . self::in_days( $days ) . ') GROUP BY value ORDER BY visitors DESC, value LIMIT 20', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
+				$days
+			),
+			ARRAY_A
+		);
+
+		return array_map(
+			static fn( array $row ): array => array(
+				'label'    => (string) $row['value'],
+				'visitors' => (int) $row['visitors'],
+			),
+			$rows
+		);
 	}
 
 	/**

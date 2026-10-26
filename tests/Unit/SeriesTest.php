@@ -38,6 +38,23 @@ final class SeriesTest extends TestCase {
 		);
 	}
 
+	public function test_nullable_fields_stay_null_where_the_row_is_missing(): void {
+		$points = Series::fill(
+			new DateRange( '2026-10-12', '2026-10-14' ),
+			array(
+				'2026-10-13' => array( 'views' => 0, 'views_ia' => 0 ),
+				'2026-10-14' => array( 'views' => 4, 'views_ia' => 6 ),
+			),
+			array( 'views', 'views_ia' ),
+			array( 'views_ia' )
+		);
+
+		// Il giorno senza riga ha null (lo strumento non c'era), uno zero vero resta zero.
+		$this->assertSame( array( 0, null ), array( $points[0]['views'], $points[0]['views_ia'] ) );
+		$this->assertSame( array( 0, 0 ), array( $points[1]['views'], $points[1]['views_ia'] ) );
+		$this->assertSame( array( 4, 6 ), array( $points[2]['views'], $points[2]['views_ia'] ) );
+	}
+
 	public function test_ignores_rows_outside_the_range(): void {
 		$points = Series::fill( new DateRange( '2026-10-14', '2026-10-14' ), array( '2026-10-01' => array( 'views' => 9 ) ), array( 'views' ) );
 

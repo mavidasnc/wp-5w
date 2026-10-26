@@ -183,6 +183,24 @@ final class ChannelsTest extends TestCase {
 		}
 	}
 
+	public function test_ai_in_php_recognizes_every_assistant_domain_and_subdomain(): void {
+		foreach ( Channels::AI as $name => $domains ) {
+			foreach ( $domains as $domain ) {
+				// Host esatto, sottodominio e utm_source (anche con www. e maiuscole), come ai_sql().
+				$this->assertSame( $name, Channels::ai( $domain, '' ), $domain );
+				$this->assertSame( $name, Channels::ai( "app.{$domain}", '' ), $domain );
+				$this->assertSame( $name, Channels::ai( '', ' WWW.' . strtoupper( $domain ) . ' ' ), $domain );
+			}
+		}
+	}
+
+	public function test_ai_in_php_is_empty_for_other_sites(): void {
+		$this->assertSame( '', Channels::ai( 'google.com', '' ) );
+		$this->assertSame( '', Channels::ai( 'notclaude.ai', '' ) );
+		$this->assertSame( '', Channels::ai( '', 'newsletter' ) );
+		$this->assertSame( '', Channels::ai( '', '' ) );
+	}
+
 	public function test_classify_is_not_changed_by_the_ai_channel(): void {
 		$this->assertSame(
 			array(

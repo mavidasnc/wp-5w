@@ -158,6 +158,74 @@
 	overflow-x: auto;
 }
 
+// Confronto tra gli strumenti nella scheda Stato: un riquadro per strumento, con i totali del periodo e la differenza rispetto a WP Statistics.
+.wp5w-tools {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 12px;
+	margin: 12px 0;
+}
+
+.wp5w-tool {
+	margin-bottom: 0;
+
+	h3 {
+		margin: 0 0 8px;
+	}
+
+	&__row {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		margin: 0 0 4px;
+
+		span:first-child {
+			flex: 1;
+			color: #646970;
+		}
+
+		strong {
+			font-size: 20px;
+		}
+	}
+}
+
+// Badge della differenza percentuale: verde entro la soglia del Confronto, rosso oltre (stessi colori delle variazioni dei KPI).
+.wp5w-diff {
+	display: inline-block;
+	padding: 0 6px;
+	border-radius: 3px;
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 1.6;
+	white-space: nowrap;
+
+	&.is-good {
+		background: #edfaef;
+		color: #007017;
+	}
+
+	&.is-bad {
+		background: #fcf0f1;
+		color: #b32d2e;
+	}
+}
+
+// Nelle celle della tabella il badge va sotto il numero.
+.wp5w-compare-table {
+	td .wp5w-diff,
+	th .wp5w-diff {
+		display: block;
+		width: fit-content;
+		margin: 2px 0 0 auto;
+	}
+
+	&__group {
+		text-align: center;
+		border-left: 1px solid #dcdcde;
+	}
+}
+
 .wp5w-table,
 .wp5w-status table {
 	.num {

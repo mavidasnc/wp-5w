@@ -21,6 +21,7 @@ use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\Settings;
+use Mavida\FiveW\Sources\AccessLogSource;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Visit;
 
@@ -266,25 +267,33 @@ final class AdminController extends RestController {
 					'callback'            => array( $this, 'save_settings' ),
 					'permission_callback' => array( $this, 'check_admin_permission' ),
 					'args'                => array(
-						'own_tracking'   => array( 'type' => 'boolean' ),
-						'exclude_users'  => array(
+						'own_tracking'       => array( 'type' => 'boolean' ),
+						'exclude_users'      => array(
 							'type' => 'string',
 							'enum' => Settings::USER_MODES,
 						),
-						'excluded_ips'   => array(
+						'excluded_ips'       => array(
 							'type'              => 'array',
 							'items'             => array( 'type' => 'string' ),
 							'validate_callback' => array( self::class, 'validate_excluded_ips' ),
 						),
-						'respect_dnt'    => array( 'type' => 'boolean' ),
-						'retention_days' => array(
+						'respect_dnt'        => array( 'type' => 'boolean' ),
+						'retention_days'     => array(
 							'type'    => 'integer',
 							'minimum' => 7,
 							'maximum' => 365,
 						),
-						'own_since'      => array(
+						'own_since'          => array(
 							'type'              => 'string',
 							'validate_callback' => array( self::class, 'validate_own_since' ),
+						),
+						'log_glob'           => array(
+							'type'              => 'string',
+							'validate_callback' => array( self::class, 'validate_log_glob' ),
+						),
+						'log_excluded_paths' => array(
+							'type'  => 'array',
+							'items' => array( 'type' => 'string' ),
 						),
 					),
 				),
@@ -472,6 +481,17 @@ final class AdminController extends RestController {
 			return new \WP_Error( 'wp5w_invalid_ip', sprintf( __( 'Indirizzi IP non validi: %s', 'wp-5w' ), implode( ', ', $invalid ) ), array( 'status' => 400 ) );
 		}
 		return true;
+	}
+
+	/**
+	 * Controlla il percorso dei log di accesso: vuoto (sorgente spenta) oppure un percorso assoluto con almeno un file leggibile.
+	 *
+	 * @param mixed $value Valore ricevuto.
+	 * @return true|\WP_Error
+	 */
+	public static function validate_log_glob( mixed $value ): bool|\WP_Error {
+		$result = AccessLogSource::check_glob( is_string( $value ) ? trim( $value ) : '' );
+		return true === $result ? true : new \WP_Error( 'wp5w_invalid_log_glob', $result, array( 'status' => 400 ) );
 	}
 
 	/**

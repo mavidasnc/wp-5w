@@ -69,6 +69,7 @@ final class OverviewQuery {
 			),
 			'kpis'     => $kpis,
 			'series'   => $this->series( $range ),
+			'tools'    => $this->tools( $range ),
 			'channels' => $this->channels( $range ),
 			'coverage' => $this->coverage(),
 		);
@@ -145,6 +146,35 @@ final class OverviewQuery {
 		}
 
 		return Series::fill( $range, $rows, array( 'visitors', 'views', 'clicks', 'impressions' ) );
+	}
+
+	/**
+	 * Serie giornaliera di ogni strumento di statistiche (WP Statistics, raccolta propria, Independent Analytics), per le linee del grafico.
+	 *
+	 * ECCEZIONE ALLA REGOLA DELL'ORIGINE: legge di proposito le tre origini insieme, una per strumento, senza `Origin::where()`.
+	 * Il grafico le mostra tutte, e un giorno senza riga di uno strumento (che non c'era ancora) resta `null`, non zero.
+	 *
+	 * @param DateRange $range Intervallo.
+	 * @return array<int,array<string,int|string|null>> Punti { day, visitors_wps, views_wps, visitors_own, views_own, visitors_ia, views_ia }.
+	 */
+	private function tools( DateRange $range ): array {
+		global $wpdb;
+
+		$rows = array();
+		$list = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT day, origin, visitors, views FROM ' . Schema::table( 'site_daily' ) . " WHERE day BETWEEN %s AND %s AND origin IN ( 'wps', 'own', 'ia' )",
+				$range->from,
+				$range->to
+			)
+		);
+		foreach ( (array) $list as $row ) {
+			$rows[ $row->day ][ 'visitors_' . $row->origin ] = (int) $row->visitors;
+			$rows[ $row->day ][ 'views_' . $row->origin ]    = (int) $row->views;
+		}
+
+		$fields = array( 'visitors_wps', 'views_wps', 'visitors_own', 'views_own', 'visitors_ia', 'views_ia' );
+		return Series::fill( $range, $rows, $fields, $fields );
 	}
 
 	/**

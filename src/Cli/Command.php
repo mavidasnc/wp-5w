@@ -12,6 +12,7 @@ namespace Mavida\FiveW\Cli;
 use Mavida\FiveW\Etl\GscFileImport;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Query\OverviewQuery;
+use Mavida\FiveW\Sources\AccessLogSource;
 use Mavida\FiveW\Support\DateRange;
 
 defined( 'ABSPATH' ) || exit;
@@ -148,5 +149,38 @@ final class Command {
 		}
 
 		\WP_CLI::success( sprintf( '%d righe in %d giorni (%s → %s), %d scartate.', $result['rows'], $result['days'], $result['from'] ?? '-', $result['to'] ?? '-', $result['skipped'] ) );
+	}
+
+	/**
+	 * Rilegge tutti gli archivi dei log di accesso (Opzioni, «Log di accesso») e riscrive i giorni che coprono per intero.
+	 *
+	 * Non tocca l'esito dell'ETL generale (wp5w_etl_state): usa un'opzione sua.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp 5w log-import
+	 *
+	 * @subcommand log-import
+	 *
+	 * @param array<int,string>    $args       Argomenti posizionali.
+	 * @param array<string,string> $assoc_args Opzioni.
+	 * @return void
+	 */
+	public function log_import( array $args, array $assoc_args ): void {
+		unset( $args, $assoc_args );
+
+		$state = ( new Importer( array( new AccessLogSource() ), 'wp5w_log_state' ) )->run( Importer::full_range(), 'full' );
+		if ( isset( $state['error'] ) ) {
+			\WP_CLI::error( (string) $state['error'] );
+		}
+		foreach ( $state['rows'] as $table => $rows ) {
+			\WP_CLI::log( "  {$table}: {$rows} righe" );
+		}
+
+		if ( $state['ok'] ) {
+			\WP_CLI::success( "Log importati in {$state['duration']} s." );
+		} else {
+			\WP_CLI::error( 'Import dei log con errori: ' . (string) ( $state['sources']['log']['error'] ?? 'sorgente non disponibile' ) );
+		}
 	}
 }

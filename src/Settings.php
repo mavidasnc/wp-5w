@@ -46,22 +46,25 @@ final class Settings {
 	/**
 	 * Valori predefiniti.
 	 *
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int}
+	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
 	 */
 	public static function defaults(): array {
 		return array(
-			'own_tracking'   => true,
-			'exclude_users'  => 'admins',
-			'excluded_ips'   => array(),
-			'respect_dnt'    => true,
-			'retention_days' => 30,
+			'own_tracking'       => true,
+			'exclude_users'      => 'admins',
+			'excluded_ips'       => array(),
+			'respect_dnt'        => true,
+			'retention_days'     => 30,
+			// Log di accesso del server (0.14.0): percorso dei file (con * e ?) e prefissi di percorso da ignorare. Vuoto = sorgente spenta.
+			'log_glob'           => '',
+			'log_excluded_paths' => array(),
 		);
 	}
 
 	/**
 	 * Impostazioni salvate, unite ai valori predefiniti.
 	 *
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int}
+	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
 	 */
 	public static function get(): array {
 		$saved = get_option( self::OPTION, array() );
@@ -153,7 +156,7 @@ final class Settings {
 	 * Gli IP non validi si scartano qui: la risposta 400 con l'elenco delle righe errate la dà la REST prima di salvare.
 	 *
 	 * @param mixed $value Valore ricevuto.
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int}
+	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
 	 */
 	public static function sanitize( mixed $value ): array {
 		$defaults = self::defaults();
@@ -168,13 +171,24 @@ final class Settings {
 			}
 		}
 
-		// Passo 2: booleani, modalità ammessa e conservazione tra 7 e 365 giorni.
+		// Passo 2: percorsi esclusi dai log, uno per riga, che iniziano con «/» (senza spazi, vuoti e doppioni).
+		$paths = array();
+		foreach ( (array) $value['log_excluded_paths'] as $path ) {
+			$path = trim( sanitize_text_field( (string) $path ) );
+			if ( str_starts_with( $path, '/' ) && strlen( $path ) <= 200 ) {
+				$paths[] = $path;
+			}
+		}
+
+		// Passo 3: booleani, modalità ammessa e conservazione tra 7 e 365 giorni.
 		return array(
-			'own_tracking'   => filter_var( $value['own_tracking'], FILTER_VALIDATE_BOOLEAN ),
-			'exclude_users'  => in_array( $value['exclude_users'], self::USER_MODES, true ) ? (string) $value['exclude_users'] : $defaults['exclude_users'],
-			'excluded_ips'   => array_values( array_unique( $ips ) ),
-			'respect_dnt'    => filter_var( $value['respect_dnt'], FILTER_VALIDATE_BOOLEAN ),
-			'retention_days' => max( 7, min( 365, (int) $value['retention_days'] ) ),
+			'own_tracking'       => filter_var( $value['own_tracking'], FILTER_VALIDATE_BOOLEAN ),
+			'exclude_users'      => in_array( $value['exclude_users'], self::USER_MODES, true ) ? (string) $value['exclude_users'] : $defaults['exclude_users'],
+			'excluded_ips'       => array_values( array_unique( $ips ) ),
+			'respect_dnt'        => filter_var( $value['respect_dnt'], FILTER_VALIDATE_BOOLEAN ),
+			'retention_days'     => max( 7, min( 365, (int) $value['retention_days'] ) ),
+			'log_glob'           => trim( sanitize_text_field( (string) $value['log_glob'] ) ),
+			'log_excluded_paths' => array_values( array_unique( $paths ) ),
 		);
 	}
 }

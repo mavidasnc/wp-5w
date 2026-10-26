@@ -68,7 +68,7 @@ final class OwnSource extends Source {
 	 */
 	protected function required(): array {
 		return array(
-			'wp5w_hits' => array( 'ts', 'day', 'visitor', 'object_type', 'object_id', 'uri', 'referrer_host', 'channel', 'source', 'utm_source', 'utm_medium', 'utm_campaign', 'is_entry', 'country', 'device', 'browser', 'os' ),
+			'wp5w_hits' => array( 'ts', 'day', 'visitor', 'object_type', 'object_id', 'uri', 'referrer_host', 'channel', 'source', 'utm_source', 'utm_medium', 'utm_campaign', 'is_entry', 'country', 'device', 'browser', 'os', 'bot' ),
 		);
 	}
 
@@ -93,6 +93,9 @@ final class OwnSource extends Source {
 			$delete    = " AND origin = 'own'";
 			$rows      = array();
 
+			// Canale «bot»: le visite con l'etichetta `bot` (BotFilter::label(), dalla 0.11.0) vanno nel canale `bot`, che ha la precedenza su `ai`
+			// (un crawler di un assistente AI è un bot). Si decide qui, in aggregazione: lo storico si ricalcola con un ETL dalla prima data di wp5w_hits.
+			// referrer_daily non cambia: raggruppa per host del referrer e mescolerebbe in un solo canale visite di bot e di persone.
 			// Canale «ai»: la regola è la stessa che WpStatisticsSource applica alle righe wps. Si decide qui, in aggregazione,
 			// guardando host del referrer e utm_source: wp5w_hits resta con i canali di WP Statistics (Channels::classify()).
 			$ai     = Channels::ai_sql( 'referrer_host', 'utm_source' );
@@ -124,7 +127,7 @@ final class OwnSource extends Source {
 				'entry_daily',
 				$range,
 				$available,
-				"SELECT day, object_type, object_id, IF( {$ai} <> '', 'ai', COALESCE(NULLIF(channel, ''), 'unassigned') ) AS entry_channel, COUNT(DISTINCT visitor), 'own' FROM {$hits}
+				"SELECT day, object_type, object_id, IF( bot <> '', 'bot', IF( {$ai} <> '', 'ai', COALESCE(NULLIF(channel, ''), 'unassigned') ) ) AS entry_channel, COUNT(DISTINCT visitor), 'own' FROM {$hits}
 				WHERE is_entry = 1 AND day BETWEEN %s AND %s GROUP BY day, object_type, object_id, entry_channel",
 				'day, object_type, object_id, channel, visitors, origin',
 				$delete
@@ -150,7 +153,7 @@ final class OwnSource extends Source {
 				'dim_daily',
 				$range,
 				$available,
-				"SELECT h.day, 'channel', IF( {$ai_hit} <> '', 'ai', h.channel ), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
+				"SELECT h.day, 'channel', IF( h.bot <> '', 'bot', IF( {$ai_hit} <> '', 'ai', h.channel ) ), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
 				UNION ALL
 				SELECT h.day, 'source', COALESCE(NULLIF(IF( {$ai_hit} <> '', {$ai_hit}, h.source ), ''), '(n/d)'), COUNT(*), 'own' FROM {$hits} h JOIN ( {$first} ) f ON f.id = h.id GROUP BY h.day, 3
 				UNION ALL

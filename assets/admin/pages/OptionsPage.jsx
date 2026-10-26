@@ -31,6 +31,8 @@ const toFields = ( data ) => ( {
 	respect_dnt: !! data.respect_dnt,
 	retention_days: String( data.retention_days ),
 	own_since: data.own_since ?? '',
+	log_glob: data.log_glob ?? '',
+	log_excluded_paths: ( data.log_excluded_paths ?? [] ).join( '\n' ),
 } );
 
 export default function OptionsPage() {
@@ -70,6 +72,11 @@ export default function OptionsPage() {
 				respect_dnt: fields.respect_dnt,
 				retention_days: parseInt( fields.retention_days, 10 ) || 0,
 				own_since: fields.own_since,
+				log_glob: fields.log_glob.trim(),
+				log_excluded_paths: fields.log_excluded_paths
+					.split( '\n' )
+					.map( ( line ) => line.trim() )
+					.filter( Boolean ),
 			},
 		} )
 			.then( ( data ) => {
@@ -132,7 +139,31 @@ export default function OptionsPage() {
 				/>
 			</Card>
 
-			<Card id="options-dnt" title={ __( 'Rispetta Do Not Track', 'wp-5w' ) }>
+			<Card id="options-logs" title={ __( 'Log di accesso del server', 'wp-5w' ) }>
+				<TextControl
+					__nextHasNoMarginBottom
+					label={ __( 'Percorso dei file di log', 'wp-5w' ) }
+					help={ __(
+						'Facoltativo. Percorso assoluto con * e ? (per esempio /home/utente/domains/sito.com/logs/*.sito.tar.gz*): i log contano anche i crawler che non eseguono JavaScript e compaiono nella scheda Stato, accanto agli altri strumenti. Vuoto = spento. Nessun IP né user agent viene salvato.',
+						'wp-5w'
+					) }
+					value={ fields.log_glob }
+					onChange={ set( 'log_glob' ) }
+				/>
+				<TextareaControl
+					__nextHasNoMarginBottom
+					label={ __( 'Percorsi da ignorare nei log', 'wp-5w' ) }
+					help={ __(
+						'Un prefisso per riga, per esempio /dashboard/ se sotto lo stesso dominio gira un\'altra applicazione.',
+						'wp-5w'
+					) }
+					rows={ 3 }
+					value={ fields.log_excluded_paths }
+					onChange={ set( 'log_excluded_paths' ) }
+				/>
+				</Card>
+
+				<Card id="options-dnt" title={ __( 'Rispetta Do Not Track', 'wp-5w' ) }>
 				<ToggleControl
 					__nextHasNoMarginBottom
 					label={ __( 'Non registrare chi ha attivato Do Not Track nel browser', 'wp-5w' ) }
