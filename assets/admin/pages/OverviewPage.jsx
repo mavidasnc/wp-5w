@@ -3,7 +3,7 @@ import { __ } from '@wordpress/i18n';
 import { Notice, SelectControl, Spinner } from '@wordpress/components';
 import { api, formatDay, shiftDay, today } from '../api';
 import KpiCard from '../components/KpiCard';
-import TrendChart from '../components/TrendChart';
+import TrendChart, { TOOL_KEYS } from '../components/TrendChart';
 import TopContents from '../components/TopContents';
 import SearchContent from '../components/SearchContent';
 import ChannelList from '../components/ChannelList';
@@ -91,11 +91,13 @@ export default function OverviewPage() {
 					<div className="wp5w-grid">
 						<section className="wp5w-card wp5w-grid__main">
 							<h2>{ __( 'Andamento', 'wp-5w' ) }</h2>
-							<TrendChart series={ data.series } />
+							<TrendChart series={ data.series.map( ( point, i ) => ( { ...point, ...data.tools[ i ] } ) ) } keys={ TOOL_KEYS } />
 							<p className="wp5w-note">
 								{ __( 'Search Console disponibile dal', 'wp-5w' ) } { formatDay( data.coverage.gsc_daily.from ) }
 								{ '; ' }
 								{ __( 'gli ultimi 2-3 giorni sono incompleti.', 'wp-5w' ) }
+								{ ' ' }
+								{ __( 'Una linea per ogni strumento di statistiche: clicca sulla legenda per mostrarle o nasconderle (le visualizzazioni sono tratteggiate e nascoste all\'inizio).', 'wp-5w' ) }
 							</p>
 						</section>
 						<section className="wp5w-card">

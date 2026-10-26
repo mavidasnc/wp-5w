@@ -514,8 +514,12 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 	$r30      = DateRange::last_days( 30, $today );
 	$r60      = DateRange::last_days( 60, $today );
 
+	// `tools` (le serie dei tre strumenti) legge di proposito tutte le origini: non fa parte del confronto prima/dopo le righe own.
+	$overview_data = $overview->get( $r30 );
+	unset( $overview_data['tools'] );
+
 	return array(
-		'overview'     => (string) wp_json_encode( $overview->get( $r30 ) ),
+		'overview'     => (string) wp_json_encode( $overview_data ),
 		'top all'      => (string) wp_json_encode( $overview->top( $r30, 'all' ) ),
 		'top post'     => (string) wp_json_encode( $overview->top( $r30, 'post' ) ),
 		'latest'       => (string) wp_json_encode( $posts->latest() ),
@@ -1701,6 +1705,17 @@ $check_six_dims = static function ( string $label ) use ( $wpdb, $dim_table, $to
 	}
 };
 $check_six_dims( 'ai own' );
+
+// Passo 2c (0.14.0): serie dei tre strumenti della Panoramica (`tools`). Legge le tre origini insieme (eccezione alla regola dell'origine);
+// il giorno senza riga di uno strumento resta null, non zero.
+$tools_range  = DateRange::last_days( 30, $today );
+$tools        = ( new OverviewQuery() )->get( $tools_range )['tools'];
+$tools_by_day = array_column( $tools, null, 'day' );
+$check( 'tools: un punto per giorno del periodo', 30, count( $tools ) );
+$check( 'tools: visitatori own di oggi = site_daily own', (int) $wpdb->get_var( $wpdb->prepare( 'SELECT visitors FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) ), $tools_by_day[ $today ]['visitors_own'] );
+$check( 'tools: visualizzazioni wps del giorno del seed = site_daily wps', (int) $wpdb->get_var( $wpdb->prepare( 'SELECT views FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'wps' AND day = %s", $seed_day ) ), $tools_by_day[ $seed_day ]['views_wps'] );
+$check( 'tools: own prima della raccolta è null (non zero)', null, $tools_by_day[ $tools_range->from ]['visitors_own'] );
+$check( 'tools: senza righe ia i visitatori ia sono null', null, $tools_by_day[ $today ]['visitors_ia'] );
 
 // Passo 3: confronto. Giorni con righe ai in entrambe le origini, simulati come nella sezione 10.
 $compare_backup = array();

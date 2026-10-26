@@ -19,12 +19,16 @@ final class Series {
 	/**
 	 * Un punto per giorno, con zero dove mancano i dati, così i grafici non saltano i buchi.
 	 *
-	 * @param DateRange                                $range  Intervallo.
-	 * @param array<string,array<string,mixed>|object> $rows Righe indicizzate per giorno (Y-m-d).
-	 * @param array<int,string>                        $fields Campi numerici da copiare.
-	 * @return array<int,array<string,int|string>> Punti { day, ...fields }.
+	 * I campi in `$nullable` restano `null` dove il giorno non ha nessuna riga (o la riga non ha il campo): servono alle serie
+	 * di strumenti che non c'erano ancora, che in un grafico non devono scendere a zero.
+	 *
+	 * @param DateRange                                $range    Intervallo.
+	 * @param array<string,array<string,mixed>|object> $rows     Righe indicizzate per giorno (Y-m-d).
+	 * @param array<int,string>                        $fields   Campi numerici da copiare.
+	 * @param array<int,string>                        $nullable Campi che restano null dove manca il dato.
+	 * @return array<int,array<string,int|string|null>> Punti { day, ...fields }.
 	 */
-	public static function fill( DateRange $range, array $rows, array $fields ): array {
+	public static function fill( DateRange $range, array $rows, array $fields, array $nullable = array() ): array {
 		$points = array();
 		$day    = new \DateTimeImmutable( $range->from );
 		$end    = new \DateTimeImmutable( $range->to );
@@ -34,7 +38,7 @@ final class Series {
 			$row   = isset( $rows[ $key ] ) ? (array) $rows[ $key ] : array();
 			$point = array( 'day' => $key );
 			foreach ( $fields as $field ) {
-				$point[ $field ] = (int) ( $row[ $field ] ?? 0 );
+				$point[ $field ] = isset( $row[ $field ] ) ? (int) $row[ $field ] : ( in_array( $field, $nullable, true ) ? null : 0 );
 			}
 			$points[] = $point;
 			$day      = $day->modify( '+1 day' );
