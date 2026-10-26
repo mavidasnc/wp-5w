@@ -183,7 +183,7 @@ export default function Compare() {
 						</p>
 						<TrendChart series={ chartSeries } keys={ TOOL_KEYS } />
 						<p className="wp5w-note">
-							{ __( 'WP Statistics e Independent Analytics contano come visitatori anche una flotta di browser automatici con user agent da telefono: eseguono JavaScript ma non caricano immagini né fogli di stile. Fino alla 0.13.0 il tracker proprio li perdeva perché inviava con sendBeacon, che quei browser bloccano; dalla 0.14.0 invia con fetch come gli altri due, quindi la differenza dei giorni precedenti è più grande. Independent Analytics non traccia gli utenti collegati, non rispetta Do Not Track e conta una nuova sessione dopo 30 minuti di pausa: gli ingressi sono di più e le visite di meno. Il giorno è quello della visita nel fuso del sito.', 'wp-5w' ) }
+							{ __( 'WP Statistics e Independent Analytics contano come visitatori anche una flotta di browser automatici con user agent da telefono: eseguono JavaScript ma non caricano immagini né fogli di stile. Fino alla 0.13.0 il tracker proprio ne perdeva molti, con ogni probabilità perché inviava con sendBeacon, che quei browser sembrano bloccare; dalla 0.14.0 invia con fetch come gli altri due (se dopo un giorno intero la differenza resta, questa spiegazione va rivista), quindi la differenza dei giorni precedenti è più grande. Independent Analytics non traccia gli utenti collegati, non rispetta Do Not Track e conta una nuova sessione dopo 30 minuti di pausa: gli ingressi sono di più e le visite di meno. Il giorno è quello della visita nel fuso del sito.', 'wp-5w' ) }
 						</p>
 						<div className="wp5w-table-scroll">
 							<table className="widefat striped wp5w-compare-table">

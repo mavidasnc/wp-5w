@@ -19,7 +19,7 @@ mkdir -p .wp-env-plugins && for z in wp-statistics.14.16.15 seo-by-rank-math.1.0
 
 npx wp-env start
 npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/seed.php     # dati sintetici
-npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php   # schema v6, ETL, raccolta propria, opzioni, fase 4, iterazioni 0.11.0, 0.12.0 e 0.13.0 (sezione 15: Independent Analytics)
+npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php   # schema v6, ETL, raccolta propria, opzioni, fase 4, iterazioni 0.11.0, 0.12.0, 0.13.0 e 0.14.0 (sezione 15: Independent Analytics; sezione 16: log di accesso)
 ```
 
 ### Recupero dello storico di Search Console

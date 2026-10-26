@@ -376,6 +376,11 @@ final class CompareQuery {
 			$channel = '(n/d)' === $row['value'] ? 'unassigned' : (string) $row['value'];
 			$origin  = (string) $row['origin'];
 
+			// I bot dei log (`logbot`) non sono una colonna del confronto: un canale presente solo lì darebbe una riga di zeri.
+			if ( 'logbot' === $origin ) {
+				continue;
+			}
+
 			$by_channel[ $channel ][ $origin ] = ( $by_channel[ $channel ][ $origin ] ?? 0 ) + (int) $row['visitors'];
 		}
 
