@@ -1674,6 +1674,20 @@ $check( 'ai own: entry_daily con visitatori ai', 4, $wpdb->get_var( $wpdb->prepa
 $check( 'ai own: referrer_daily con tre siti ai (quello senza referrer non c\'è)', 3, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND channel = 'ai'", $today ) ) );
 $check( 'ai own: referrer_daily claude.ai con sorgente Claude', 'Claude', $wpdb->get_var( $wpdb->prepare( 'SELECT source FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND referrer = 'claude.ai'", $today ) ) );
 
+// Passo 2b (0.14.0): canale «bot». Un crawler AI (claudebot, con referrer claude.ai) va in `bot` e non in `ai`; la visita si toglie subito dopo,
+// così i controlli seguenti ripartono dagli stessi numeri.
+$send_hit( $payload( $post_a, array( 'r' => 'https://claude.ai/chat/x', 'u' => '/wp5w-v14-bot/' ) ), '192.0.2.9', 'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' );
+( new OwnSource() )->run_hourly();
+$check( 'bot own: etichetta della visita', 'claudebot', $wpdb->get_var( "SELECT bot FROM {$hits_table} WHERE uri = '/wp5w-v14-bot/'" ) );
+$check( 'bot own: canale bot di oggi', 1, $dim_value( 'own', $today, 'channel', 'bot' ) );
+$check( 'bot own: il canale ai resta a 4 (il crawler non ci entra)', 4, $dim_value( 'own', $today, 'channel', 'ai' ) );
+$check( 'bot own: entry_daily con un visitatore bot', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(visitors), 0) FROM ' . Schema::table( 'entry_daily' ) . " WHERE origin = 'own' AND day = %s AND channel = 'bot'", $today ) ) );
+$bot_visitors = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT visitors FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day = %s", $today ) );
+$check( 'bot own: somma di channel = visitatori own del sito', $bot_visitors, $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE origin = 'own' AND day = %s AND dim = 'channel'", $today ) ) );
+$wpdb->query( "DELETE FROM {$hits_table} WHERE uri = '/wp5w-v14-bot/'" );
+( new OwnSource() )->run_hourly();
+$check( 'bot own: tolta la visita, il canale bot sparisce', 0, $dim_value( 'own', $today, 'channel', 'bot' ) );
+
 /**
  * Controlla che le sei dimensioni dell'invariante (senza le utm_*) abbiano la stessa somma, uguale ai visitatori own del sito.
  *
