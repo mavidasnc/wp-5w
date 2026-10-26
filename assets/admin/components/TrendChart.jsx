@@ -23,6 +23,8 @@ const TOOLS = {
 	wps: { name: __( 'WP Statistics', 'wp-5w' ), color: '#2271b1' },
 	own: { name: __( 'Raccolta propria', 'wp-5w' ), color: '#d63638' },
 	ia: { name: __( 'Independent Analytics', 'wp-5w' ), color: '#7e57c2' },
+	// Solo nel Confronto della scheda Stato (la Panoramica non ha questa serie e la legenda la nasconde).
+	log: { name: __( 'Log del server', 'wp-5w' ), color: '#e65100' },
 };
 
 const SERIES = [

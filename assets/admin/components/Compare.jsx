@@ -54,6 +54,9 @@ function Diff( { value, threshold } ) {
 	return <span className={ `wp5w-diff ${ Math.abs( value ) > threshold ? 'is-bad' : 'is-good' }` }>{ formatDiff( value ) }</span>;
 }
 
+// Chiave della differenza (rispetto a WP Statistics) nella riga del giorno, per strumento.
+const DIFF_KEY = { own: 'diff', ia: 'diff_ia', log: 'diff_log' };
+
 /**
  * Giorno breve gg/mm per l'elenco dei giorni esclusi.
  *
@@ -126,6 +129,9 @@ export default function Compare() {
 		...( ia
 			? [ { id: 'ia', label: __( 'Independent Analytics', 'wp-5w' ), ...totals.ia, diff_visitors: totals.diff_ia.visitors, diff_views: totals.diff_ia.views } ]
 			: [] ),
+		...( data.log_available
+			? [ { id: 'log', label: __( 'Log del server (browser)', 'wp-5w' ), ...totals.log, diff_visitors: totals.diff_log.visitors, diff_views: totals.diff_log.views } ]
+			: [] ),
 	];
 
 	// Un punto per giorno confrontato, con le chiavi delle serie del grafico della Panoramica.
@@ -136,6 +142,7 @@ export default function Compare() {
 		visitors_own: day.own.visitors,
 		views_own: day.own.views,
 		...( ia ? { visitors_ia: day.ia.visitors, views_ia: day.ia.views } : {} ),
+		...( data.log_available ? { visitors_log: day.log?.visitors ?? null, views_log: day.log?.views ?? null } : {} ),
 	} ) );
 
 	return (
@@ -203,12 +210,12 @@ export default function Compare() {
 											{ tools.map( ( tool ) => (
 												<Fragment key={ tool.id }>
 													<td className="num">
-														{ formatNumber( day[ tool.id ].visitors ) }
-														<Diff value={ tool.id === 'wps' ? null : day[ tool.id === 'own' ? 'diff' : 'diff_ia' ].visitors } threshold={ data.threshold } />
+														{ formatNumber( day[ tool.id ]?.visitors ) }
+														<Diff value={ day[ DIFF_KEY[ tool.id ] ]?.visitors } threshold={ data.threshold } />
 													</td>
 													<td className="num">
-														{ formatNumber( day[ tool.id ].views ) }
-														<Diff value={ tool.id === 'wps' ? null : day[ tool.id === 'own' ? 'diff' : 'diff_ia' ].views } threshold={ data.threshold } />
+														{ formatNumber( day[ tool.id ]?.views ) }
+														<Diff value={ day[ DIFF_KEY[ tool.id ] ]?.views } threshold={ data.threshold } />
 													</td>
 												</Fragment>
 											) ) }
@@ -323,6 +330,8 @@ export default function Compare() {
 									<th className="num">{ __( 'Differenza', 'wp-5w' ) }</th>
 									{ ia && <th className="num">{ __( 'Independent Analytics', 'wp-5w' ) }</th> }
 									{ ia && <th className="num">{ __( 'Differenza', 'wp-5w' ) }</th> }
+									{ data.log_available && <th className="num">{ __( 'Log del server (browser)', 'wp-5w' ) }</th> }
+									{ data.log_available && <th className="num">{ __( 'Differenza', 'wp-5w' ) }</th> }
 								</tr>
 							</thead>
 							<tbody>
@@ -334,10 +343,43 @@ export default function Compare() {
 										<td className="num">{ formatDiff( row.diff ) }</td>
 										{ ia && <td className="num">{ formatNumber( row.ia ) }</td> }
 										{ ia && <td className="num">{ formatDiff( row.diff_ia ) }</td> }
+										{ data.log_available && <td className="num">{ formatNumber( row.log ) }</td> }
+										{ data.log_available && <td className="num">{ formatDiff( row.diff_log ) }</td> }
 									</tr>
 								) ) }
 							</tbody>
 						</table>
+
+						{ data.log_available && (
+							<>
+								<h3>{ __( 'Bot dai log del server', 'wp-5w' ) }</h3>
+								<p className="wp5w-note wp5w-note--top">
+									{ sprintf(
+										/* translators: 1: visitatori dei bot, 2: visualizzazioni dei bot, 3: giorni coperti dai log. */
+										__( 'I log vedono anche i crawler che non eseguono JavaScript: nei %3$s giorni coperti sono %1$s visitatori con %2$s visualizzazioni, fuori dalla colonna «Log del server (browser)». Un visitatore senza nessuna prova di essere un browser (né risorse del sito scaricate né un tracker eseguito) è «senza-js»: un ritorno di un lettore vero con tutto in cache e senza interazioni finisce lì.', 'wp-5w' ),
+										formatNumber( totals.logbot.visitors ),
+										formatNumber( totals.logbot.views ),
+										formatNumber( totals.log_days )
+									) }
+								</p>
+								<table className="widefat striped">
+									<thead>
+										<tr>
+											<th>{ __( 'Bot', 'wp-5w' ) }</th>
+											<th className="num">{ __( 'Visitatori', 'wp-5w' ) }</th>
+										</tr>
+									</thead>
+									<tbody>
+										{ data.bots.map( ( bot ) => (
+											<tr key={ bot.label }>
+												<td>{ bot.label }</td>
+												<td className="num">{ formatNumber( bot.visitors ) }</td>
+											</tr>
+										) ) }
+									</tbody>
+								</table>
+							</>
+						) }
 
 						<h3>{ __( 'Scarti della raccolta propria', 'wp-5w' ) }</h3>
 						<table className="widefat striped">
