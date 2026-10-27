@@ -3243,7 +3243,7 @@ $check( 'oggi: la home è del bot e si chiama Home', '1|1|0|0|1|0|Home', implode
 $today_totals = $today_data['pages']['totals'];
 $check( 'oggi: totali (visualizzazioni, visitatori distinti, diretto, ricerca, bot, altri)', '6|5|2|1|1|2', implode( '|', array( $today_totals['views'], $today_totals['visitors'], $today_totals['direct'], $today_totals['search'], $today_totals['bot'], $today_totals['other'] ) ) );
 $check( 'oggi: diretto + ricerca + bot + altri = visualizzazioni', $today_totals['views'], $today_totals['direct'] + $today_totals['search'] + $today_totals['bot'] + $today_totals['other'] );
-$check( 'oggi: il totale di oggi coincide con quello della raccolta propria aggregata', (string) $today_kpis['views']['value'], $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table} WHERE day = '2026-10-27'" ) );
+$check( 'oggi: le visualizzazioni di oggi sono le righe grezze di wp5w_hits', (string) $today_kpis['views']['value'], $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table} WHERE day = '2026-10-27'" ) );
 $today_json = (string) wp_json_encode( $today_data );
 $check( 'oggi: nessuna chiave visitor o ts nella risposta', 0, (int) str_contains( $today_json, '"visitor"' ) + (int) str_contains( $today_json, '"ts"' ) );
 

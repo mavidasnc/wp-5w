@@ -153,7 +153,7 @@ export default function Compare() {
 		<>
 			<Card
 				id="status-compare"
-				title={ ia ? __( 'Confronto tra raccolta propria, WP Statistics e Independent Analytics', 'wp-5w' ) : __( 'Confronto con WP Statistics', 'wp-5w' ) }
+				title={ ia ? __( 'Confronto tra raccolta propria, WP Statistics e Independent Analytics', 'wp-5w' ) : __( 'Confronto tra raccolta propria e WP Statistics', 'wp-5w' ) }
 			>
 				<Coverage coverage={ coverage } />
 				{ hasDays && (

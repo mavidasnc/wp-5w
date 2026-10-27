@@ -13,7 +13,7 @@ Nuova scheda «Oggi» e nuovo ordine degli strumenti nel Confronto. Nessuna tabe
 - `OnlineQuery::describe()`: titolo e link di un contenuto, estratti da `content()` e usati anche da `TodayQuery`. `verify.php` sezione 17 (la pulizia finale diventa la 18).
 
 ### Changed
-- **Confronto della scheda Stato:** gli strumenti compaiono nell'ordine raccolta propria, WP Statistics, Independent Analytics e log in riquadri, grafico, tabella giornaliera, ingressi sulla home, canali e contenuti. La differenza resta sempre rispetto a WP Statistics e `CompareQuery` non cambia. `TrendChart` mostra le serie nell'ordine di `keys` quando viene passato (la Panoramica passa `TOOL_KEYS` e non cambia).
+- **Confronto della scheda Stato:** gli strumenti compaiono nell'ordine raccolta propria, WP Statistics, Independent Analytics e log in riquadri, grafico, tabella giornaliera, ingressi sulla home, canali e contenuti; lo stesso ordine vale per il box «Sorgenti» (poi Rank Math), ordinato lato client senza cambiare `GET /admin/status`. La differenza resta sempre rispetto a WP Statistics e `CompareQuery` non cambia. `TrendChart` mostra le serie nell'ordine di `keys` quando viene passato (la Panoramica passa `TOOL_KEYS` e non cambia).
 
 ## [0.13.0] — 2026-10-22
 

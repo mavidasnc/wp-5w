@@ -24,7 +24,8 @@ defined( 'ABSPATH' ) || exit;
  * Visitatori e visualizzazioni di oggi con il confronto con ieri e con le medie degli ultimi 7 e 30 giorni, più le pagine viste oggi.
  *
  * Legge solo `wp5w_hits`, che è sempre raccolta propria (nessuna regola dell'origine, come OnlineQuery): conteggi identici
- * a quelli di OwnSource (visitatori distinti e visite, bot compresi), quindi il totale di oggi coincide con la Panoramica.
+ * a quelli di OwnSource (visitatori distinti e visite, bot compresi): non sono i numeri di WP Statistics e, finché l'aggregazione oraria
+ * non ha scritto oggi, nemmeno quelli della Panoramica.
  * Il confronto è alla stessa ora del giorno (la giornata in corso non si confronta con giornate intere) e porta con sé,
  * come riferimento, anche il totale della giornata intera.
  */

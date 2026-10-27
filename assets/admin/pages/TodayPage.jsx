@@ -35,7 +35,7 @@ export default function TodayPage() {
 			<p className="wp5w-note wp5w-note--top">
 				{ sprintf(
 					/* translators: 1: giorno (gg/mm/aaaa), 2: ora dell'aggiornamento. */
-					__( 'Oggi, %1$s, fino alle %2$s. I confronti sono alla stessa ora: ieri e i giorni delle medie sono contati fino alle %2$s; sotto ogni valore, in piccolo, il totale della giornata intera.', 'wp-5w' ),
+					__( 'Oggi, %1$s, fino alle %2$s, dalla raccolta propria (bot e browser automatici compresi, quindi i numeri possono differire da WP Statistics). I confronti sono alla stessa ora: ieri e i giorni delle medie sono contati fino alle %2$s; sotto ogni valore, in piccolo, il totale della giornata intera.', 'wp-5w' ),
 					formatDay( data.day ),
 					data.at.slice( 0, 5 )
 				) }
