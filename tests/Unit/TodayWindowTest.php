@@ -64,6 +64,30 @@ final class TodayWindowTest extends TestCase {
 		);
 	}
 
+	public function test_cumulate_adds_hour_by_hour_and_fills_missing_hours(): void {
+		$cumulated = TodayWindow::cumulate(
+			array(
+				9  => 2,
+				11 => 3,
+			)
+		);
+
+		$this->assertCount( 24, $cumulated );
+		$this->assertSame( 0, $cumulated[8] );
+		$this->assertSame( 2, $cumulated[9] );
+		$this->assertSame( 2, $cumulated[10] );
+		$this->assertSame( 5, $cumulated[11] );
+		$this->assertSame( 5, $cumulated[23] );
+	}
+
+	public function test_cumulate_stops_after_the_last_hour(): void {
+		$cumulated = TodayWindow::cumulate( array( 9 => 2 ), 10 );
+
+		$this->assertSame( 2, $cumulated[10] );
+		$this->assertNull( $cumulated[11] );
+		$this->assertNull( $cumulated[23] );
+	}
+
 	public function test_mean_without_days_is_null(): void {
 		$this->assertNull( TodayWindow::mean( array( '2026-10-24' => 6 ), array() ) );
 	}

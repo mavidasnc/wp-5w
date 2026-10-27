@@ -69,6 +69,28 @@ final class TodayWindow {
 	}
 
 	/**
+	 * Valori orari cumulati: per ogni ora da 0 a 23 il totale dall'inizio della giornata.
+	 *
+	 * Le ore dopo `$last_hour` (la giornata in corso non è ancora arrivata) valgono null, così la linea del grafico si ferma invece di restare piatta.
+	 *
+	 * @param array<int,int> $by_hour   Valore per ora locale (0-23); le ore mancanti valgono zero.
+	 * @param int|null       $last_hour Ultima ora da mostrare, null per tutte e 24.
+	 * @return array<int,int|null> Sempre 24 valori, indicizzati dall'ora.
+	 */
+	public static function cumulate( array $by_hour, ?int $last_hour = null ): array {
+		$total  = 0;
+		$result = array();
+
+		for ( $hour = 0; $hour < 24; $hour++ ) {
+			$total += (int) ( $by_hour[ $hour ] ?? 0 );
+			// Ore future: nessun valore.
+			$result[ $hour ] = null !== $last_hour && $hour > $last_hour ? null : $total;
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Sposta un giorno Y-m-d di un numero di giorni.
 	 *
 	 * @param string $day  Giorno.

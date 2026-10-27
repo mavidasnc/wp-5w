@@ -133,7 +133,72 @@ final class TodayQuery {
 			'tracking'  => Settings::get()['own_tracking'],
 			'first_day' => $first,
 			'kpis'      => $kpis,
+			'hourly'    => $this->hourly( $today, $local, (int) substr( $time, 0, 2 ) ),
 			'pages'     => $this->pages( $today, $full['visitors'][ $today ] ?? 0 ),
+		);
+	}
+
+	/**
+	 * Andamento orario cumulato di oggi e di ieri (visitatori e visualizzazioni), per il grafico.
+	 *
+	 * Un visitatore conta nell'ora della sua prima visita del giorno, così a ogni ora il valore cumulato è il numero di visitatori
+	 * distinti fino a quel momento (come il KPI). L'ora è quella locale del sito, ricavata da `ts` con la stessa espressione di get().
+	 * Oggi si ferma all'ora in corso.
+	 *
+	 * @param string $today        Oggi (Y-m-d).
+	 * @param string $local        Espressione SQL dell'ora locale di `ts` (LocalTime::shift_sql()).
+	 * @param int    $current_hour Ora locale in corso (0-23).
+	 * @return array{today:array{visitors:array<int,int|null>,views:array<int,int|null>},yesterday:array{visitors:array<int,int|null>,views:array<int,int|null>}}
+	 */
+	private function hourly( string $today, string $local, int $current_hour ): array {
+		global $wpdb;
+
+		$hits = Schema::table( 'hits' );
+		// Ieri con date su stringhe in UTC: 24 ore prima non è sempre il giorno prima nei giorni di cambio dell'ora.
+		$yesterday = gmdate( 'Y-m-d', (int) strtotime( $today . ' UTC' ) - DAY_IN_SECONDS );
+
+		// Passo 1: visualizzazioni per giorno e ora, poi visitatori per giorno e ora della prima visita.
+		$views    = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT day, HOUR( {$local} ) AS hour, COUNT(*) AS n FROM {$hits} WHERE day IN (%s, %s) GROUP BY day, hour",
+				$yesterday,
+				$today
+			),
+			ARRAY_A
+		);
+		$visitors = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT day, hour, COUNT(*) AS n FROM (
+					SELECT day, visitor, HOUR( MIN( {$local} ) ) AS hour FROM {$hits} WHERE day IN (%s, %s) GROUP BY day, visitor
+				) first_hits GROUP BY day, hour",
+				$yesterday,
+				$today
+			),
+			ARRAY_A
+		);
+
+		// Passo 2: valori per giorno e ora.
+		$by = array(
+			'visitors' => array(),
+			'views'    => array(),
+		);
+		foreach ( (array) $visitors as $row ) {
+			$by['visitors'][ (string) $row['day'] ][ (int) $row['hour'] ] = (int) $row['n'];
+		}
+		foreach ( (array) $views as $row ) {
+			$by['views'][ (string) $row['day'] ][ (int) $row['hour'] ] = (int) $row['n'];
+		}
+
+		// Passo 3: cumulati; oggi si ferma all'ora in corso, ieri è completo.
+		return array(
+			'today'     => array(
+				'visitors' => TodayWindow::cumulate( $by['visitors'][ $today ] ?? array(), $current_hour ),
+				'views'    => TodayWindow::cumulate( $by['views'][ $today ] ?? array(), $current_hour ),
+			),
+			'yesterday' => array(
+				'visitors' => TodayWindow::cumulate( $by['visitors'][ $yesterday ] ?? array() ),
+				'views'    => TodayWindow::cumulate( $by['views'][ $yesterday ] ?? array() ),
+			),
 		);
 	}
 

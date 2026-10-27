@@ -2,6 +2,14 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.16.0] — 2026-10-27
+
+Scheda «Oggi» con aggiornamento automatico e andamento orario. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.
+
+### Added
+- **Aggiornamento automatico della scheda «Oggi»:** si ricarica da sola ogni minuto, solo mentre la scheda del browser è visibile (al ritorno si ricarica subito); un errore non cancella gli ultimi dati. La logica è nell'hook `hooks/usePolledApi.js`, la stessa di «Online adesso» (che per ora ha la sua copia).
+- **Andamento orario di oggi e ieri** (`HourlyChart`, chiave `hourly` di `GET /admin/today`): a ogni ora il totale cumulato dall'inizio della giornata, per visitatori (contati nell'ora della prima visita del giorno) e visualizzazioni; oggi si ferma all'ora in corso. Le visualizzazioni sono tratteggiate e nascoste all'inizio, come nel grafico della Panoramica. `TodayWindow::cumulate()` è pura e coperta da PHPUnit; `verify.php` sezione 17 controlla le serie e che l'ultimo valore sia il KPI.
+
 ## [0.15.0] — 2026-10-27
 
 Nuova scheda «Oggi» e nuovo ordine degli strumenti nel Confronto. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.

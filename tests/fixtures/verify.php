@@ -3244,6 +3244,17 @@ $today_totals = $today_data['pages']['totals'];
 $check( 'oggi: totali (visualizzazioni, visitatori distinti, diretto, ricerca, bot, altri)', '6|5|2|1|1|2', implode( '|', array( $today_totals['views'], $today_totals['visitors'], $today_totals['direct'], $today_totals['search'], $today_totals['bot'], $today_totals['other'] ) ) );
 $check( 'oggi: diretto + ricerca + bot + altri = visualizzazioni', $today_totals['views'], $today_totals['direct'] + $today_totals['search'] + $today_totals['bot'] + $today_totals['other'] );
 $check( 'oggi: le visualizzazioni di oggi sono le righe grezze di wp5w_hits', (string) $today_kpis['views']['value'], $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table} WHERE day = '2026-10-27'" ) );
+// Andamento orario cumulato. Oggi: t1 alle 9 (due visualizzazioni), t2 e t3 alle 10, t4 e t5 alle 11; si ferma alle 12.
+// Ieri (ora solare): y1 alle 9, y2 alle 11, y3 alle 15.
+$hourly_today = $today_data['hourly']['today'];
+$hourly_yest  = $today_data['hourly']['yesterday'];
+$check( 'oggi orario: 24 ore per serie', '24|24|24|24', count( $hourly_today['visitors'] ) . '|' . count( $hourly_today['views'] ) . '|' . count( $hourly_yest['visitors'] ) . '|' . count( $hourly_yest['views'] ) );
+$check( 'oggi orario: visitatori cumulati alle 8, 9, 10, 11 e 12', '0|1|3|5|5', implode( '|', array( $hourly_today['visitors'][8], $hourly_today['visitors'][9], $hourly_today['visitors'][10], $hourly_today['visitors'][11], $hourly_today['visitors'][12] ) ) );
+$check( 'oggi orario: visualizzazioni cumulate alle 9, 10, 11 e 12', '2|4|6|6', implode( '|', array( $hourly_today['views'][9], $hourly_today['views'][10], $hourly_today['views'][11], $hourly_today['views'][12] ) ) );
+$check( 'oggi orario: dopo l\'ora in corso non ci sono valori', '1|1', (int) ( null === $hourly_today['visitors'][13] ) . '|' . (int) ( null === $hourly_today['views'][23] ) );
+$check( 'oggi orario: l\'ultimo valore di oggi è il KPI', $today_kpis['visitors']['value'] . '|' . $today_kpis['views']['value'], $hourly_today['visitors'][12] . '|' . $hourly_today['views'][12] );
+$check( 'oggi orario: visitatori di ieri cumulati alle 8, 9, 10, 11, 14, 15 e 23', '0|1|1|2|2|3|3', implode( '|', array( $hourly_yest['visitors'][8], $hourly_yest['visitors'][9], $hourly_yest['visitors'][10], $hourly_yest['visitors'][11], $hourly_yest['visitors'][14], $hourly_yest['visitors'][15], $hourly_yest['visitors'][23] ) ) );
+$check( 'oggi orario: l\'ultimo valore di ieri è la giornata intera', $today_kpis['visitors']['compare']['yesterday']['full'] . '|' . $today_kpis['views']['compare']['yesterday']['full'], $hourly_yest['visitors'][23] . '|' . $hourly_yest['views'][23] );
 $today_json = (string) wp_json_encode( $today_data );
 $check( 'oggi: nessuna chiave visitor o ts nella risposta', 0, (int) str_contains( $today_json, '"visitor"' ) + (int) str_contains( $today_json, '"ts"' ) );
 
