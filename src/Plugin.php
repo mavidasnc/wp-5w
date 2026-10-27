@@ -20,6 +20,7 @@ use Mavida\FiveW\Gsc\OAuthHandler;
 use Mavida\FiveW\Query\CompareQuery;
 use Mavida\FiveW\Query\OnlineQuery;
 use Mavida\FiveW\Query\OperationsQuery;
+use Mavida\FiveW\Query\TodayQuery;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
@@ -118,7 +119,7 @@ final class Plugin {
 		$posts  = new PostsQuery();
 		( new UpdateController() )->register();
 		( new GscController() )->register();
-		( new AdminController( $importer, new OverviewQuery(), $posts, $search, new AudienceQuery( $search ), new TrendQuery(), new CompareQuery(), new OnlineQuery(), new OperationsQuery() ) )->register();
+		( new AdminController( $importer, new OverviewQuery(), $posts, $search, new AudienceQuery( $search ), new TrendQuery(), new CompareQuery(), new OnlineQuery(), new OperationsQuery(), new TodayQuery() ) )->register();
 
 		// Visite degli ultimi 30 giorni nell'elenco di articoli e pagine e nella barra di amministrazione (anche nel frontend).
 		( new PostViews( $posts ) )->register();

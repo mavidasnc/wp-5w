@@ -34,6 +34,7 @@ use Mavida\FiveW\Query\OperationsQuery;
 use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
+use Mavida\FiveW\Query\TodayQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\REST\GscController;
 use Mavida\FiveW\Settings;
@@ -3173,7 +3174,112 @@ update_option( 'timezone_string', (string) $log_tz_backup[0] );
 update_option( 'gmt_offset', $log_tz_backup[1] );
 
 // ---------------------------------------------------------------------------
-// 17. Pulizia finale.
+// 17. Iterazione 0.15.0: scheda «Oggi» (TodayQuery e GET /admin/today).
+// ---------------------------------------------------------------------------
+// Visite sintetiche in wp5w_hits con orari locali noti (Europe/Rome) e $now fissato a martedì 27/10/2026 alle 12:00,
+// due giorni dopo il ritorno all'ora solare (25/10): la finestra dei 7 giorni mescola ora legale e solare.
+$today_tz_backup = array( get_option( 'timezone_string' ), get_option( 'gmt_offset' ) );
+update_option( 'timezone_string', 'Europe/Rome' );
+$today_tz  = new DateTimeZone( 'Europe/Rome' );
+$today_now = ( new DateTimeImmutable( '2026-10-27 12:00:00', $today_tz ) )->getTimestamp();
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+// Una visita: giorno e orario locali, chi (hash), contenuto, canale, host del referrer e bot.
+$today_hit = static function ( string $day, string $time, string $who, string $type, int $id, string $channel = 'direct', string $referrer = '', string $bot = '' ) use ( $wpdb, $hits_table, $today_tz ): void {
+	$utc = ( new DateTimeImmutable( "{$day} {$time}", $today_tz ) )->setTimezone( new DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' );
+	$wpdb->query(
+		$wpdb->prepare(
+			"INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, bot) VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s)",
+			$utc,
+			$day,
+			md5( "wp5w-today-{$day}-{$who}" ),
+			$type,
+			$id,
+			'/oggi-' . $type . '-' . $id . '/',
+			$referrer,
+			$channel,
+			$bot
+		)
+	);
+};
+
+// Primo giorno di raccolta (20/10): parziale, fuori dalle medie.
+$today_hit( '2026-10-20', '08:00:00', 'p', 'post', $post_a );
+// 21/10 (ora legale): la visita delle 11:30 è prima di mezzogiorno, quella delle 12:30 no (con +1 fisso verrebbe contata).
+$today_hit( '2026-10-21', '11:30:00', 'w1', 'post', $post_a );
+$today_hit( '2026-10-21', '12:30:00', 'w2', 'post', $post_a );
+// 25/10 (ora solare): 11:30 è prima di mezzogiorno (con +2 fisso verrebbe scartata), 12:30 no.
+$today_hit( '2026-10-25', '11:30:00', 'z1', 'post', $post_a );
+$today_hit( '2026-10-25', '12:30:00', 'z2', 'post', $post_a );
+// Ieri: due visitatori entro mezzogiorno, uno dopo.
+$today_hit( '2026-10-26', '09:00:00', 'y1', 'post', $post_a );
+$today_hit( '2026-10-26', '11:59:00', 'y2', 'post', $post_a );
+$today_hit( '2026-10-26', '15:00:00', 'y3', 'post', $post_b );
+// Oggi: t1 diretto con due pagine (la seconda con un canale diverso: conta la prima visita del giorno), t2 da Google,
+// t3 da ChatGPT (il canale di WP Statistics è «search», ma per il plugin è «ai»), t4 bot, t5 da Facebook.
+$today_hit( '2026-10-27', '09:00:00', 't1', 'post', $post_a );
+$today_hit( '2026-10-27', '09:05:00', 't1', 'post', $post_b, 'referral' );
+$today_hit( '2026-10-27', '10:00:00', 't2', 'post', $post_a, 'search', 'google.it' );
+$today_hit( '2026-10-27', '10:30:00', 't3', 'post', $post_a, 'search', 'chatgpt.com' );
+$today_hit( '2026-10-27', '11:00:00', 't4', 'home', 0, 'direct', '', 'googlebot' );
+$today_hit( '2026-10-27', '11:30:00', 't5', 'post', $post_b, 'social', 'facebook.com' );
+
+$today_data  = ( new TodayQuery() )->get( $today_now );
+$today_kpis  = $today_data['kpis'];
+$today_pages = array_column( $today_data['pages']['rows'], null, 'id' );
+$check( 'oggi: giorno e ora locale', '2026-10-27|12:00:00', $today_data['day'] . '|' . $today_data['at'] );
+$check( 'oggi: primo giorno di raccolta', '2026-10-20', $today_data['first_day'] ?? '' );
+$check( 'oggi: visitatori e visualizzazioni di oggi', '5|6', $today_kpis['visitors']['value'] . '|' . $today_kpis['views']['value'] );
+$check( 'oggi: ieri alla stessa ora (visitatori) e giornata intera', '2|3', $today_kpis['visitors']['compare']['yesterday']['at'] . '|' . $today_kpis['visitors']['compare']['yesterday']['full'] );
+$check( 'oggi: ieri, giorni e variazione dei visitatori', '1|150', $today_kpis['visitors']['compare']['yesterday']['days'] . '|' . $today_kpis['visitors']['compare']['yesterday']['change'] );
+// Media 7 giorni: 6 giorni interi (21..26/10, il 20/10 è parziale). Visitatori alla stessa ora (1+0+0+0+1+2)/6, giornata intera (2+0+0+0+2+3)/6.
+$check( 'oggi: media 7 giorni, giorni e valori alla stessa ora (ora legale e solare)', '6|0.7|1.2', $today_kpis['visitors']['compare']['avg7']['days'] . '|' . $today_kpis['visitors']['compare']['avg7']['at'] . '|' . $today_kpis['visitors']['compare']['avg7']['full'] );
+$check( 'oggi: media 7 giorni, variazione di visitatori e visualizzazioni', '650|800', $today_kpis['visitors']['compare']['avg7']['change'] . '|' . $today_kpis['views']['compare']['avg7']['change'] );
+$check( 'oggi: la media 30 giorni usa gli stessi 6 giorni', '6|0.7', $today_kpis['visitors']['compare']['avg30']['days'] . '|' . $today_kpis['visitors']['compare']['avg30']['at'] );
+$check( 'oggi: pagine in ordine di visualizzazioni', implode( ',', array( $post_a, $post_b, 0 ) ), implode( ',', array_column( $today_data['pages']['rows'], 'id' ) ) );
+$check( 'oggi: primo articolo (visualizzazioni, visitatori, diretto, ricerca, bot, altri)', '3|3|1|1|0|1', implode( '|', array( $today_pages[ $post_a ]['views'], $today_pages[ $post_a ]['visitors'], $today_pages[ $post_a ]['direct'], $today_pages[ $post_a ]['search'], $today_pages[ $post_a ]['bot'], $today_pages[ $post_a ]['other'] ) ) );
+$check( 'oggi: secondo articolo conta il canale della prima visita del giorno (t1 diretto, t5 social)', '2|2|1|0|0|1', implode( '|', array( $today_pages[ $post_b ]['views'], $today_pages[ $post_b ]['visitors'], $today_pages[ $post_b ]['direct'], $today_pages[ $post_b ]['search'], $today_pages[ $post_b ]['bot'], $today_pages[ $post_b ]['other'] ) ) );
+$check( 'oggi: la home è del bot e si chiama Home', '1|1|0|0|1|0|Home', implode( '|', array( $today_pages[0]['views'], $today_pages[0]['visitors'], $today_pages[0]['direct'], $today_pages[0]['search'], $today_pages[0]['bot'], $today_pages[0]['other'], $today_pages[0]['title'] ) ) );
+$today_totals = $today_data['pages']['totals'];
+$check( 'oggi: totali (visualizzazioni, visitatori distinti, diretto, ricerca, bot, altri)', '6|5|2|1|1|2', implode( '|', array( $today_totals['views'], $today_totals['visitors'], $today_totals['direct'], $today_totals['search'], $today_totals['bot'], $today_totals['other'] ) ) );
+$check( 'oggi: diretto + ricerca + bot + altri = visualizzazioni', $today_totals['views'], $today_totals['direct'] + $today_totals['search'] + $today_totals['bot'] + $today_totals['other'] );
+$check( 'oggi: le visualizzazioni di oggi sono le righe grezze di wp5w_hits', (string) $today_kpis['views']['value'], $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table} WHERE day = '2026-10-27'" ) );
+$today_json = (string) wp_json_encode( $today_data );
+$check( 'oggi: nessuna chiave visitor o ts nella risposta', 0, (int) str_contains( $today_json, '"visitor"' ) + (int) str_contains( $today_json, '"ts"' ) );
+
+// Senza giorni interi precedenti (solo visite di oggi): nessuna media e nessuna variazione.
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$today_hit( '2026-10-27', '09:00:00', 't1', 'post', $post_a );
+$today_alone = ( new TodayQuery() )->get( $today_now )['kpis']['visitors'];
+$check( 'oggi: senza storico nessun giorno, media e variazione nulli', '0|0|0||', $today_alone['compare']['yesterday']['days'] . '|' . $today_alone['compare']['avg7']['days'] . '|' . $today_alone['compare']['avg30']['days'] . '|' . ( $today_alone['compare']['avg7']['at'] ?? '' ) . '|' . ( $today_alone['compare']['avg7']['change'] ?? '' ) );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$check( 'oggi: senza visite nessuna pagina e nessun errore', '0|0', ( new TodayQuery() )->get( $today_now )['kpis']['views']['value'] . '|' . count( ( new TodayQuery() )->get( $today_now )['pages']['rows'] ) );
+
+// Rotta REST: 401 o 403 senza utente, 200 per un amministratore.
+$today_route = '/wp5w/v1/admin/today';
+$check( 'oggi senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $today_route )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$today_response = $rest_call( 'GET', $today_route );
+$admin_user( 0 );
+$check( 'oggi con amministratore: 200', 200, $today_response->get_status() );
+$check( 'oggi: la risposta ha kpis e pagine', '1|1', (int) isset( $today_response->get_data()['kpis']['visitors'] ) . '|' . (int) isset( $today_response->get_data()['pages']['rows'] ) );
+
+// Fuso a scostamento fisso («+02:00»): getTransitions() restituisce false e la query non deve fermarsi. Alle 12:00 locali
+// (10:00 UTC) la visita delle 10:30 locali (08:30 UTC) conta alla stessa ora, quella delle 12:30 locali (10:30 UTC) no.
+update_option( 'timezone_string', '' );
+update_option( 'gmt_offset', 2 );
+foreach ( array( '2026-10-27 08:30:00' => 'f1', '2026-10-27 10:30:00' => 'f2' ) as $wp5w_utc => $wp5w_who ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri) VALUES (%s, '2026-10-27', UNHEX(%s), 'home', 0, '/')", $wp5w_utc, md5( $wp5w_who ) ) );
+}
+$today_fixed = ( new TodayQuery() )->get( ( new DateTimeImmutable( '2026-10-27 10:00:00', new DateTimeZone( 'UTC' ) ) )->getTimestamp() );
+$check( 'oggi con fuso a scostamento fisso: ora locale, visitatori alla stessa ora e giornata intera', '12:00:00|1|2', $today_fixed['at'] . '|' . $today_fixed['kpis']['visitors']['value'] . '|' . $today_fixed['kpis']['visitors']['full'] );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+update_option( 'timezone_string', (string) $today_tz_backup[0] );
+update_option( 'gmt_offset', $today_tz_backup[1] );
+
+// ---------------------------------------------------------------------------
+// 18. Pulizia finale.
 // ---------------------------------------------------------------------------
 // Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
 remove_filter( 'pre_http_request', $github_mock, 10 );

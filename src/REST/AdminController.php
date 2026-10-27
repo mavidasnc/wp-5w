@@ -19,6 +19,7 @@ use Mavida\FiveW\Query\OverviewQuery;
 use Mavida\FiveW\Query\AudienceQuery;
 use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
+use Mavida\FiveW\Query\TodayQuery;
 use Mavida\FiveW\Query\TrendQuery;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Sources\AccessLogSource;
@@ -44,6 +45,7 @@ final class AdminController extends RestController {
 	 * @param CompareQuery    $compare    Confronto tra la raccolta propria e WP Statistics.
 	 * @param OnlineQuery     $online     «Online adesso».
 	 * @param OperationsQuery $operations Pagine non trovate e ricerche interne.
+	 * @param TodayQuery      $today      Scheda «Oggi».
 	 */
 	public function __construct(
 		private readonly Importer $importer,
@@ -54,7 +56,8 @@ final class AdminController extends RestController {
 		private readonly TrendQuery $trend,
 		private readonly CompareQuery $compare,
 		private readonly OnlineQuery $online,
-		private readonly OperationsQuery $operations
+		private readonly OperationsQuery $operations,
+		private readonly TodayQuery $today
 	) {}
 
 	/**
@@ -187,6 +190,17 @@ final class AdminController extends RestController {
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
 				'callback'            => fn() => $this->respond( $this->online->get() ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+			)
+		);
+
+		// Scheda «Oggi»: nessun parametro, il giorno è quello in corso nel fuso del sito.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/today',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn() => $this->respond( $this->today->get() ),
 				'permission_callback' => array( $this, 'check_admin_permission' ),
 			)
 		);

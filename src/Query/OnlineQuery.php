@@ -92,8 +92,24 @@ final class OnlineQuery {
 	private function content( array $row ): array {
 		$type = (string) $row['object_type'];
 		$id   = (int) $row['object_id'];
-		$uri  = (string) $row['uri'];
 
+		return array(
+			'type'     => $type,
+			'id'       => $id,
+			'visitors' => (int) $row['visitors'],
+		) + self::describe( $type, $id, (string) $row['uri'] );
+	}
+
+	/**
+	 * Titolo e link di un contenuto: da WordPress se l'ID è quello di un post, altrimenti dall'URI.
+	 * Usata anche dalla scheda Oggi (TodayQuery).
+	 *
+	 * @param string $type Tipo di contenuto (`wp5w_hits.object_type`).
+	 * @param int    $id   ID del contenuto.
+	 * @param string $uri  URI della visita.
+	 * @return array{title:string,url:string}
+	 */
+	public static function describe( string $type, int $id, string $uri ): array {
 		if ( ObjectType::is_post( $type, $id ) ) {
 			$title = html_entity_decode( get_the_title( $id ), ENT_QUOTES, 'UTF-8' );
 			$link  = get_permalink( $id );
@@ -109,11 +125,8 @@ final class OnlineQuery {
 		}
 
 		return array(
-			'type'     => $type,
-			'id'       => $id,
-			'title'    => '' !== $title ? $title : $uri,
-			'url'      => $link ? (string) $link : home_url( $uri ),
-			'visitors' => (int) $row['visitors'],
+			'title' => '' !== $title ? $title : $uri,
+			'url'   => $link ? (string) $link : home_url( $uri ),
 		);
 	}
 }

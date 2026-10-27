@@ -14,6 +14,19 @@ const TABLES = {
 	gsc_daily: __( 'Search Console per pagina e query', 'wp-5w' ),
 };
 
+// Ordine delle sorgenti nel box «Sorgenti»: gli strumenti di traffico come nel Confronto, poi Search Console di Rank Math.
+const SOURCE_ORDER = [ 'own', 'wp_statistics', 'ia', 'log', 'rank_math' ];
+
+/**
+ * Posizione di una sorgente nel box «Sorgenti» (le sconosciute vanno in fondo).
+ *
+ * @param {string} id Identificativo della sorgente.
+ */
+const sourceRank = ( id ) => {
+	const index = SOURCE_ORDER.indexOf( id );
+	return index === -1 ? SOURCE_ORDER.length : index;
+};
+
 /**
  * Data e ora da timestamp UNIX.
  *
@@ -66,7 +79,7 @@ export default function StatusPage() {
 			<Card id="status-sources" title={ __( 'Sorgenti', 'wp-5w' ) }>
 				<table className="widefat striped">
 					<tbody>
-						{ status.sources.map( ( source ) => (
+						{ [ ...status.sources ].sort( ( a, b ) => sourceRank( a.id ) - sourceRank( b.id ) ).map( ( source ) => (
 							<tr key={ source.id }>
 								<td>
 									<strong>{ source.label }</strong>
