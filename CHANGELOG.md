@@ -2,6 +2,19 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.15.0] — 2026-10-27
+
+Nuova scheda «Oggi» e nuovo ordine degli strumenti nel Confronto. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.
+
+### Added
+- **Scheda «Oggi»** (`?tab=today`, `TodayPage`): visitatori e visualizzazioni di oggi con il confronto con ieri e con le medie degli ultimi 7 e 30 giorni (`TodayKpi`), alla stessa ora del giorno e con, in piccolo, il totale della giornata intera; sotto, le pagine viste oggi con visualizzazioni, visitatori e le colonne Diretto, Motori di ricerca, Bot e Altri canali (totale = somma delle quattro). Ogni visualizzazione prende il canale con cui il visitatore è arrivato oggi (la prima visita del giorno), con la stessa regola della dimensione `channel` di `OwnSource` (`bot` prima di `ai`, e `ai` prima del canale di WP Statistics).
+- **`Query\TodayQuery`** (`GET /admin/today`): legge solo `wp5w_hits`, come `OnlineQuery`, quindi non è una nuova eccezione alla regola dell'origine. L'ora locale si ricava da `ts` con le transizioni del fuso (`LocalTime::shift_sql()`), compresi i fusi a scostamento fisso (UTC, «+02:00»), per i quali `getTransitions()` restituisce `false`.
+- **`Support\TodayWindow`** (classe pura, coperta da PHPUnit): i giorni delle medie escludono sempre il primo giorno di raccolta, che è parziale; con meno storico del richiesto la media è su meno giorni e la scheda lo dice.
+- `OnlineQuery::describe()`: titolo e link di un contenuto, estratti da `content()` e usati anche da `TodayQuery`. `verify.php` sezione 17 (la pulizia finale diventa la 18).
+
+### Changed
+- **Confronto della scheda Stato:** gli strumenti compaiono nell'ordine raccolta propria, WP Statistics, Independent Analytics e log in riquadri, grafico, tabella giornaliera, ingressi sulla home, canali e contenuti. La differenza resta sempre rispetto a WP Statistics e `CompareQuery` non cambia. `TrendChart` mostra le serie nell'ordine di `keys` quando viene passato (la Panoramica passa `TOOL_KEYS` e non cambia).
+
 ## [0.13.0] — 2026-10-22
 
 Independent Analytics come terza origine del Confronto e nuova scheda «Aggiornamenti». Nessuna tabella nuova e nessuna migrazione dello schema (`origin` è già `varchar(8)` nella chiave primaria); nessun evento cron nuovo.

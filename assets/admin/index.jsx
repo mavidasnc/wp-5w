@@ -2,6 +2,7 @@ import { createRoot } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { TabPanel } from '@wordpress/components';
 import OverviewPage from './pages/OverviewPage';
+import TodayPage from './pages/TodayPage';
 import PostsPage from './pages/PostsPage';
 import AudiencePage from './pages/AudiencePage';
 import OptionsPage from './pages/OptionsPage';
@@ -11,6 +12,7 @@ import './styles/admin.scss';
 
 const TABS = [
 	{ name: 'overview', title: __( 'Panoramica', 'wp-5w' ) },
+	{ name: 'today', title: __( 'Oggi', 'wp-5w' ) },
 	{ name: 'posts', title: __( 'Articoli', 'wp-5w' ) },
 	{ name: 'audience', title: __( 'Visitatori', 'wp-5w' ) },
 	{ name: 'options', title: __( 'Opzioni', 'wp-5w' ) },
@@ -37,6 +39,7 @@ function App() {
 			<TabPanel tabs={ TABS } initialTabName={ initial }>
 				{ ( tab ) => {
 					const pages = {
+						today: TodayPage,
 						posts: PostsPage,
 						audience: AudiencePage,
 						options: OptionsPage,

@@ -94,6 +94,37 @@
 	}
 }
 
+// Indicatori della scheda Oggi: valore di oggi e righe di confronto (ieri, medie).
+.wp5w-today-kpi {
+	&__rows {
+		margin: 8px 0 0;
+		padding: 0;
+		list-style: none;
+
+		li {
+			display: grid;
+			grid-template-columns: 1fr auto auto;
+			column-gap: 8px;
+			align-items: baseline;
+			padding: 6px 0;
+			border-top: 1px solid #f0f0f1;
+		}
+	}
+
+	&__name {
+		color: #646970;
+	}
+
+	&__value {
+		font-weight: 600;
+	}
+
+	&__full {
+		grid-column: 1 / -1;
+		margin: 0;
+	}
+}
+
 .wp5w-grid {
 	display: grid;
 	grid-template-columns: 3fr 1fr;

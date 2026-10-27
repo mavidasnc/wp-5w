@@ -4,7 +4,10 @@ import { Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Card from './Card';
 import { LABELS as CHANNEL_LABELS } from './ChannelList';
-import TrendChart, { TOOL_KEYS } from './TrendChart';
+import TrendChart from './TrendChart';
+
+// Serie del grafico del Confronto, nell'ordine della legenda: raccolta propria, WP Statistics, Independent Analytics e log (con visitatori prima delle visualizzazioni).
+const COMPARE_KEYS = [ 'own', 'wps', 'ia', 'log' ].flatMap( ( id ) => [ `visitors_${ id }`, `views_${ id }` ] );
 
 // Etichette dei motivi per cui un giorno è escluso dal confronto.
 const EXCLUDED = {
@@ -122,10 +125,11 @@ export default function Compare() {
 	// Independent Analytics: colonne in più solo se il plugin è attivo e ha giorni confrontabili.
 	const ia = data.ia_available;
 
-	// Gli strumenti da mostrare, nello stesso ordine in riquadri, grafico e tabella (la differenza è sempre rispetto a WP Statistics).
+	// Gli strumenti da mostrare, nello stesso ordine in riquadri, grafico e tabella: raccolta propria, WP Statistics, Independent Analytics e log
+	// (la differenza è sempre rispetto a WP Statistics).
 	const tools = [
-		{ id: 'wps', label: __( 'WP Statistics', 'wp-5w' ), ...totals.wps },
 		{ id: 'own', label: __( 'Raccolta propria', 'wp-5w' ), ...totals.own, diff_visitors: totals.diff.visitors, diff_views: totals.diff.views },
+		{ id: 'wps', label: __( 'WP Statistics', 'wp-5w' ), ...totals.wps },
 		...( ia
 			? [ { id: 'ia', label: __( 'Independent Analytics', 'wp-5w' ), ...totals.ia, diff_visitors: totals.diff_ia.visitors, diff_views: totals.diff_ia.views } ]
 			: [] ),
@@ -137,10 +141,10 @@ export default function Compare() {
 	// Un punto per giorno confrontato, con le chiavi delle serie del grafico della Panoramica.
 	const chartSeries = data.days.map( ( day ) => ( {
 		day: day.day,
-		visitors_wps: day.wps.visitors,
-		views_wps: day.wps.views,
 		visitors_own: day.own.visitors,
 		views_own: day.own.views,
+		visitors_wps: day.wps.visitors,
+		views_wps: day.wps.views,
 		...( ia ? { visitors_ia: day.ia.visitors, views_ia: day.ia.views } : {} ),
 		...( data.log_available ? { visitors_log: day.log?.visitors ?? null, views_log: day.log?.views ?? null } : {} ),
 	} ) );
@@ -149,7 +153,7 @@ export default function Compare() {
 		<>
 			<Card
 				id="status-compare"
-				title={ ia ? __( 'Confronto tra WP Statistics, raccolta propria e Independent Analytics', 'wp-5w' ) : __( 'Confronto con WP Statistics', 'wp-5w' ) }
+				title={ ia ? __( 'Confronto tra raccolta propria, WP Statistics e Independent Analytics', 'wp-5w' ) : __( 'Confronto con WP Statistics', 'wp-5w' ) }
 			>
 				<Coverage coverage={ coverage } />
 				{ hasDays && (
@@ -181,7 +185,7 @@ export default function Compare() {
 								formatNumber( data.threshold, '%' )
 							) }
 						</p>
-						<TrendChart series={ chartSeries } keys={ TOOL_KEYS } />
+						<TrendChart series={ chartSeries } keys={ COMPARE_KEYS } />
 						<p className="wp5w-note">
 							{ __( 'WP Statistics e Independent Analytics contano come visitatori anche una flotta di browser automatici con user agent da telefono: eseguono JavaScript ma non caricano immagini né fogli di stile. Fino alla 0.13.0 il tracker proprio ne perdeva molti, con ogni probabilità perché inviava con sendBeacon, che quei browser sembrano bloccare; dalla 0.14.0 invia con fetch come gli altri due (se dopo un giorno intero la differenza resta, questa spiegazione va rivista), quindi la differenza dei giorni precedenti è più grande. Independent Analytics non traccia gli utenti collegati, non rispetta Do Not Track e conta una nuova sessione dopo 30 minuti di pausa: gli ingressi sono di più e le visite di meno. Il giorno è quello della visita nel fuso del sito.', 'wp-5w' ) }
 						</p>
@@ -268,14 +272,14 @@ export default function Compare() {
 							</thead>
 							<tbody>
 								<tr>
-									<td>{ __( 'WP Statistics', 'wp-5w' ) }</td>
-									<td className="num">{ formatNumber( home.wps ) }</td>
-									<td className="num">{ formatNumber( home.share_wps, '%' ) }</td>
-								</tr>
-								<tr>
 									<td>{ __( 'Propri', 'wp-5w' ) }</td>
 									<td className="num">{ formatNumber( home.own ) }</td>
 									<td className="num">{ formatNumber( home.share_own, '%' ) }</td>
+								</tr>
+								<tr>
+									<td>{ __( 'WP Statistics', 'wp-5w' ) }</td>
+									<td className="num">{ formatNumber( home.wps ) }</td>
+									<td className="num">{ formatNumber( home.share_wps, '%' ) }</td>
 								</tr>
 								<tr>
 									<td>{ __( 'Differenza', 'wp-5w' ) }</td>
@@ -303,8 +307,8 @@ export default function Compare() {
 							<thead>
 								<tr>
 									<th>{ __( 'Giorno', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
 									<th className="num">{ __( 'Propri', 'wp-5w' ) }</th>
+									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
 									{ ia && <th className="num">{ __( 'Independent Analytics', 'wp-5w' ) }</th> }
 								</tr>
 							</thead>
@@ -312,8 +316,8 @@ export default function Compare() {
 								{ data.days.map( ( day ) => (
 									<tr key={ day.day }>
 										<td>{ formatDay( day.day ) }</td>
-										<td className="num">{ formatNumber( day.home_direct.wps ) }</td>
 										<td className="num">{ formatNumber( day.home_direct.own ) }</td>
+										<td className="num">{ formatNumber( day.home_direct.wps ) }</td>
 										{ ia && <td className="num">{ formatNumber( day.home_direct.ia ) }</td> }
 									</tr>
 								) ) }
@@ -325,8 +329,8 @@ export default function Compare() {
 							<thead>
 								<tr>
 									<th>{ __( 'Canale', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
 									<th className="num">{ __( 'Propri', 'wp-5w' ) }</th>
+									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
 									<th className="num">{ __( 'Differenza', 'wp-5w' ) }</th>
 									{ ia && <th className="num">{ __( 'Independent Analytics', 'wp-5w' ) }</th> }
 									{ ia && <th className="num">{ __( 'Differenza', 'wp-5w' ) }</th> }
@@ -338,8 +342,8 @@ export default function Compare() {
 								{ channels.map( ( row ) => (
 									<tr key={ row.channel }>
 										<td>{ CHANNEL_LABELS[ row.channel ] ?? row.channel }</td>
-										<td className="num">{ formatNumber( row.wps ) }</td>
 										<td className="num">{ formatNumber( row.own ) }</td>
+										<td className="num">{ formatNumber( row.wps ) }</td>
 										<td className="num">{ formatDiff( row.diff ) }</td>
 										{ ia && <td className="num">{ formatNumber( row.ia ) }</td> }
 										{ ia && <td className="num">{ formatDiff( row.diff_ia ) }</td> }
@@ -410,8 +414,8 @@ export default function Compare() {
 							<thead>
 								<tr>
 									<th>{ __( 'Contenuto', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
 									<th className="num">{ __( 'Propri', 'wp-5w' ) }</th>
+									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
 									<th className="num">{ __( 'Differenza assoluta', 'wp-5w' ) }</th>
 									<th className="num">{ __( 'Differenza %', 'wp-5w' ) }</th>
 									{ ia && <th className="num">{ __( 'Independent Analytics', 'wp-5w' ) }</th> }
@@ -424,8 +428,8 @@ export default function Compare() {
 										<td>
 											<a href={ row.url } target="_blank" rel="noreferrer">{ row.title }</a>
 										</td>
-										<td className="num">{ formatNumber( row.wps_views ) }</td>
 										<td className="num">{ formatNumber( row.own_views ) }</td>
+										<td className="num">{ formatNumber( row.wps_views ) }</td>
 										<td className="num">{ formatNumber( row.diff_abs ) }</td>
 										<td className="num">{ formatDiff( row.diff ) }</td>
 										{ ia && <td className="num">{ formatNumber( row.ia_views ) }</td> }

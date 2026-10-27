@@ -103,7 +103,10 @@ export default function TrendChart( { series, keys = null } ) {
 	const data = {
 		labels: points.map( ( point ) => label( point.day ) ),
 		// Una serie senza nessun valore (strumento non installato) non compare nemmeno nella legenda.
-		datasets: SERIES.filter( ( serie ) => ( ! keys || keys.includes( serie.key ) ) && points.some( ( point ) => point[ serie.key ] != null ) ).map( ( serie ) => ( {
+		// Con `keys` l'ordine della legenda è quello di `keys`, altrimenti quello di SERIES.
+		datasets: ( keys ? keys.map( ( key ) => SERIES.find( ( serie ) => serie.key === key ) ).filter( Boolean ) : SERIES )
+			.filter( ( serie ) => points.some( ( point ) => point[ serie.key ] != null ) )
+			.map( ( serie ) => ( {
 			label: serie.label,
 			data: points.map( ( point ) => point[ serie.key ] ),
 			borderColor: serie.color,
