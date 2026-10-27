@@ -19,6 +19,32 @@ namespace Mavida\FiveW\Support;
 final class LocalTime {
 
 	/**
+	 * Transizioni del fuso nell'intervallo, nel formato che si aspetta shift_sql().
+	 *
+	 * Un fuso a scostamento fisso («+02:00») non ha transizioni e `DateTimeZone::getTransitions()` restituisce `false`:
+	 * in quel caso basta un solo scostamento, quello valido alla fine dell'intervallo.
+	 *
+	 * @param \DateTimeZone $zone Fuso del sito.
+	 * @param int           $from Inizio dell'intervallo (timestamp UNIX).
+	 * @param int           $to   Fine dell'intervallo (timestamp UNIX).
+	 * @return array<int,array{ts:int,offset:int}|array<mixed>>
+	 */
+	public static function transitions( \DateTimeZone $zone, int $from, int $to ): array {
+		$transitions = $zone->getTransitions( $from, $to );
+
+		if ( is_array( $transitions ) && array() !== $transitions ) {
+			return $transitions;
+		}
+
+		return array(
+			array(
+				'ts'     => $from,
+				'offset' => $zone->getOffset( new \DateTimeImmutable( '@' . $to ) ),
+			),
+		);
+	}
+
+	/**
 	 * Espressione SQL con la colonna UTC spostata all'ora del sito.
 	 *
 	 * Le transizioni sono quelle di `DateTimeZone::getTransitions()`: la prima ha il `ts` dell'inizio dell'intervallo

@@ -1,41 +1,37 @@
-import { useEffect, useState } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
 import { Notice, Spinner } from '@wordpress/components';
-import { api, formatDay, formatNumber } from '../api';
+import { formatDay, formatNumber } from '../api';
 import Card from '../components/Card';
+import HourlyChart from '../components/HourlyChart';
 import ShowMore from '../components/ShowMore';
 import TodayKpi from '../components/TodayKpi';
+import usePolledApi from '../hooks/usePolledApi';
+
+// Ogni quanto si aggiorna, in millisecondi.
+const REFRESH_MS = 60000;
 
 /**
  * Scheda «Oggi»: visitatori e visualizzazioni del giorno in corso, confrontati alla stessa ora con ieri e con le medie di 7 e 30 giorni,
- * e pagine viste oggi con il canale con cui sono arrivati i visitatori. Legge solo la raccolta propria.
+ * andamento orario di oggi contro ieri e pagine viste oggi con il canale con cui sono arrivati i visitatori. Legge solo la raccolta propria
+ * e si aggiorna da sola ogni minuto mentre la scheda del browser è visibile.
  */
 export default function TodayPage() {
-	const [ data, setData ] = useState( null );
-	const [ error, setError ] = useState( null );
+	const { data, error } = usePolledApi( '/admin/today', REFRESH_MS );
 
-	// Carica i dati una volta al montaggio della scheda.
-	useEffect( () => {
-		api( '/admin/today' )
-			.then( setData )
-			.catch( ( e ) => setError( e.message ) );
-	}, [] );
-
-	if ( error ) {
-		return <Notice status="error" isDismissible={ false }>{ error }</Notice>;
-	}
+	// Senza dati: l'errore del primo caricamento oppure lo spinner. Un errore successivo non toglie gli ultimi dati.
 	if ( ! data ) {
-		return <Spinner />;
+		return error ? <Notice status="error" isDismissible={ false }>{ error }</Notice> : <Spinner />;
 	}
 
 	const { kpis, pages } = data;
 
 	return (
 		<div className="wp5w-today">
+			{ error && <Notice status="error" isDismissible={ false }>{ error }</Notice> }
 			<p className="wp5w-note wp5w-note--top">
 				{ sprintf(
 					/* translators: 1: giorno (gg/mm/aaaa), 2: ora dell'aggiornamento. */
-					__( 'Oggi, %1$s, fino alle %2$s, dalla raccolta propria (bot e browser automatici compresi, quindi i numeri possono differire da WP Statistics). I confronti sono alla stessa ora: ieri e i giorni delle medie sono contati fino alle %2$s; sotto ogni valore, in piccolo, il totale della giornata intera.', 'wp-5w' ),
+					__( 'Oggi, %1$s, fino alle %2$s, dalla raccolta propria (bot e browser automatici compresi, quindi i numeri possono differire da WP Statistics). I confronti sono alla stessa ora: ieri e i giorni delle medie sono contati fino alle %2$s; sotto ogni valore, in piccolo, il totale della giornata intera. La scheda si aggiorna da sola ogni minuto.', 'wp-5w' ),
 					formatDay( data.day ),
 					data.at.slice( 0, 5 )
 				) }
@@ -46,6 +42,13 @@ export default function TodayPage() {
 				<TodayKpi label={ __( 'Visitatori', 'wp-5w' ) } data={ kpis.visitors } />
 				<TodayKpi label={ __( 'Visualizzazioni', 'wp-5w' ) } data={ kpis.views } />
 			</div>
+
+			<Card id="today-hourly" title={ __( 'Andamento orario: oggi e ieri', 'wp-5w' ) }>
+				<HourlyChart hourly={ data.hourly } />
+				<p className="wp5w-note">
+					{ __( 'Valori cumulati: a ogni ora, i visitatori (contati nell\'ora della loro prima visita) o le visualizzazioni dall\'inizio della giornata. Clicca sulla legenda per mostrare o nascondere le serie (le visualizzazioni sono tratteggiate e nascoste all\'inizio). Ora locale del sito.', 'wp-5w' ) }
+				</p>
+			</Card>
 
 			<Card id="today-pages" title={ __( 'Pagine viste oggi', 'wp-5w' ) }>
 				{ pages.rows.length === 0 ? (

@@ -47,6 +47,35 @@ final class LocalTimeTest extends TestCase {
 		$this->assertStringContainsString( 'ELSE 3600 END', $sql );
 	}
 
+	public function test_a_fixed_offset_zone_gives_a_single_offset_instead_of_false(): void {
+		// Con «+02:00» getTransitions() restituisce false: senza il controllo shift_sql() andrebbe in TypeError.
+		$from        = strtotime( '2026-10-01 00:00:00 UTC' );
+		$transitions = LocalTime::transitions( new \DateTimeZone( '+02:00' ), $from, strtotime( '2026-10-27 00:00:00 UTC' ) );
+
+		$this->assertSame(
+			array(
+				array(
+					'ts'     => $from,
+					'offset' => 7200,
+				),
+			),
+			$transitions
+		);
+		$this->assertSame( 'ts + INTERVAL 7200 SECOND', LocalTime::shift_sql( 'ts', $transitions ) );
+	}
+
+	public function test_utc_gives_a_zero_offset(): void {
+		$transitions = LocalTime::transitions( new \DateTimeZone( 'UTC' ), strtotime( '2026-10-01 00:00:00 UTC' ), strtotime( '2026-10-27 00:00:00 UTC' ) );
+
+		$this->assertSame( 'ts + INTERVAL 0 SECOND', LocalTime::shift_sql( 'ts', $transitions ) );
+	}
+
+	public function test_a_zone_with_daylight_saving_keeps_its_real_transitions(): void {
+		$transitions = LocalTime::transitions( new \DateTimeZone( 'Europe/Rome' ), strtotime( '2026-01-01 00:00:00 UTC' ), strtotime( '2026-12-31 23:59:59 UTC' ) );
+
+		$this->assertSame( self::rome(), $transitions );
+	}
+
 	public function test_later_transitions_come_first_so_the_most_recent_one_wins(): void {
 		$sql = LocalTime::shift_sql( 'v.viewed_at', self::rome() );
 
