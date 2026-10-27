@@ -63,19 +63,7 @@ final class TodayQuery {
 
 		// Passo 2: una sola query per giorno. L'ora locale si ricava da `ts` (UTC) con le transizioni del fuso del sito,
 		// perché la finestra mescola giorni con ora legale e solare (niente scostamento fisso).
-		$zone        = wp_timezone();
-		$start       = $now - 32 * DAY_IN_SECONDS;
-		$transitions = $zone->getTransitions( $start, $now );
-		// Un fuso a scostamento fisso (UTC o «+02:00») non ha transizioni e getTransitions() restituisce false: basta lo scostamento di oggi.
-		if ( ! is_array( $transitions ) ) {
-			$transitions = array(
-				array(
-					'ts'     => $start,
-					'offset' => $zone->getOffset( new \DateTimeImmutable( '@' . $now ) ),
-				),
-			);
-		}
-		$local = LocalTime::shift_sql( 'ts', $transitions );
+		$local = LocalTime::shift_sql( 'ts', LocalTime::transitions( wp_timezone(), $now - 32 * DAY_IN_SECONDS, $now ) );
 		$rows  = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT day, COUNT(DISTINCT visitor) AS visitors, COUNT(*) AS views,

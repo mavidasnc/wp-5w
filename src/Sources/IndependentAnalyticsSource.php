@@ -92,7 +92,7 @@ final class IndependentAnalyticsSource extends Source {
 		$types     = $this->table( self::PREFIX . 'referrer_types' );
 
 		// Passo 1: giorno del sito di ogni orario UTC (ora legale compresa, senza tabelle dei fusi in MariaDB).
-		$transitions = wp_timezone()->getTransitions( (int) strtotime( '2020-01-01 00:00:00 UTC' ), time() + YEAR_IN_SECONDS );
+		$transitions = LocalTime::transitions( wp_timezone(), (int) strtotime( '2020-01-01 00:00:00 UTC' ), time() + YEAR_IN_SECONDS );
 		$view_day    = 'DATE( ' . LocalTime::shift_sql( 'v.viewed_at', $transitions ) . ' )';
 		$session_day = 'DATE( ' . LocalTime::shift_sql( 's.created_at', $transitions ) . ' )';
 

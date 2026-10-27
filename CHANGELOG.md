@@ -10,6 +10,9 @@ Scheda «Oggi» con aggiornamento automatico e andamento orario. Nessuna tabella
 - **Aggiornamento automatico della scheda «Oggi»:** si ricarica da sola ogni minuto, solo mentre la scheda del browser è visibile (al ritorno si ricarica subito); un errore non cancella gli ultimi dati. La logica è nell'hook `hooks/usePolledApi.js`, la stessa di «Online adesso» (che per ora ha la sua copia).
 - **Andamento orario di oggi e ieri** (`HourlyChart`, chiave `hourly` di `GET /admin/today`): a ogni ora il totale cumulato dall'inizio della giornata, per visitatori (contati nell'ora della prima visita del giorno) e visualizzazioni; oggi si ferma all'ora in corso. Le visualizzazioni sono tratteggiate e nascoste all'inizio, come nel grafico della Panoramica. `TodayWindow::cumulate()` è pura e coperta da PHPUnit; `verify.php` sezione 17 controlla le serie e che l'ultimo valore sia il KPI.
 
+### Fixed
+- **Siti con fuso a scostamento fisso** (UTC o «+02:00»): `DateTimeZone::getTransitions()` restituisce `false` e `LocalTime::shift_sql()` andava in `TypeError`. Il nuovo `LocalTime::transitions()` ricade su un solo scostamento ed è usato da `TodayQuery` e da `IndependentAnalyticsSource` (che aveva la stessa chiamata senza controllo, quindi l'import di Independent Analytics si fermava su questi siti). Coperto da PHPUnit.
+
 ## [0.15.0] — 2026-10-27
 
 Nuova scheda «Oggi» e nuovo ordine degli strumenti nel Confronto. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.
@@ -22,6 +25,21 @@ Nuova scheda «Oggi» e nuovo ordine degli strumenti nel Confronto. Nessuna tabe
 
 ### Changed
 - **Confronto della scheda Stato:** gli strumenti compaiono nell'ordine raccolta propria, WP Statistics, Independent Analytics e log in riquadri, grafico, tabella giornaliera, ingressi sulla home, canali e contenuti; lo stesso ordine vale per il box «Sorgenti» (poi Rank Math), ordinato lato client senza cambiare `GET /admin/status`. La differenza resta sempre rispetto a WP Statistics e `CompareQuery` non cambia. `TrendChart` mostra le serie nell'ordine di `keys` quando viene passato (la Panoramica passa `TOOL_KEYS` e non cambia).
+
+## [0.14.0] — 2026-10-26
+
+Tracker con `fetch`, canale «bot», grafico dei tre strumenti nella Panoramica e log di accesso del server come quarto termine del Confronto. Nessuna tabella nuova, nessuna migrazione dello schema (le nuove origini `log` e `logbot` stanno nella colonna `origin`, già `varchar(8)`) e nessun evento cron nuovo: i log si leggono dentro l'ETL delle 4:00.
+
+### Added
+- **Log di accesso del server** (`AccessLogSource`, origini `log` e `logbot`): legge gli archivi `.tar.gz[.N]` che il server ruota ogni notte (opzione `log_glob`, vuota = spenta; `log_excluded_paths` per i prefissi da ignorare, per esempio un'altra applicazione sullo stesso dominio) e scrive `site_daily` e `dim_daily` (dimensioni `channel` e, solo per `logbot`, `bot`). Due origini perché i bot sono centinaia di visitatori al giorno contro un centinaio di persone: `log` conta i client che hanno dato una prova di essere browser (POST a un tracker o risorse del sito scaricate) senza gli amministratori; `logbot` le firme dei bot e i client senza nessuna prova (`senza-js`). Non si salvano IP né user agent (il visitatore del giorno è un hash in memoria) e si scrivono solo i giorni interamente coperti dai log (`Support\LogCoverage`). Classi pure nuove: `Support\TarGz`, `Support\AccessLog` e `Support\LogCoverage`, più `Channels::ai()` (la regola di `ai_sql()` in PHP).
+- **Confronto con i log:** colonna «Log del server (browser)» nei riquadri, nel grafico, nella tabella giornaliera e nei canali, e un elenco dei bot visti dai log. Compare solo con i log attivi e con dati; `Comparison::plan()` non cambia, quindi un buco nei log non toglie giorni al confronto tra gli altri strumenti.
+- **Opzioni:** box «Log di accesso del server» (percorso dei file e percorsi da ignorare). **WP-CLI:** `wp 5w log-import` rilegge tutti gli archivi, con uno stato suo (`wp5w_log_state`) che non tocca quello dell'ETL generale.
+- **Panoramica:** il grafico mostra una linea per ogni strumento di statistiche (WP Statistics, raccolta propria, Independent Analytics), con le visualizzazioni tratteggiate e nascoste all'inizio (`OverviewQuery::tools()`, chiave `tools`). Un giorno in cui uno strumento non c'era ancora resta senza punto, non a zero (`Series::fill()` accetta i campi `$nullable`).
+- **Canale «bot»:** le visite con l'etichetta di `BotFilter::label()` vanno nel canale `bot`, con la precedenza su `ai`, in `entry_daily` e nella dimensione `channel` di `dim_daily` (non in `referrer_daily`, che mescolerebbe bot e persone). Lo storico si ricalcola con `wp 5w etl --from=<primo giorno di wp5w_hits>`.
+
+### Changed
+- **Tracker:** invia con `fetch` e `keepalive` e usa `sendBeacon` solo se manca `fetch`. I browser automatici bloccano i beacon: dal log del 25/10/2026 risultavano circa 135 IP su 163 contati da WP Statistics ma mai dalla raccolta propria. Resta sotto il limite di 1.536 byte. Dopo l'aggiornamento serve `litespeed-purge all`, perché lo script è nelle pagine in cache.
+- Il Confronto ha una spiegazione in più sui browser automatici e sulle differenze di raccolta tra gli strumenti.
 
 ## [0.13.0] — 2026-10-22
 
