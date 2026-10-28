@@ -30,6 +30,8 @@ defined( 'ABSPATH' ) || exit;
  * Due origini in `site_daily` e `dim_daily`:
  * - `log`: i client che hanno dato prova di essere browser (POST a un tracker o risorse del sito scaricate), senza amministratori;
  * - `logbot`: i bot dichiarati nello user agent (BotFilter::label()) e i client senza nessuna prova (etichetta `senza-js`).
+ * Per `log` scrive anche `object_daily` (visualizzazioni per contenuto) e `entry_daily` (ingressi per contenuto e canale), solo per
+ * la home e i contenuti singoli: tipo e ID si ricavano dal percorso (object_for()), il resto si salta.
  *
  * `Origin::where()` non le seleziona mai: le legge solo CompareQuery. IP e user agent non escono dalla memoria: i visitatori
  * si contano con un hash calcolato al volo (IP e user agent, per giorno del sito) e non si salva nulla che li identifichi.
@@ -169,6 +171,7 @@ final class AccessLogSource extends Source {
 		$js        = array();
 		$intervals = array();
 		$day_cache = array();
+		$home_path = rtrim( (string) wp_parse_url( home_url(), PHP_URL_PATH ), '/' );
 
 		foreach ( $files as $file ) {
 			if ( (int) filemtime( $file ) < $cutoff ) {
@@ -213,14 +216,25 @@ final class AccessLogSource extends Source {
 					'medium'   => '',
 					'admin'    => false,
 					'bot'      => BotFilter::label( $request['ua'] ),
+					'entry'    => '',
+					'entry_ts' => 0,
+					'pages'    => array(),
 				);
 
 				if ( 'admin' === $kind ) {
 					$visitor['admin'] = true;
 				} elseif ( $visitor['path'] !== $request['path'] || abs( $request['ts'] - $visitor['ts'] ) > AccessLog::RELOAD_SECONDS ) {
 					// La stessa pagina richiesta di nuovo entro pochi secondi (guest mode di LiteSpeed) conta una volta sola.
-					if ( 0 === $visitor['views'] ) {
+					// Ingresso, referrer e UTM vengono dalla pagina più vecchia del giorno: gli archivi non si leggono in ordine di tempo
+					// (glob() elenca prima il più recente), quindi la prima pagina letta non è sempre la prima vista.
+					// Le ricerche (/?s=...) hanno il percorso della home ma non sono la home: niente ingresso né contenuto.
+					$is_search = 1 === preg_match( '/[?&]s=/', $request['uri'] );
+					if ( 0 === $visitor['views'] || $request['ts'] < $visitor['entry_ts'] ) {
+						$visitor['entry']    = $is_search ? '' : $request['path'];
+						$visitor['entry_ts'] = $request['ts'];
 						$visitor['referrer'] = Channels::host( $request['referrer'], $site_host );
+						$visitor['source']   = '';
+						$visitor['medium']   = '';
 						if ( str_contains( $request['uri'], 'utm_' ) ) {
 							parse_str( (string) wp_parse_url( $request['uri'], PHP_URL_QUERY ), $query );
 							$visitor['source'] = is_string( $query['utm_source'] ?? null ) ? $query['utm_source'] : '';
@@ -230,6 +244,10 @@ final class AccessLogSource extends Source {
 					++$visitor['views'];
 					$visitor['path'] = $request['path'];
 					$visitor['ts']   = $request['ts'];
+					// Pagine viste per percorso, solo per chi può finire in `log` (un bot dichiarato non ci finisce mai).
+					if ( '' === $visitor['bot'] && ! $is_search ) {
+						$visitor['pages'][ $request['path'] ] = ( $visitor['pages'][ $request['path'] ] ?? 0 ) + 1;
+					}
 				}
 				$visitors[ $key ] = $visitor;
 			}
@@ -250,7 +268,8 @@ final class AccessLogSource extends Source {
 		$complete = array_flip( $complete );
 
 		// Passo 4: classificazione di ogni visitatore del giorno e totali per origine, canale ed etichetta del bot.
-		$totals = array();
+		$totals  = array();
+		$objects = array();
 		foreach ( $visitors as $key => $visitor ) {
 			[ $day, $hash ] = explode( "\0", $key, 2 );
 			if ( ! isset( $complete[ $day ] ) || $visitor['admin'] || 0 === $visitor['views'] ) {
@@ -271,36 +290,117 @@ final class AccessLogSource extends Source {
 			$totals[ $day ][ $origin ]['channel'][ $channel ] = ( $totals[ $day ][ $origin ]['channel'][ $channel ] ?? 0 ) + 1;
 			if ( '' !== $label ) {
 				$totals[ $day ][ $origin ]['bot'][ $label ] = ( $totals[ $day ][ $origin ]['bot'][ $label ] ?? 0 ) + 1;
+				continue;
+			}
+
+			// Solo `log`: ingresso con il canale e visualizzazioni per contenuto (un visitatore conta una volta per contenuto).
+			$entry = self::object_for( $visitor['entry'], $home_path, $objects );
+			if ( null !== $entry ) {
+				$entry_key                                        = $entry['type'] . '|' . $entry['id'] . '|' . $channel;
+				$totals[ $day ][ $origin ]['entry'][ $entry_key ] = ( $totals[ $day ][ $origin ]['entry'][ $entry_key ] ?? 0 ) + 1;
+			}
+			$seen = array();
+			foreach ( $visitor['pages'] as $path => $views ) {
+				$object = self::object_for( (string) $path, $home_path, $objects );
+				if ( null === $object ) {
+					continue;
+				}
+				$object_key = $object['type'] . '|' . $object['id'];
+				$item       = $totals[ $day ][ $origin ]['object'][ $object_key ] ?? $object + array(
+					'uri'      => substr( (string) $path, 0, 190 ),
+					'views'    => 0,
+					'visitors' => 0,
+				);
+
+				$item['views']      += $views;
+				$item['visitors']   += isset( $seen[ $object_key ] ) ? 0 : 1;
+				$seen[ $object_key ] = true;
+
+				$totals[ $day ][ $origin ]['object'][ $object_key ] = $item;
 			}
 		}
 
 		// Passo 5: scrittura giorno per giorno (anche i giorni senza visite si svuotano: i log dicono che erano vuoti).
 		$rows = array(
-			'log:site_daily' => 0,
-			'log:dim_daily'  => 0,
+			'log:site_daily'   => 0,
+			'log:dim_daily'    => 0,
+			'log:object_daily' => 0,
+			'log:entry_daily'  => 0,
 		);
 		foreach ( array_keys( $complete ) as $day ) {
-			$written                 = $this->replace_day( (string) $day, $totals[ $day ] ?? array() );
-			$rows['log:site_daily'] += $written['site'];
-			$rows['log:dim_daily']  += $written['dim'];
+			$written                   = $this->replace_day( (string) $day, $totals[ $day ] ?? array() );
+			$rows['log:site_daily']   += $written['site'];
+			$rows['log:dim_daily']    += $written['dim'];
+			$rows['log:object_daily'] += $written['object'];
+			$rows['log:entry_daily']  += $written['entry'];
 		}
 
 		return $rows;
 	}
 
 	/**
+	 * Tipo e ID del contenuto di un percorso, come Tracker::current_object(): la home (la pagina statica, la pagina degli articoli
+	 * o «Gli ultimi articoli») e i contenuti singoli. Null per tutto il resto (archivi, ricerche, pagine successive, 404), che si salta.
+	 *
+	 * @param string                                       $path      Percorso della richiesta, senza query; vuoto per un ingresso da una ricerca.
+	 * @param string                                       $home_path Percorso della home senza barra finale (vuoto nella radice).
+	 * @param array<string,array{type:string,id:int}|null> $cache     Risultati già calcolati per percorso (url_to_postid() fa query).
+	 * @return array{type:string,id:int}|null
+	 */
+	private static function object_for( string $path, string $home_path, array &$cache ): ?array {
+		// Un percorso vero inizia sempre con «/»: vuoto è una ricerca (nella radice coinciderebbe con la home).
+		if ( '' === $path ) {
+			return null;
+		}
+		if ( array_key_exists( $path, $cache ) ) {
+			return $cache[ $path ];
+		}
+
+		// Passo 1: la home (ID come get_queried_object_id(): la pagina statica oppure 0 con «Gli ultimi articoli»).
+		$static = 'page' === get_option( 'show_on_front' );
+		$object = null;
+		if ( rtrim( $path, '/' ) === $home_path ) {
+			$object = array(
+				'type' => 'home',
+				'id'   => $static ? (int) get_option( 'page_on_front' ) : 0,
+			);
+		} else {
+			// Passo 2: contenuti singoli; la pagina della home e quella degli articoli sono la `home`, come nel Tracker.
+			$id = url_to_postid( home_url( $path ) );
+			if ( $id > 0 ) {
+				if ( $static && in_array( $id, array( (int) get_option( 'page_on_front' ), (int) get_option( 'page_for_posts' ) ), true ) ) {
+					$type = 'home';
+				} else {
+					$post_type = (string) get_post_type( $id );
+					$type      = in_array( $post_type, array( 'post', 'page' ), true ) ? $post_type : 'post_type_' . $post_type;
+					$type      = substr( (string) preg_replace( '/[^a-z0-9_]/', '_', strtolower( $type ) ), 0, 40 );
+				}
+				$object = array(
+					'type' => $type,
+					'id'   => $id,
+				);
+			}
+		}
+
+		$cache[ $path ] = $object;
+		return $object;
+	}
+
+	/**
 	 * Sostituisce le righe `log` e `logbot` di un giorno in una transazione.
 	 *
 	 * @param string                            $day    Giorno (Y-m-d).
-	 * @param array<string,array<string,mixed>> $totals Totali per origine (visitors, views, channel, bot).
-	 * @return array{site:int,dim:int} Righe scritte.
+	 * @param array<string,array<string,mixed>> $totals Totali per origine (visitors, views, channel, bot; per `log` anche object ed entry).
+	 * @return array{site:int,dim:int,object:int,entry:int} Righe scritte.
 	 * @throws \RuntimeException Se una query fallisce.
 	 */
 	private function replace_day( string $day, array $totals ): array {
 		global $wpdb;
 
-		$site = array();
-		$dim  = array();
+		$site   = array();
+		$dim    = array();
+		$object = array();
+		$entry  = array();
 		foreach ( $totals as $origin => $item ) {
 			$site[] = $wpdb->prepare( '(%s, %d, %d, %s)', $day, $item['visitors'], $item['views'], $origin );
 			foreach ( $item['channel'] as $channel => $visitors ) {
@@ -309,20 +409,37 @@ final class AccessLogSource extends Source {
 			foreach ( $item['bot'] ?? array() as $label => $visitors ) {
 				$dim[] = $wpdb->prepare( "(%s, 'bot', %s, %d, %s)", $day, $label, $visitors, $origin );
 			}
+			foreach ( $item['object'] ?? array() as $row ) {
+				$object[] = $wpdb->prepare( '(%s, %s, %d, %s, %d, %d, %s)', $day, $row['type'], $row['id'], $row['uri'], $row['views'], $row['visitors'], $origin );
+			}
+			foreach ( $item['entry'] ?? array() as $key => $visitors ) {
+				[ $type, $id, $channel ] = explode( '|', (string) $key, 3 );
+				$entry[]                 = $wpdb->prepare( '(%s, %s, %d, %s, %d, %s)', $day, $type, (int) $id, $channel, $visitors, $origin );
+			}
 		}
 
-		$site_table = Schema::table( 'site_daily' );
-		$dim_table  = Schema::table( 'dim_daily' );
-		$origins    = "'" . self::ORIGIN . "', '" . self::ORIGIN_BOT . "'";
+		$site_table   = Schema::table( 'site_daily' );
+		$dim_table    = Schema::table( 'dim_daily' );
+		$object_table = Schema::table( 'object_daily' );
+		$entry_table  = Schema::table( 'entry_daily' );
+		$origins      = "'" . self::ORIGIN . "', '" . self::ORIGIN_BOT . "'";
 
 		$wpdb->query( 'START TRANSACTION' );
 		$ok = false !== $wpdb->query( $wpdb->prepare( "DELETE FROM {$site_table} WHERE day = %s AND origin IN ( {$origins} )", $day ) )
-			&& false !== $wpdb->query( $wpdb->prepare( "DELETE FROM {$dim_table} WHERE day = %s AND origin IN ( {$origins} )", $day ) );
+			&& false !== $wpdb->query( $wpdb->prepare( "DELETE FROM {$dim_table} WHERE day = %s AND origin IN ( {$origins} )", $day ) )
+			&& false !== $wpdb->query( $wpdb->prepare( "DELETE FROM {$object_table} WHERE day = %s AND origin IN ( {$origins} )", $day ) )
+			&& false !== $wpdb->query( $wpdb->prepare( "DELETE FROM {$entry_table} WHERE day = %s AND origin IN ( {$origins} )", $day ) );
 		if ( $ok && $site ) {
 			$ok = false !== $wpdb->query( "INSERT INTO {$site_table} (day, visitors, views, origin) VALUES " . implode( ',', $site ) );
 		}
 		if ( $ok && $dim ) {
 			$ok = false !== $wpdb->query( "INSERT INTO {$dim_table} (day, dim, value, visitors, origin) VALUES " . implode( ',', $dim ) );
+		}
+		if ( $ok && $object ) {
+			$ok = false !== $wpdb->query( "INSERT INTO {$object_table} (day, object_type, object_id, uri, views, visitors, origin) VALUES " . implode( ',', $object ) );
+		}
+		if ( $ok && $entry ) {
+			$ok = false !== $wpdb->query( "INSERT INTO {$entry_table} (day, object_type, object_id, channel, visitors, origin) VALUES " . implode( ',', $entry ) );
 		}
 
 		if ( ! $ok ) {
@@ -332,8 +449,10 @@ final class AccessLogSource extends Source {
 		$wpdb->query( 'COMMIT' );
 
 		return array(
-			'site' => count( $site ),
-			'dim'  => count( $dim ),
+			'site'   => count( $site ),
+			'dim'    => count( $dim ),
+			'object' => count( $object ),
+			'entry'  => count( $entry ),
 		);
 	}
 }

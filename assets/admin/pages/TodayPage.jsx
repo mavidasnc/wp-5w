@@ -12,7 +12,7 @@ const REFRESH_MS = 60000;
 
 /**
  * Scheda «Oggi»: visitatori e visualizzazioni del giorno in corso, confrontati alla stessa ora con ieri e con le medie di 7 e 30 giorni,
- * andamento orario di oggi contro ieri e pagine viste oggi con il canale con cui sono arrivati i visitatori. Legge solo la raccolta propria
+ * andamento orario di oggi contro ieri e la media di 7 giorni e pagine viste oggi con il canale con cui sono arrivati i visitatori. Legge solo la raccolta propria
  * e si aggiorna da sola ogni minuto mentre la scheda del browser è visibile.
  */
 export default function TodayPage() {
@@ -43,10 +43,10 @@ export default function TodayPage() {
 				<TodayKpi label={ __( 'Visualizzazioni', 'wp-5w' ) } data={ kpis.views } />
 			</div>
 
-			<Card id="today-hourly" title={ __( 'Andamento orario: oggi e ieri', 'wp-5w' ) }>
+			<Card id="today-hourly" title={ __( 'Andamento orario: oggi, ieri e media degli ultimi 7 giorni', 'wp-5w' ) }>
 				<HourlyChart hourly={ data.hourly } />
 				<p className="wp5w-note">
-					{ __( 'Valori cumulati: a ogni ora, i visitatori (contati nell\'ora della loro prima visita) o le visualizzazioni dall\'inizio della giornata. Clicca sulla legenda per mostrare o nascondere le serie (le visualizzazioni sono tratteggiate e nascoste all\'inizio). Ora locale del sito.', 'wp-5w' ) }
+					{ __( 'Le linee sono i valori cumulati (asse sinistro): a ogni ora, i visitatori o le visualizzazioni dall\'inizio della giornata. Le barre sono i valori di ogni singola ora (asse destro): per i visitatori sono i nuovi visitatori dell\'ora, contati nell\'ora della loro prima visita del giorno, non quelli attivi in quell\'ora. La media usa gli stessi giorni del confronto «media 7 giorni» qui sopra. Clicca sulla legenda per mostrare o nascondere le serie (le visualizzazioni sono nascoste all\'inizio). Ora locale del sito.', 'wp-5w' ) }
 				</p>
 			</Card>
 

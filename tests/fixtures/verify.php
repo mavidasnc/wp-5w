@@ -517,8 +517,9 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 	$r60      = DateRange::last_days( 60, $today );
 
 	// `tools` (le serie dei tre strumenti) legge di proposito tutte le origini: non fa parte del confronto prima/dopo le righe own.
+	// Lo stesso per `no_js` (0.17.0), che legge le righe `logbot` dei log di accesso.
 	$overview_data = $overview->get( $r30 );
-	unset( $overview_data['tools'] );
+	unset( $overview_data['tools'], $overview_data['no_js'] );
 
 	return array(
 		'overview'     => (string) wp_json_encode( $overview_data ),
@@ -2995,6 +2996,9 @@ $ua_gbot   = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot
 $content   = (string) wp_parse_url( content_url(), PHP_URL_PATH );
 $core      = rtrim( (string) wp_parse_url( site_url(), PHP_URL_PATH ), '/' );
 $chrome_ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
+// 0.17.0: un articolo vero (riconosciuto da url_to_postid()) per il dettaglio per contenuto; /post-b/ non esiste e si salta.
+$log_post_a = (string) wp_parse_url( (string) get_permalink( $post_a ), PHP_URL_PATH );
+$log_home   = 'page' === get_option( 'show_on_front' ) ? (int) get_option( 'page_on_front' ) : 0;
 
 // Archivio A: dalle 00:45 del giorno A alle 00:45 del giorno B.
 $log_lines_a = array(
@@ -3011,7 +3015,9 @@ $log_lines_b = array(
 	$log_line( '198.51.100.1', "{$log_b} 10:00:01", 'POST', '/public/plugins/litespeed-cache/guest.vary.php' ),
 	$log_line( '198.51.100.1', "{$log_b} 10:00:05", 'GET', '/', 200, 'https://www.example.test/' ),
 	$log_line( '198.51.100.1', "{$log_b} 10:00:06", 'POST', '/wp-json/wp5w/v1/hit', 204 ),
-	$log_line( '198.51.100.1', "{$log_b} 10:01:00", 'GET', '/post-a/', 200, 'https://www.example.test/' ),
+	$log_line( '198.51.100.1', "{$log_b} 10:01:00", 'GET', $log_post_a, 200, 'https://www.example.test/' ),
+	// 0.17.0: una ricerca ha il percorso della home ma non è la home (conta nel sito, non nei contenuti).
+	$log_line( '198.51.100.1', "{$log_b} 10:30:00", 'GET', '/?s=prova', 200, 'https://www.example.test/' ),
 	// GPTBot torna di giorno: stessa persona digitale, stesso giorno, due visualizzazioni in tutto.
 	$log_line( '198.51.100.2', "{$log_b} 12:00:00", 'GET', '/post-b/', 200, '-', $ua_bot ),
 	// V3: nessuna prova di essere un browser.
@@ -3027,7 +3033,7 @@ $log_lines_b = array(
 	$log_line( '198.51.100.6', "{$log_b} 15:00:00", 'GET', '/dashboard/public/api/usage' ),
 	$log_line( '198.51.100.6', "{$log_b} 15:00:10", 'GET', '/dashboard/public/api/usage' ),
 	// V7: persona che arriva da un assistente AI.
-	$log_line( '198.51.100.7', "{$log_b} 09:00:00", 'GET', '/post-a/', 200, 'https://claude.ai/chat/x' ),
+	$log_line( '198.51.100.7', "{$log_b} 09:00:00", 'GET', $log_post_a, 200, 'https://claude.ai/chat/x' ),
 	$log_line( '198.51.100.7', "{$log_b} 09:00:01", 'GET', "{$content}/litespeed/css/a.css" ),
 	// Righe che non sono pagine: 404, reindirizzamento, feed, REST, file statici.
 	$log_line( '198.51.100.11', "{$log_b} 16:00:00", 'GET', '/non-esiste/', 404 ),
@@ -3091,11 +3097,12 @@ $check( 'log: la sorgente risulta attiva', '3 file', ( new AccessLogSource() )->
 
 // Passo 2: import dei quattro giorni. Solo B e C sono coperti per intero; l'import non cambia le letture con Origin::where().
 $log_before = $ui_snapshot();
-$wpdb->query( 'DELETE FROM ' . Schema::table( 'site_daily' ) . " WHERE origin IN ('log','logbot')" );
-$wpdb->query( "DELETE FROM {$dim_table} WHERE origin IN ('log','logbot')" );
+foreach ( array( 'site_daily', 'dim_daily', 'object_daily', 'entry_daily' ) as $wp5w_name ) {
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('log','logbot')" );
+}
 $log_result = ( new AccessLogSource() )->import( new DateRange( $log_a, $log_d ) );
 $check( 'log: righe scritte in site_daily (log e logbot di B e C)', 4, $log_result['log:site_daily'] ?? 0 );
-$check( 'log: giorno B, browser (V1 e V7: 3 visualizzazioni, la doppia GET conta una volta)', '2|3', $log_site( $log_b, 'log' ) );
+$check( 'log: giorno B, browser (V1 e V7: 4 visualizzazioni con la ricerca, la doppia GET conta una volta)', '2|4', $log_site( $log_b, 'log' ) );
 $check( 'log: giorno B, bot (GPTBot con 2 visualizzazioni e V3 «senza-js»)', '2|3', $log_site( $log_b, 'logbot' ) );
 $check( 'log: giorno B, canali dei browser (ai e search)', 'ai=1,search=1', $log_dim_of( $log_b, 'log', 'channel' ) );
 $check( 'log: giorno B, canali dei bot', 'direct=2', $log_dim_of( $log_b, 'logbot', 'channel' ) );
@@ -3108,17 +3115,37 @@ $check( 'log: giorno D incompleto non scritto', 'nessuna riga|nessuna riga', $lo
 $check( 'log: somma dei canali = visitatori (browser, giorno B)', 2, $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(visitors), 0) FROM {$dim_table} WHERE day = %s AND origin = 'log' AND dim = 'channel'", $log_b ) ) );
 $check( 'log: l\'import non cambia nessuna lettura con Origin::where()', md5( (string) wp_json_encode( $log_before ) ), md5( (string) wp_json_encode( $ui_snapshot() ) ) );
 
+// Passo 2b (0.17.0): dettaglio per contenuto dei browser. Giorno B: V1 entra dalla home (da Google) e vede l'articolo, V7 entra
+// dall'articolo (da claude.ai); giorno C: V8 entra dalla home e vede /post-b/, che non esiste e si salta.
+$log_objects = static function ( string $day, string $origin ) use ( $wpdb ): string {
+	$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT object_type, object_id, views, visitors FROM ' . Schema::table( 'object_daily' ) . ' WHERE day = %s AND origin = %s ORDER BY object_type, object_id', $day, $origin ), ARRAY_A );
+	return implode( ',', array_map( static fn( $row ) => "{$row['object_type']}:{$row['object_id']}={$row['views']}/{$row['visitors']}", $rows ) );
+};
+$log_entries = static function ( string $day, string $origin ) use ( $wpdb ): string {
+	$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT object_type, object_id, channel, visitors FROM ' . Schema::table( 'entry_daily' ) . ' WHERE day = %s AND origin = %s ORDER BY object_type, object_id, channel', $day, $origin ), ARRAY_A );
+	return implode( ',', array_map( static fn( $row ) => "{$row['object_type']}:{$row['object_id']}:{$row['channel']}={$row['visitors']}", $rows ) );
+};
+$check( 'log dettaglio: righe scritte in object_daily ed entry_daily', '3|3', ( $log_result['log:object_daily'] ?? '' ) . '|' . ( $log_result['log:entry_daily'] ?? '' ) );
+$check( 'log dettaglio: giorno B, visualizzazioni per contenuto (la doppia GET della home conta una volta, la ricerca non è la home)', "home:{$log_home}=1/1,post:{$post_a}=2/2", $log_objects( $log_b, 'log' ) );
+$check( 'log dettaglio: giorno B, ingressi per contenuto e canale', "home:{$log_home}:search=1,post:{$post_a}:ai=1", $log_entries( $log_b, 'log' ) );
+$check( 'log dettaglio: giorno C, solo la home (/post-b/ non è un contenuto)', "home:{$log_home}=1/1|home:{$log_home}:direct=1", $log_objects( $log_c, 'log' ) . '|' . $log_entries( $log_c, 'log' ) );
+$check( 'log dettaglio: nessuna riga logbot per contenuto', '0|0', $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( 'object_daily' ) . " WHERE origin = 'logbot'" ) . '|' . $wpdb->get_var( 'SELECT COUNT(*) FROM ' . Schema::table( 'entry_daily' ) . " WHERE origin = 'logbot'" ) );
+
+// Panoramica (0.17.0): visitatori senza JavaScript dai log (V3 il giorno B), con i giorni coperti.
+$log_no_js = ( new OverviewQuery() )->get( DateRange::last_days( 30, $today ) )['no_js'] ?? null;
+$check( 'log panoramica: senza JavaScript (visitatori, giorni coperti, giorni del periodo)', '1|2|30', ( $log_no_js['visitors'] ?? '' ) . '|' . ( $log_no_js['days'] ?? '' ) . '|' . ( $log_no_js['period_days'] ?? '' ) );
+
 // Passo 3: rieseguire l'import è idempotente, e un import con meno archivi non cancella i giorni che i log non coprono più.
 ( new AccessLogSource() )->import( new DateRange( $log_a, $log_d ) );
-$check( 'log: reimport idempotente (giorno B)', '2|3', $log_site( $log_b, 'log' ) );
+$check( 'log: reimport idempotente (giorno B)', '2|4', $log_site( $log_b, 'log' ) );
 unlink( $log_path_a ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- File di prova.
 ( new AccessLogSource() )->import( new DateRange( $log_a, $log_d ) );
-$check( 'log: senza l\'archivio A il giorno B resta com\'era', '2|3', $log_site( $log_b, 'log' ) );
+$check( 'log: senza l\'archivio A il giorno B resta com\'era', '2|4', $log_site( $log_b, 'log' ) );
 $check( 'log: senza l\'archivio A il giorno C è ancora scritto', '1|2', $log_site( $log_c, 'log' ) );
 
 // Passo 4: Confronto. Il giorno B e C hanno wps e own (inseriti qui se mancano), i log aggiungono le loro chiavi senza spostare la finestra.
 $log_backup = array();
-foreach ( array( 'site_daily', 'dim_daily' ) as $wp5w_name ) {
+foreach ( array( 'site_daily', 'dim_daily', 'object_daily', 'entry_daily' ) as $wp5w_name ) {
 	$log_backup[ $wp5w_name ] = $wpdb->get_results( 'SELECT * FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own') AND day BETWEEN '{$log_a}' AND '{$log_c}'", ARRAY_A );
 	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own') AND day BETWEEN '{$log_a}' AND '{$log_c}'" );
 }
@@ -3128,6 +3155,10 @@ foreach ( array( $log_a, $log_b, $log_c ) as $wp5w_day ) {
 	$wpdb->insert( Schema::table( 'site_daily' ), array( 'day' => $wp5w_day, 'visitors' => 8, 'views' => 12, 'origin' => 'own' ) );
 }
 $wpdb->insert( $dim_table, array( 'day' => $log_b, 'dim' => 'channel', 'value' => 'search', 'visitors' => 4, 'origin' => 'wps' ) );
+// 0.17.0: ingressi diretti sulla home e visualizzazioni dell'articolo per WP Statistics e la raccolta propria.
+$wpdb->insert( Schema::table( 'entry_daily' ), array( 'day' => $log_c, 'object_type' => 'home', 'object_id' => $log_home, 'channel' => 'direct', 'visitors' => 4, 'origin' => 'wps' ) );
+$wpdb->insert( Schema::table( 'object_daily' ), array( 'day' => $log_b, 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $log_post_a, 'views' => 10, 'visitors' => 5, 'origin' => 'wps' ) );
+$wpdb->insert( Schema::table( 'object_daily' ), array( 'day' => $log_b, 'object_type' => 'post', 'object_id' => $post_a, 'uri' => $log_post_a, 'views' => 4, 'visitors' => 2, 'origin' => 'own' ) );
 update_option( Importer::STATE_OPTION, array( 'mode' => 'daily', 'from' => $log_a, 'to' => $today, 'started' => time(), 'ok' => true ), false );
 $admin_user( $admin_id );
 $log_compare = $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data();
@@ -3135,26 +3166,36 @@ $admin_user( 0 );
 $log_days = array_column( $log_compare['days'] ?? array(), null, 'day' );
 $check( 'log confronto: log_available', true, $log_compare['log_available'] ?? false );
 $check( 'log confronto: la finestra è quella di wps e own (B e C)', $log_b . ',' . $log_c, implode( ',', array_keys( array_intersect_key( $log_days, array_flip( array( $log_a, $log_b, $log_c ) ) ) ) ) );
-$check( 'log confronto: giorno B, browser e bot', '2|3|2|3', ( $log_days[ $log_b ]['log']['visitors'] ?? '' ) . '|' . ( $log_days[ $log_b ]['log']['views'] ?? '' ) . '|' . ( $log_days[ $log_b ]['logbot']['visitors'] ?? '' ) . '|' . ( $log_days[ $log_b ]['logbot']['views'] ?? '' ) );
+$check( 'log confronto: giorno B, browser e bot', '2|4|2|3', ( $log_days[ $log_b ]['log']['visitors'] ?? '' ) . '|' . ( $log_days[ $log_b ]['log']['views'] ?? '' ) . '|' . ( $log_days[ $log_b ]['logbot']['visitors'] ?? '' ) . '|' . ( $log_days[ $log_b ]['logbot']['views'] ?? '' ) );
 $check( 'log confronto: differenza dei browser rispetto a wps (2 contro 10 = −80%)', -80.0, $log_days[ $log_b ]['diff_log']['visitors'] ?? 'nessuna' );
-$check( 'log confronto: totali dei browser sui due giorni (3 visitatori, 5 visualizzazioni)', '3|5|2', ( $log_compare['totals']['log']['visitors'] ?? '' ) . '|' . ( $log_compare['totals']['log']['views'] ?? '' ) . '|' . ( $log_compare['totals']['log_days'] ?? '' ) );
+$check( 'log confronto: totali dei browser sui due giorni (3 visitatori, 6 visualizzazioni)', '3|6|2', ( $log_compare['totals']['log']['visitors'] ?? '' ) . '|' . ( $log_compare['totals']['log']['views'] ?? '' ) . '|' . ( $log_compare['totals']['log_days'] ?? '' ) );
 $check( 'log confronto: totali dei bot (3 visitatori, 4 visualizzazioni)', '3|4', ( $log_compare['totals']['logbot']['visitors'] ?? '' ) . '|' . ( $log_compare['totals']['logbot']['views'] ?? '' ) );
 $check( 'log confronto: i giorni con differenza oltre la soglia non dipendono dai log (flagged solo da own e ia)', $log_days[ $log_b ]['flagged'] ?? 'x', \Mavida\FiveW\Support\Comparison::flagged( $log_days[ $log_b ]['diff']['visitors'] ?? null, $log_days[ $log_b ]['diff']['views'] ?? null ) );
 $log_bots = array_column( $log_compare['bots'] ?? array(), 'visitors', 'label' );
 $check( 'log confronto: elenco dei bot', 'bot=1,gptbot=1,senza-js=1', implode( ',', array_map( static fn( $label, $n ) => "{$label}={$n}", array_keys( $log_bots ), $log_bots ) ) );
 $log_channels = array_column( $log_compare['channels'] ?? array(), null, 'channel' );
 $check( 'log confronto: colonna log nei canali (ai 1, search 1)', '1|1', ( $log_channels['ai']['log'] ?? '' ) . '|' . ( $log_channels['search']['log'] ?? '' ) );
+$check( 'log confronto: differenza del log nei canali sui giorni dei log (search 1 contro 4 = −75%)', -75.0, $log_channels['search']['diff_log'] ?? 'nessuna' );
+// 0.17.0: ingressi diretti sulla home (B 0, C 1 contro 4 di WP Statistics) e articolo nei contenuti (2 contro 10).
+$check( 'log confronto: home diretta del log per giorno (B, C)', '0|1', ( $log_days[ $log_b ]['home_direct']['log'] ?? 'x' ) . '|' . ( $log_days[ $log_c ]['home_direct']['log'] ?? 'x' ) );
+$check( 'log confronto: home diretta del log, differenza, quota e giorni', '1|-75|33.3|2', ( $log_compare['home_direct']['log'] ?? '' ) . '|' . ( $log_compare['home_direct']['diff_log'] ?? '' ) . '|' . ( $log_compare['home_direct']['share_log'] ?? '' ) . '|' . ( $log_compare['home_direct']['log_days'] ?? '' ) );
+$log_top = array_column( $log_compare['top'] ?? array(), null, 'id' );
+$check( 'log confronto: articolo nei contenuti (log, differenza e base di wps sui giorni dei log)', '2|-80|10', ( $log_top[ $post_a ]['log_views'] ?? '' ) . '|' . ( $log_top[ $post_a ]['diff_log'] ?? '' ) . '|' . ( $log_top[ $post_a ]['wps_log_views'] ?? '' ) );
+$check( 'log confronto: base di wps della home diretta e dei canali (search)', '4|4', ( $log_compare['home_direct']['wps_log'] ?? '' ) . '|' . ( $log_channels['search']['wps_log'] ?? '' ) );
 
 // Passo 5: senza righe `log` la risposta non ha nessuna chiave dei log.
-$wpdb->query( 'DELETE FROM ' . Schema::table( 'site_daily' ) . " WHERE origin IN ('log','logbot')" );
-$wpdb->query( "DELETE FROM {$dim_table} WHERE origin IN ('log','logbot')" );
+foreach ( array( 'site_daily', 'dim_daily', 'object_daily', 'entry_daily' ) as $wp5w_name ) {
+	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('log','logbot')" );
+}
 $admin_user( $admin_id );
 $no_log = $rest_call( 'GET', '/wp5w/v1/admin/compare' )->get_data();
 $admin_user( 0 );
 $check( 'senza log: log_available falso e nessuna chiave dei log', '0|0|0|0', (int) ( $no_log['log_available'] ?? true ) . '|' . (int) isset( $no_log['days'][0]['log'] ) . '|' . (int) isset( $no_log['totals']['log'] ) . '|' . (int) isset( $no_log['bots'] ) );
+$check( 'senza log: nessuna chiave dei log negli ingressi diretti e nei contenuti', '0|0|0', (int) isset( $no_log['home_direct']['log'] ) . '|' . (int) array_key_exists( 'log', $no_log['days'][0]['home_direct'] ?? array() ) . '|' . (int) isset( $no_log['top'][0]['log_views'] ) );
+$check( 'senza log: nessuna riga «senza JavaScript» nella Panoramica', null, ( new OverviewQuery() )->get( DateRange::last_days( 30, $today ) )['no_js'] );
 
 // Passo 6: ripristino.
-foreach ( array( 'site_daily', 'dim_daily' ) as $wp5w_name ) {
+foreach ( array( 'site_daily', 'dim_daily', 'object_daily', 'entry_daily' ) as $wp5w_name ) {
 	$wpdb->query( 'DELETE FROM ' . Schema::table( $wp5w_name ) . " WHERE origin IN ('wps','own') AND day BETWEEN '{$log_a}' AND '{$log_c}'" );
 	foreach ( $log_backup[ $wp5w_name ] as $wp5w_row ) {
 		$wpdb->insert( Schema::table( $wp5w_name ), $wp5w_row );
@@ -3255,6 +3296,12 @@ $check( 'oggi orario: dopo l\'ora in corso non ci sono valori', '1|1', (int) ( n
 $check( 'oggi orario: l\'ultimo valore di oggi è il KPI', $today_kpis['visitors']['value'] . '|' . $today_kpis['views']['value'], $hourly_today['visitors'][12] . '|' . $hourly_today['views'][12] );
 $check( 'oggi orario: visitatori di ieri cumulati alle 8, 9, 10, 11, 14, 15 e 23', '0|1|1|2|2|3|3', implode( '|', array( $hourly_yest['visitors'][8], $hourly_yest['visitors'][9], $hourly_yest['visitors'][10], $hourly_yest['visitors'][11], $hourly_yest['visitors'][14], $hourly_yest['visitors'][15], $hourly_yest['visitors'][23] ) ) );
 $check( 'oggi orario: l\'ultimo valore di ieri è la giornata intera', $today_kpis['visitors']['compare']['yesterday']['full'] . '|' . $today_kpis['views']['compare']['yesterday']['full'], $hourly_yest['visitors'][23] . '|' . $hourly_yest['views'][23] );
+// 0.17.0: media 7 giorni dei cumulati sugli stessi 6 giorni del KPI (21..26/10, ora legale e solare). Visitatori alle 10: 26/10 y1 = 1/6; alle 11: 21/10 w1,
+// 25/10 z1, 26/10 y1 e y2 = 4/6; alle 12 anche w2 e z2 = 6/6; alle 15 anche y3 = 7/6.
+$hourly_avg = $today_data['hourly']['avg7'];
+$check( 'oggi orario: media 7 giorni, 24 ore per serie e nessun null', '24|24|0', count( $hourly_avg['visitors'] ) . '|' . count( $hourly_avg['views'] ) . '|' . count( array_filter( $hourly_avg['visitors'], 'is_null' ) ) );
+$check( 'oggi orario: media 7 giorni dei visitatori cumulati alle 10, 11, 12 e 15', '0.17|0.67|1|1.17', implode( '|', array( $hourly_avg['visitors'][10], $hourly_avg['visitors'][11], $hourly_avg['visitors'][12], $hourly_avg['visitors'][15] ) ) );
+$check( 'oggi orario: l\'ultimo valore della media è la giornata intera del KPI', $today_kpis['visitors']['compare']['avg7']['full'] . '|' . $today_kpis['views']['compare']['avg7']['full'], round( $hourly_avg['visitors'][23], 1 ) . '|' . round( $hourly_avg['views'][23], 1 ) );
 $today_json = (string) wp_json_encode( $today_data );
 $check( 'oggi: nessuna chiave visitor o ts nella risposta', 0, (int) str_contains( $today_json, '"visitor"' ) + (int) str_contains( $today_json, '"ts"' ) );
 
@@ -3263,6 +3310,7 @@ $wpdb->query( "TRUNCATE TABLE {$hits_table}" );
 $today_hit( '2026-10-27', '09:00:00', 't1', 'post', $post_a );
 $today_alone = ( new TodayQuery() )->get( $today_now )['kpis']['visitors'];
 $check( 'oggi: senza storico nessun giorno, media e variazione nulli', '0|0|0||', $today_alone['compare']['yesterday']['days'] . '|' . $today_alone['compare']['avg7']['days'] . '|' . $today_alone['compare']['avg30']['days'] . '|' . ( $today_alone['compare']['avg7']['at'] ?? '' ) . '|' . ( $today_alone['compare']['avg7']['change'] ?? '' ) );
+$check( 'oggi orario: senza storico nessuna media 7 giorni', null, ( new TodayQuery() )->get( $today_now )['hourly']['avg7'] );
 $wpdb->query( "TRUNCATE TABLE {$hits_table}" );
 $check( 'oggi: senza visite nessuna pagina e nessun errore', '0|0', ( new TodayQuery() )->get( $today_now )['kpis']['views']['value'] . '|' . count( ( new TodayQuery() )->get( $today_now )['pages']['rows'] ) );
 

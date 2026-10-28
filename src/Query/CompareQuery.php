@@ -100,6 +100,12 @@ final class CompareQuery {
 		$home_direct = $this->home_direct( $days );
 		$discards    = $this->discards( $days );
 
+		// Passo 5b: giorni coperti dai log (righe `log` in site_daily) e, tra questi, quelli con il dettaglio per contenuto
+		// (object_daily ed entry_daily, scritti dalla 0.17.0: i giorni importati prima ne sono senza finché non si rilancia l'import).
+		// Le differenze del log si calcolano sempre rispetto a WP Statistics sugli stessi giorni.
+		$log_days        = $with_log ? array_values( array_filter( $days, static fn( string $day ): bool => isset( $site['log'][ $day ] ) ) ) : array();
+		$log_detail_days = $this->log_detail_days( $log_days );
+
 		// Passo 6: una riga per giorno e i totali (le chiavi `ia` e `diff_ia` ci sono solo con Independent Analytics).
 		$day_rows = array();
 		$empty    = array(
@@ -169,6 +175,9 @@ final class CompareQuery {
 					'visitors' => Metrics::change( $log['visitors'], $wps['visitors'] ),
 					'views'    => Metrics::change( $log['views'], $wps['views'] ),
 				);
+				if ( array() !== $log_detail_days ) {
+					$row['home_direct']['log'] = in_array( $day, $log_detail_days, true ) ? ( $home_direct[ $day ]['log'] ?? 0 ) : null;
+				}
 				if ( null !== $log ) {
 					++$log_totals['days'];
 					foreach ( array( 'visitors', 'views' ) as $key ) {
@@ -225,9 +234,9 @@ final class CompareQuery {
 				'share_wps' => self::share( $home_totals['wps'], $totals['wps']['visitors'] ),
 				'share_own' => self::share( $home_totals['own'], $totals['own']['visitors'] ),
 			),
-			'channels'      => $this->channels( $days, $with_ia, $with_log ),
+			'channels'      => $this->channels( $days, $with_ia, $with_log ? $log_days : null ),
 			'discards'      => Comparison::discard_shares( $per_reason, $totals['own']['views'] ),
-			'top'           => $this->top( $days, $with_ia ),
+			'top'           => $this->top( $days, $with_ia, $log_detail_days ),
 		);
 
 		// Independent Analytics: chiavi in più, la forma delle altre resta quella del confronto a due origini.
@@ -254,6 +263,23 @@ final class CompareQuery {
 			);
 			$response['totals']['views_per_visitor']['log'] = self::per_visitor( $log_totals['log'] );
 			$response['bots']                               = $this->bots( $days );
+		}
+
+		// Ingressi diretti sulla home dai log: solo sui giorni con il dettaglio per contenuto, confrontati con WP Statistics sugli stessi giorni.
+		if ( array() !== $log_detail_days ) {
+			$home_log     = 0;
+			$home_wps     = 0;
+			$log_visitors = 0;
+			foreach ( $log_detail_days as $day ) {
+				$home_log     += $home_direct[ $day ]['log'] ?? 0;
+				$home_wps     += $home_direct[ $day ]['wps'] ?? 0;
+				$log_visitors += $site['log'][ $day ]['visitors'];
+			}
+			$response['home_direct']['log']       = $home_log;
+			$response['home_direct']['diff_log']  = Metrics::change( $home_log, $home_wps );
+			$response['home_direct']['share_log'] = self::share( $home_log, $log_visitors );
+			$response['home_direct']['log_days']  = count( $log_detail_days );
+			$response['home_direct']['wps_log']   = $home_wps;
 		}
 
 		return $response;
@@ -288,6 +314,29 @@ final class CompareQuery {
 	 */
 	private static function in_days( array $days ): string {
 		return implode( ',', array_fill( 0, count( $days ), '%s' ) );
+	}
+
+	/**
+	 * Giorni dei log che hanno anche il dettaglio per contenuto (righe `log` in object_daily).
+	 *
+	 * @param array<int,string> $log_days Giorni completi coperti dai log.
+	 * @return array<int,string>
+	 */
+	private function log_detail_days( array $log_days ): array {
+		global $wpdb;
+
+		if ( ! $log_days ) {
+			return array();
+		}
+
+		$found = $wpdb->get_col(
+			$wpdb->prepare(
+				'SELECT DISTINCT day FROM ' . Schema::table( 'object_daily' ) . " WHERE origin = 'log' AND day IN (" . self::in_days( $log_days ) . ') ORDER BY day', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
+				$log_days
+			)
+		);
+
+		return array_map( 'strval', $found );
 	}
 
 	/**
@@ -349,22 +398,24 @@ final class CompareQuery {
 	/**
 	 * Visitatori per canale nelle origini, dal più grande al più piccolo.
 	 *
-	 * @param array<int,string> $days    Giorni completi.
-	 * @param bool              $with_ia  Aggiunge le colonne di Independent Analytics.
-	 * @param bool              $with_log Aggiunge la colonna dei log di accesso (client da browser).
+	 * @param array<int,string>      $days     Giorni completi.
+	 * @param bool                   $with_ia  Aggiunge le colonne di Independent Analytics.
+	 * @param array<int,string>|null $log_days Giorni coperti dai log, per la colonna dei log di accesso (client da browser); null senza log.
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function channels( array $days, bool $with_ia, bool $with_log = false ): array {
+	private function channels( array $days, bool $with_ia, ?array $log_days = null ): array {
 		global $wpdb;
 
 		if ( ! $days ) {
 			return array();
 		}
 
-		$rows = $wpdb->get_results(
+		// Visitatori sui soli giorni dei log (per la differenza del log rispetto a WP Statistics sugli stessi giorni).
+		$on_log_days = $log_days ? 'SUM( IF( day IN (' . self::in_days( $log_days ) . '), visitors, 0 ) )' : '0';
+		$rows        = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT value, origin, SUM(visitors) AS visitors FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day IN (" . self::in_days( $days ) . ') GROUP BY value, origin', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
-				$days
+				"SELECT value, origin, SUM(visitors) AS visitors, {$on_log_days} AS visitors_log_days FROM " . Schema::table( 'dim_daily' ) . " WHERE dim = 'channel' AND day IN (" . self::in_days( $days ) . ') GROUP BY value, origin', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
+				array_merge( $log_days ?? array(), $days )
 			),
 			ARRAY_A
 		);
@@ -382,6 +433,9 @@ final class CompareQuery {
 			}
 
 			$by_channel[ $channel ][ $origin ] = ( $by_channel[ $channel ][ $origin ] ?? 0 ) + (int) $row['visitors'];
+			if ( 'wps' === $origin ) {
+				$by_channel[ $channel ]['wps_log_days'] = ( $by_channel[ $channel ]['wps_log_days'] ?? 0 ) + (int) $row['visitors_log_days'];
+			}
 		}
 
 		// Passo 2: differenza (rispetto a wps) e ordine per il massimo tra le origini decrescente, poi per nome.
@@ -400,10 +454,11 @@ final class CompareQuery {
 				$item['ia']      = $ia;
 				$item['diff_ia'] = Metrics::change( $ia, $wps );
 			}
-			if ( $with_log ) {
+			if ( null !== $log_days ) {
 				$log              = $values['log'] ?? 0;
 				$item['log']      = $log;
-				$item['diff_log'] = Metrics::change( $log, $wps );
+				$item['wps_log']  = $values['wps_log_days'] ?? 0;
+				$item['diff_log'] = Metrics::change( $log, $item['wps_log'] );
 			}
 			$channels[] = $item;
 		}
@@ -446,28 +501,39 @@ final class CompareQuery {
 	/**
 	 * Contenuti con la differenza assoluta più grande di visualizzazioni (le righe con ID 0, come la home, restano).
 	 *
-	 * @param array<int,string> $days    Giorni completi.
-	 * @param bool              $with_ia Aggiunge le visualizzazioni di Independent Analytics.
+	 * Il log è solo una colonna in più: non entra nella soglia né nella classifica, vale null per i tipi che il log non sa
+	 * riconoscere (archivi, ricerche) e la sua differenza è rispetto a WP Statistics sui soli giorni con il dettaglio dei log.
+	 *
+	 * @param array<int,string> $days            Giorni completi.
+	 * @param bool              $with_ia         Aggiunge le visualizzazioni di Independent Analytics.
+	 * @param array<int,string> $log_detail_days Giorni con il dettaglio per contenuto dei log (vuoto: nessuna colonna del log).
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function top( array $days, bool $with_ia ): array {
+	private function top( array $days, bool $with_ia, array $log_detail_days = array() ): array {
 		global $wpdb;
 
 		if ( ! $days ) {
 			return array();
 		}
 
-		$rows = $wpdb->get_results(
+		$with_log    = array() !== $log_detail_days;
+		$on_log_days = $with_log ? 'SUM( IF( day IN (' . self::in_days( $log_detail_days ) . '), views, 0 ) )' : '0';
+		$rows        = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT object_type, object_id, origin, MIN(uri) AS uri, SUM(views) AS views FROM ' . Schema::table( 'object_daily' ) . ' WHERE day IN (' . self::in_days( $days ) . ') GROUP BY object_type, object_id, origin', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
-				$days
+				"SELECT object_type, object_id, origin, MIN(uri) AS uri, SUM(views) AS views, {$on_log_days} AS views_log_days FROM " . Schema::table( 'object_daily' ) . ' WHERE day IN (' . self::in_days( $days ) . ') GROUP BY object_type, object_id, origin', // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
+				array_merge( $log_detail_days, $days )
 			),
 			ARRAY_A
 		);
 
 		// Passo 1: una riga per contenuto con le visualizzazioni di ogni origine. Un'origine che non è nel confronto si ignora
 		// (non va sommata a wps).
-		$origins  = $with_ia ? array( 'wps', 'own', 'ia' ) : array( 'wps', 'own' );
+		$origins = array_merge( array( 'wps', 'own' ), $with_ia ? array( 'ia' ) : array(), $with_log ? array( 'log' ) : array() );
+		/**
+		 * Visualizzazioni per contenuto e origine.
+		 *
+		 * @var array<string,array{type:string,id:int,uri:string,wps:int,own:int,ia?:int,log?:int,wps_log?:int}> $contents
+		 */
 		$contents = array();
 		foreach ( $rows as $row ) {
 			if ( ! in_array( $row['origin'], $origins, true ) ) {
@@ -485,8 +551,15 @@ final class CompareQuery {
 				if ( $with_ia ) {
 					$contents[ $key ]['ia'] = 0;
 				}
+				if ( $with_log ) {
+					$contents[ $key ]['log']     = 0;
+					$contents[ $key ]['wps_log'] = 0;
+				}
 			}
 			$contents[ $key ][ $row['origin'] ] += (int) $row['views'];
+			if ( $with_log && 'wps' === $row['origin'] ) {
+				$contents[ $key ]['wps_log'] += (int) $row['views_log_days'];
+			}
 		}
 
 		// Passo 2: la classifica (soglia minima, ordine, limite) è una regola pura.
@@ -512,6 +585,14 @@ final class CompareQuery {
 					$item['ia_views']    = $row['ia'];
 					$item['diff_abs_ia'] = $row['diff_abs_ia'];
 					$item['diff_ia']     = $row['diff_ia'];
+				}
+				// Log: solo home e contenuti singoli (AccessLogSource non riconosce gli altri tipi).
+				if ( isset( $row['log'] ) ) {
+					$known             = in_array( $row['type'], array( 'home', 'post', 'page' ), true ) || str_starts_with( $row['type'], 'post_type_' );
+					$item['log_views'] = $known ? $row['log'] : null;
+					$item['diff_log']  = $known ? Metrics::change( $row['log'], $row['wps_log'] ) : null;
+					// Base della differenza: WP Statistics sui soli giorni dei log (il tooltip del badge la mostra).
+					$item['wps_log_views'] = $known ? $row['wps_log'] : null;
 				}
 
 				return $item;
