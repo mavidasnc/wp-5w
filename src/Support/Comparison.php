@@ -220,7 +220,7 @@ final class Comparison {
 	 * Con la chiave facoltativa `ia` la riga riporta anche la differenza di Independent Analytics (`diff_abs_ia`, `diff_ia`)
 	 * e la classifica usa la più grande delle due.
 	 *
-	 * @param array<int,array{type:string,id:int,uri:string,wps:int,own:int,ia?:int}> $rows Visualizzazioni per contenuto.
+	 * @param array<int,array{type:string,id:int,uri:string,wps:int,own:int,ia?:int,log?:int,wps_log?:int}> $rows Visualizzazioni per contenuto (log e wps_log passano invariate).
 	 * @return array<int,array<string,mixed>>
 	 */
 	public static function top_differences( array $rows ): array {

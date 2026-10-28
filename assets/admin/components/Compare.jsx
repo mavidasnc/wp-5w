@@ -49,16 +49,38 @@ const formatDiff = ( diff ) => {
  * @param {Object}  props
  * @param {?number} props.value     Differenza in percentuale.
  * @param {number}  props.threshold Soglia in percentuale.
+ * @param {?number} props.base      Valore di WP Statistics usato per la differenza, se diverso da quello della riga (il log usa solo i suoi giorni).
  */
-function Diff( { value, threshold } ) {
+function Diff( { value, threshold, base } ) {
 	if ( value === null || value === undefined ) {
 		return null;
 	}
-	return <span className={ `wp5w-diff ${ Math.abs( value ) > threshold ? 'is-bad' : 'is-good' }` }>{ formatDiff( value ) }</span>;
+	const title =
+		base === null || base === undefined
+			? undefined
+			: sprintf(
+				/* translators: %s: valore di WP Statistics. */
+				__( 'Rispetto a %s di WP Statistics nei soli giorni coperti dai log', 'wp-5w' ),
+				formatNumber( base )
+			);
+	return (
+		<span className={ `wp5w-diff ${ Math.abs( value ) > threshold ? 'is-bad' : 'is-good' }` } title={ title }>
+			{ formatDiff( value ) }
+		</span>
+	);
 }
 
 // Chiave della differenza (rispetto a WP Statistics) nella riga del giorno, per strumento.
 const DIFF_KEY = { own: 'diff', ia: 'diff_ia', log: 'diff_log' };
+
+/**
+ * Differenza percentuale di un valore rispetto a WP Statistics, con un decimale come Metrics::change(); null se manca un valore o WP Statistics è zero.
+ *
+ * @param {?number} value Valore dello strumento.
+ * @param {?number} wps   Valore di WP Statistics.
+ */
+const change = ( value, wps ) =>
+	value === null || value === undefined || ! wps ? null : Math.round( ( ( value - wps ) / wps ) * 1000 ) / 10;
 
 /**
  * Giorno breve gg/mm per l'elenco dei giorni esclusi.
@@ -137,6 +159,9 @@ export default function Compare() {
 			? [ { id: 'log', label: __( 'Log del server (browser)', 'wp-5w' ), ...totals.log, diff_visitors: totals.diff_log.visitors, diff_views: totals.diff_log.views } ]
 			: [] ),
 	];
+
+	// Tabelle per contenuto (ingressi diretti sulla home e contenuti): il log c'è solo se ha giorni con il dettaglio per contenuto.
+	const detailTools = tools.filter( ( tool ) => tool.id !== 'log' || home.log_days !== undefined );
 
 	// Un punto per giorno confrontato, con le chiavi delle serie del grafico della Panoramica.
 	const chartSeries = data.days.map( ( day ) => ( {
@@ -262,7 +287,7 @@ export default function Compare() {
 						<p className="wp5w-note wp5w-note--top">
 							{ __( 'WP Statistics e Independent Analytics contano ogni giorno molti visitatori diretti, solo sulla home, con una visualizzazione e distribuiti sulle 24 ore: è la flotta di browser automatici descritta sopra. Se qui la raccolta propria ne conta molti meno, la differenza è traffico automatico che gli altri due accettano.', 'wp-5w' ) }
 						</p>
-						<table className="widefat striped">
+						<table className="widefat striped wp5w-compact">
 							<thead>
 								<tr>
 									<th />
@@ -271,88 +296,80 @@ export default function Compare() {
 								</tr>
 							</thead>
 							<tbody>
-								<tr>
-									<td>{ __( 'Propri', 'wp-5w' ) }</td>
-									<td className="num">{ formatNumber( home.own ) }</td>
-									<td className="num">{ formatNumber( home.share_own, '%' ) }</td>
-								</tr>
-								<tr>
-									<td>{ __( 'WP Statistics', 'wp-5w' ) }</td>
-									<td className="num">{ formatNumber( home.wps ) }</td>
-									<td className="num">{ formatNumber( home.share_wps, '%' ) }</td>
-								</tr>
-								<tr>
-									<td>{ __( 'Differenza', 'wp-5w' ) }</td>
-									<td className="num">{ formatDiff( home.diff ) }</td>
-									<td />
-								</tr>
-								{ ia && (
-									<>
-										<tr>
-											<td>{ __( 'Independent Analytics', 'wp-5w' ) }</td>
-											<td className="num">{ formatNumber( home.ia ) }</td>
-											<td className="num">{ formatNumber( home.share_ia, '%' ) }</td>
-										</tr>
-										<tr>
-											<td>{ __( 'Differenza Independent Analytics', 'wp-5w' ) }</td>
-											<td className="num">{ formatDiff( home.diff_ia ) }</td>
-											<td />
-										</tr>
-									</>
-								) }
+								{ detailTools.map( ( tool ) => (
+									<tr key={ tool.id }>
+										<td>{ tool.label }</td>
+										<td className="num">
+											{ formatNumber( home[ tool.id ] ) }
+											<Diff value={ home[ DIFF_KEY[ tool.id ] ] } threshold={ data.threshold } base={ tool.id === 'log' ? home.wps_log : undefined } />
+										</td>
+										<td className="num">{ formatNumber( home[ `share_${ tool.id }` ], '%' ) }</td>
+									</tr>
+								) ) }
 							</tbody>
 						</table>
-						<p className="wp5w-note">{ __( 'Giorno per giorno:', 'wp-5w' ) }</p>
-						<table className="widefat striped">
+						<p className="wp5w-note">
+							{ __( 'Giorno per giorno:', 'wp-5w' ) }
+							{ home.log_days !== undefined &&
+								` ${ sprintf(
+									/* translators: %s: giorni con il dettaglio dei log. */
+									__( 'i log contano solo i giorni con il dettaglio per contenuto (%s; il totale del log è confrontato con WP Statistics sugli stessi giorni).', 'wp-5w' ),
+									formatNumber( home.log_days )
+								) }` }
+						</p>
+						<table className="widefat striped wp5w-compact">
 							<thead>
 								<tr>
 									<th>{ __( 'Giorno', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'Propri', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
-									{ ia && <th className="num">{ __( 'Independent Analytics', 'wp-5w' ) }</th> }
+									{ detailTools.map( ( tool ) => (
+										<th key={ tool.id } className="num">{ tool.label }</th>
+									) ) }
 								</tr>
 							</thead>
 							<tbody>
 								{ data.days.map( ( day ) => (
 									<tr key={ day.day }>
 										<td>{ formatDay( day.day ) }</td>
-										<td className="num">{ formatNumber( day.home_direct.own ) }</td>
-										<td className="num">{ formatNumber( day.home_direct.wps ) }</td>
-										{ ia && <td className="num">{ formatNumber( day.home_direct.ia ) }</td> }
+										{ detailTools.map( ( tool ) => (
+											<td key={ tool.id } className="num">
+												{ formatNumber( day.home_direct[ tool.id ] ) }
+												{ tool.id !== 'wps' && <Diff value={ change( day.home_direct[ tool.id ], day.home_direct.wps ) } threshold={ data.threshold } /> }
+											</td>
+										) ) }
 									</tr>
 								) ) }
 							</tbody>
 						</table>
 
 						<h3>{ __( 'Canali', 'wp-5w' ) }</h3>
-						<table className="widefat striped">
+						<table className="widefat striped wp5w-compact">
 							<thead>
 								<tr>
 									<th>{ __( 'Canale', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'Propri', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'Differenza', 'wp-5w' ) }</th>
-									{ ia && <th className="num">{ __( 'Independent Analytics', 'wp-5w' ) }</th> }
-									{ ia && <th className="num">{ __( 'Differenza', 'wp-5w' ) }</th> }
-									{ data.log_available && <th className="num">{ __( 'Log del server (browser)', 'wp-5w' ) }</th> }
-									{ data.log_available && <th className="num">{ __( 'Differenza', 'wp-5w' ) }</th> }
+									{ tools.map( ( tool ) => (
+										<th key={ tool.id } className="num">{ tool.label }</th>
+									) ) }
 								</tr>
 							</thead>
 							<tbody>
 								{ channels.map( ( row ) => (
 									<tr key={ row.channel }>
 										<td>{ CHANNEL_LABELS[ row.channel ] ?? row.channel }</td>
-										<td className="num">{ formatNumber( row.own ) }</td>
-										<td className="num">{ formatNumber( row.wps ) }</td>
-										<td className="num">{ formatDiff( row.diff ) }</td>
-										{ ia && <td className="num">{ formatNumber( row.ia ) }</td> }
-										{ ia && <td className="num">{ formatDiff( row.diff_ia ) }</td> }
-										{ data.log_available && <td className="num">{ formatNumber( row.log ) }</td> }
-										{ data.log_available && <td className="num">{ formatDiff( row.diff_log ) }</td> }
+										{ tools.map( ( tool ) => (
+											<td key={ tool.id } className="num">
+												{ formatNumber( row[ tool.id ] ) }
+												<Diff value={ row[ DIFF_KEY[ tool.id ] ] } threshold={ data.threshold } base={ tool.id === 'log' ? row.wps_log : undefined } />
+											</td>
+										) ) }
 									</tr>
 								) ) }
 							</tbody>
 						</table>
+						{ data.log_available && (
+							<p className="wp5w-note">
+								{ __( 'La differenza del log è rispetto a WP Statistics sui soli giorni coperti dai log, quindi non sempre corrisponde alla colonna WP Statistics: passa il mouse sul badge per vedere la base.', 'wp-5w' ) }
+							</p>
+						) }
 
 						{ data.log_available && (
 							<>
@@ -410,38 +427,37 @@ export default function Compare() {
 					</Card>
 
 					<Card id="status-compare-top" title={ __( 'Contenuti con la differenza più grande', 'wp-5w' ) }>
-						<table className="widefat striped">
-							<thead>
-								<tr>
-									<th>{ __( 'Contenuto', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'Propri', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'WP Statistics', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'Differenza assoluta', 'wp-5w' ) }</th>
-									<th className="num">{ __( 'Differenza %', 'wp-5w' ) }</th>
-									{ ia && <th className="num">{ __( 'Independent Analytics', 'wp-5w' ) }</th> }
-									{ ia && <th className="num">{ __( 'Differenza % Independent Analytics', 'wp-5w' ) }</th> }
-								</tr>
-							</thead>
-							<tbody>
-								{ top.map( ( row ) => (
-									<tr key={ `${ row.type }-${ row.id }` }>
-										<td>
-											<a href={ row.url } target="_blank" rel="noreferrer">{ row.title }</a>
-										</td>
-										<td className="num">{ formatNumber( row.own_views ) }</td>
-										<td className="num">{ formatNumber( row.wps_views ) }</td>
-										<td className="num">{ formatNumber( row.diff_abs ) }</td>
-										<td className="num">{ formatDiff( row.diff ) }</td>
-										{ ia && <td className="num">{ formatNumber( row.ia_views ) }</td> }
-										{ ia && <td className="num">{ formatDiff( row.diff_ia ) }</td> }
+						<div className="wp5w-table-scroll">
+							<table className="widefat striped wp5w-compact">
+								<thead>
+									<tr>
+										<th>{ __( 'Contenuto', 'wp-5w' ) }</th>
+										{ detailTools.map( ( tool ) => (
+											<th key={ tool.id } className="num">{ tool.label }</th>
+										) ) }
 									</tr>
-								) ) }
-							</tbody>
-						</table>
+								</thead>
+								<tbody>
+									{ top.map( ( row ) => (
+										<tr key={ `${ row.type }-${ row.id }` }>
+											<td>
+												<a href={ row.url } target="_blank" rel="noreferrer">{ row.title }</a>
+											</td>
+											{ detailTools.map( ( tool ) => (
+												<td key={ tool.id } className="num">
+													{ formatNumber( row[ `${ tool.id }_views` ] ) }
+													<Diff value={ row[ DIFF_KEY[ tool.id ] ] } threshold={ data.threshold } base={ tool.id === 'log' ? row.wps_log_views : undefined } />
+												</td>
+											) ) }
+										</tr>
+									) ) }
+								</tbody>
+							</table>
+						</div>
 						<p className="wp5w-note">
 							{ sprintf(
 								/* translators: %s: visualizzazioni minime in una delle origini. */
-								__( 'Visualizzazioni sui giorni completi; compaiono i contenuti con almeno %s visualizzazioni in una delle origini.', 'wp-5w' ),
+								__( 'Visualizzazioni sui giorni completi, in ordine di differenza assoluta rispetto a WP Statistics (la più grande tra raccolta propria e Independent Analytics); compaiono i contenuti con almeno %s visualizzazioni in una delle origini. Il log conta solo i giorni con il dettaglio per contenuto, riconosce solo la home e i contenuti singoli (– per archivi e ricerche) e non entra nella classifica.', 'wp-5w' ),
 								formatNumber( data.min_views )
 							) }
 						</p>

@@ -121,46 +121,46 @@ final class TodayQuery {
 			'tracking'  => Settings::get()['own_tracking'],
 			'first_day' => $first,
 			'kpis'      => $kpis,
-			'hourly'    => $this->hourly( $today, $local, (int) substr( $time, 0, 2 ) ),
+			'hourly'    => $this->hourly( $today, $local, (int) substr( $time, 0, 2 ), TodayWindow::days( $today, $first, self::WINDOWS['avg7'] ) ),
 			'pages'     => $this->pages( $today, $full['visitors'][ $today ] ?? 0 ),
 		);
 	}
 
 	/**
-	 * Andamento orario cumulato di oggi e di ieri (visitatori e visualizzazioni), per il grafico.
+	 * Andamento orario cumulato di oggi, di ieri e della media degli ultimi 7 giorni (visitatori e visualizzazioni), per il grafico.
 	 *
 	 * Un visitatore conta nell'ora della sua prima visita del giorno, così a ogni ora il valore cumulato è il numero di visitatori
 	 * distinti fino a quel momento (come il KPI). L'ora è quella locale del sito, ricavata da `ts` con la stessa espressione di get().
-	 * Oggi si ferma all'ora in corso.
+	 * Oggi si ferma all'ora in corso. La media usa gli stessi giorni del KPI `avg7` (un giorno senza visite conta zero), quindi
+	 * il suo valore delle 23 è la media della giornata intera; null se non c'è ancora nessun giorno intero.
+	 * I valori di ogni singola ora (le barre del grafico) sono le differenze tra due ore consecutive e li calcola il frontend.
 	 *
-	 * @param string $today        Oggi (Y-m-d).
-	 * @param string $local        Espressione SQL dell'ora locale di `ts` (LocalTime::shift_sql()).
-	 * @param int    $current_hour Ora locale in corso (0-23).
-	 * @return array{today:array{visitors:array<int,int|null>,views:array<int,int|null>},yesterday:array{visitors:array<int,int|null>,views:array<int,int|null>}}
+	 * @param string            $today        Oggi (Y-m-d).
+	 * @param string            $local        Espressione SQL dell'ora locale di `ts` (LocalTime::shift_sql()).
+	 * @param int               $current_hour Ora locale in corso (0-23).
+	 * @param array<int,string> $avg_days     Giorni della media di 7 giorni (TodayWindow::days()).
+	 * @return array<string,array{visitors:array<int,int|float|null>,views:array<int,int|float|null>}|null>
 	 */
-	private function hourly( string $today, string $local, int $current_hour ): array {
+	private function hourly( string $today, string $local, int $current_hour, array $avg_days ): array {
 		global $wpdb;
 
 		$hits = Schema::table( 'hits' );
 		// Ieri con date su stringhe in UTC: 24 ore prima non è sempre il giorno prima nei giorni di cambio dell'ora.
 		$yesterday = gmdate( 'Y-m-d', (int) strtotime( $today . ' UTC' ) - DAY_IN_SECONDS );
 
-		// Passo 1: visualizzazioni per giorno e ora, poi visitatori per giorno e ora della prima visita.
-		$views    = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT day, HOUR( {$local} ) AS hour, COUNT(*) AS n FROM {$hits} WHERE day IN (%s, %s) GROUP BY day, hour",
-				$yesterday,
-				$today
-			),
+		// Passo 1: visualizzazioni per giorno e ora, poi visitatori per giorno e ora della prima visita, su oggi, ieri e i giorni della media.
+		$days         = array_values( array_unique( array_merge( array( $yesterday, $today ), $avg_days ) ) );
+		$placeholders = implode( ',', array_fill( 0, count( $days ), '%s' ) );
+		$views        = $wpdb->get_results(
+			$wpdb->prepare( "SELECT day, HOUR( {$local} ) AS hour, COUNT(*) AS n FROM {$hits} WHERE day IN ({$placeholders}) GROUP BY day, hour", $days ), // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
 			ARRAY_A
 		);
-		$visitors = $wpdb->get_results(
+		$visitors     = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT day, hour, COUNT(*) AS n FROM (
-					SELECT day, visitor, HOUR( MIN( {$local} ) ) AS hour FROM {$hits} WHERE day IN (%s, %s) GROUP BY day, visitor
-				) first_hits GROUP BY day, hour",
-				$yesterday,
-				$today
+					SELECT day, visitor, HOUR( MIN( {$local} ) ) AS hour FROM {$hits} WHERE day IN ({$placeholders}) GROUP BY day, visitor
+				) first_hits GROUP BY day, hour", // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Segnaposto generati per ogni giorno.
+				$days
 			),
 			ARRAY_A
 		);
@@ -177,7 +177,23 @@ final class TodayQuery {
 			$by['views'][ (string) $row['day'] ][ (int) $row['hour'] ] = (int) $row['n'];
 		}
 
-		// Passo 3: cumulati; oggi si ferma all'ora in corso, ieri è completo.
+		// Passo 3: media ora per ora dei cumulati dei giorni della media, con due decimali (il frontend ne ricava i valori orari:
+		// con un decimale le differenze tra due ore sbaglierebbero di 0,1).
+		$avg7 = null;
+		if ( array() !== $avg_days ) {
+			$avg7 = array();
+			foreach ( array( 'visitors', 'views' ) as $metric ) {
+				$sum = array_fill( 0, 24, 0 );
+				foreach ( $avg_days as $day ) {
+					foreach ( TodayWindow::cumulate( $by[ $metric ][ $day ] ?? array() ) as $hour => $value ) {
+						$sum[ $hour ] += (int) $value;
+					}
+				}
+				$avg7[ $metric ] = array_map( static fn( int $total ): float => round( $total / count( $avg_days ), 2 ), $sum );
+			}
+		}
+
+		// Passo 4: cumulati; oggi si ferma all'ora in corso, ieri è completo.
 		return array(
 			'today'     => array(
 				'visitors' => TodayWindow::cumulate( $by['visitors'][ $today ] ?? array(), $current_hour ),
@@ -187,6 +203,7 @@ final class TodayQuery {
 				'visitors' => TodayWindow::cumulate( $by['visitors'][ $yesterday ] ?? array() ),
 				'views'    => TodayWindow::cumulate( $by['views'][ $yesterday ] ?? array() ),
 			),
+			'avg7'      => $avg7,
 		);
 	}
 

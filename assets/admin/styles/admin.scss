@@ -257,6 +257,11 @@
 	}
 }
 
+// Tabelle compatte del Confronto: il badge sta sulla stessa riga del numero, al posto delle colonne «Differenza».
+.wp5w-compact .wp5w-diff {
+	margin-left: 6px;
+}
+
 .wp5w-table,
 .wp5w-status table {
 	.num {

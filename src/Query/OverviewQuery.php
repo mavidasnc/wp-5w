@@ -11,6 +11,7 @@ namespace Mavida\FiveW\Query;
 
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Settings;
+use Mavida\FiveW\Sources\AccessLogSource;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Metrics;
 use Mavida\FiveW\Support\Origin;
@@ -71,6 +72,7 @@ final class OverviewQuery {
 			'series'   => $this->series( $range ),
 			'tools'    => $this->tools( $range ),
 			'channels' => $this->channels( $range ),
+			'no_js'    => $this->no_js( $range ),
 			'coverage' => $this->coverage(),
 		);
 	}
@@ -204,6 +206,49 @@ final class OverviewQuery {
 				'visitors' => (int) $row['visitors'],
 			),
 			$rows
+		);
+	}
+
+	/**
+	 * Visitatori senza JavaScript visti solo dai log del server (etichetta `senza-js` dell'origine `logbot`), per la riga sotto i canali.
+	 *
+	 * ECCEZIONE ALLA REGOLA DELL'ORIGINE: legge le righe `logbot` e `log`, che `Origin::where()` non seleziona mai. Sono un'altra fonte
+	 * (il tracker è JavaScript, quindi questi visitatori non arrivano né alla raccolta propria né a WP Statistics): il numero resta
+	 * fuori dalle quote dei canali e porta con sé i giorni del periodo coperti dai log.
+	 *
+	 * @param DateRange $range Intervallo.
+	 * @return array{visitors:int,days:int,period_days:int}|null Null se i log non coprono nessun giorno del periodo.
+	 */
+	private function no_js( DateRange $range ): ?array {
+		global $wpdb;
+
+		// Passo 1: giorni coperti dai log (AccessLogSource scrive site_daily per ogni giorno completo, anche senza bot) e visitatori senza JS.
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT ( SELECT COUNT(DISTINCT day) FROM ' . Schema::table( 'site_daily' ) . ' WHERE origin IN ( %s, %s ) AND day BETWEEN %s AND %s ) AS days,
+					( SELECT COALESCE( SUM(visitors), 0 ) FROM ' . Schema::table( 'dim_daily' ) . " WHERE dim = 'bot' AND value = %s AND origin = %s AND day BETWEEN %s AND %s ) AS visitors",
+				AccessLogSource::ORIGIN,
+				AccessLogSource::ORIGIN_BOT,
+				$range->from,
+				$range->to,
+				AccessLogSource::LABEL_NO_JS,
+				AccessLogSource::ORIGIN_BOT,
+				$range->from,
+				$range->to
+			),
+			ARRAY_A
+		);
+
+		// Passo 2: senza giorni coperti la riga non si mostra.
+		$days = (int) ( $row['days'] ?? 0 );
+		if ( 0 === $days ) {
+			return null;
+		}
+
+		return array(
+			'visitors'    => (int) $row['visitors'],
+			'days'        => $days,
+			'period_days' => $range->days(),
 		);
 	}
 

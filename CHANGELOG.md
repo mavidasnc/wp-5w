@@ -2,6 +2,24 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [0.17.0] — 2026-10-28
+
+Media di 7 giorni e barre orarie nella scheda «Oggi», log di accesso in tutti i box del Confronto, visitatori senza JavaScript nella Panoramica. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo. **Dopo l'aggiornamento:** `wp 5w log-import` per scrivere il dettaglio per contenuto dei log sui giorni già importati (gli archivi già ruotati restano senza, e il Confronto li mostra con «–»).
+
+### Added
+- **Media degli ultimi 7 giorni nell'andamento orario di «Oggi»:** chiave `hourly.avg7` di `GET /admin/today` (cumulati medi ora per ora, due decimali), sugli stessi giorni del KPI `avg7`, quindi il valore delle 23 è la sua giornata intera; `null` senza nessun giorno intero.
+- **Barre orarie sovrapposte alle linee cumulate** (`HourlyChart`): oggi, ieri e media 7 giorni, su un secondo asse a destra; i valori di ogni ora sono le differenze tra due ore consecutive, calcolate nel frontend. Per i visitatori sono i nuovi visitatori dell'ora (prima visita del giorno).
+- **Dettaglio per contenuto dei log** (`AccessLogSource`): per l'origine `log` (mai `logbot`) scrive anche `object_daily` (visualizzazioni e visitatori per contenuto) ed `entry_daily` (ingressi per contenuto e canale), solo per la home e i contenuti singoli (`url_to_postid()` con una cache per percorso, ID come `Tracker::current_object()`); archivi, ricerche e pagine successive si saltano.
+- **Log negli «Ingressi diretti sulla home» e nei «Contenuti con la differenza più grande»** della scheda Stato, sempre in ordine raccolta propria, WP Statistics, Independent Analytics, log. Il log conta solo i giorni con il dettaglio per contenuto ed è confrontato con WP Statistics sugli stessi giorni; nei contenuti non entra né nella soglia né nella classifica e vale «–» per i tipi che non sa riconoscere.
+- **Visitatori senza JavaScript nella Panoramica:** riga sotto i canali (chiave `no_js` di `GET /admin/overview`) con i visitatori `senza-js` dei log e i giorni del periodo coperti dai log, fuori dalle quote dei canali. È una nuova eccezione alla regola dell'origine (`OverviewQuery::no_js()`).
+
+### Changed
+- **Differenze compatte nella scheda Stato:** negli ingressi diretti, nei canali e nei contenuti la differenza rispetto a WP Statistics è un badge accanto al numero (verde entro la soglia, rosso oltre) al posto delle righe e colonne «Differenza»; la colonna «Differenza assoluta» dei contenuti non c'è più (resta l'ordinamento). Il badge del log ha un tooltip con la sua base (WP Statistics sui soli giorni dei log, chiavi `wps_log` e `wps_log_views`), che può differire dalla colonna WP Statistics della stessa riga.
+
+### Fixed
+- **Differenza del log nei canali:** era calcolata contro WP Statistics su tutti i giorni del Confronto, anche quelli non coperti dai log; ora sugli stessi giorni dei log.
+- **Ingresso e referrer dei log:** venivano dalla prima pagina letta, ma `glob()` elenca prima l'archivio più recente; ora vengono dalla pagina più vecchia del giorno.
+
 ## [0.16.0] — 2026-10-27
 
 Scheda «Oggi» con aggiornamento automatico e andamento orario. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.

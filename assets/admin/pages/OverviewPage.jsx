@@ -1,7 +1,7 @@
 import { useEffect, useState } from '@wordpress/element';
-import { __ } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 import { Notice, SelectControl, Spinner } from '@wordpress/components';
-import { api, formatDay, shiftDay, today } from '../api';
+import { api, formatDay, formatNumber, shiftDay, today } from '../api';
 import KpiCard from '../components/KpiCard';
 import TrendChart, { TOOL_KEYS } from '../components/TrendChart';
 import TopContents from '../components/TopContents';
@@ -103,6 +103,17 @@ export default function OverviewPage() {
 						<section className="wp5w-card">
 							<h2>{ __( 'Canali', 'wp-5w' ) }</h2>
 							<ChannelList channels={ data.channels } />
+							{ data.no_js && (
+								<p className="wp5w-note">
+									{ sprintf(
+										/* translators: 1: visitatori senza JavaScript, 2: giorni coperti dai log, 3: giorni del periodo. */
+										__( 'Senza JavaScript, dai log del server: %1$s visitatori in %2$s giorni su %3$s del periodo, fuori dalle quote qui sopra. Il tracker non li vede: sono soprattutto crawler, ma anche lettori che tornano con la pagina già in cache e non interagiscono. Dettaglio nella scheda Stato.', 'wp-5w' ),
+										formatNumber( data.no_js.visitors ),
+										formatNumber( data.no_js.days ),
+										formatNumber( data.no_js.period_days )
+									) }
+								</p>
+							) }
 						</section>
 					</div>
 
