@@ -214,68 +214,114 @@ final class AudienceQuery {
 	/**
 	 * Siti di provenienza degli ultimi N giorni (box «Provenienza»).
 	 *
-	 * Con 7, 30 e 90 giorni legge `referrer_daily` con la regola dell'origine: oggi è parziale (le righe own arrivano con
-	 * l'aggregazione oraria) o assente (le righe wps arrivano con l'ETL notturno di domani).
-	 * Con 1 giorno («Oggi») legge `wp5w_hits`, come TodayQuery: sempre raccolta propria e in tempo reale, quindi nessuna regola
-	 * dell'origine. La SELECT interna è quella con cui OwnSource scrive `referrer_daily` (ingressi con un referrer esterno,
-	 * visitatori distinti per contenuto, canale «ai» con Channels::ai_sql()), così i numeri coincidono con quelli che
-	 * l'aggregazione oraria scriverà per oggi.
-	 * Un visitatore conta una volta per contenuto e per giorno (come in `referrer_daily`).
+	 * Stessa scelta della sorgente di referrer_pages(), giorno per giorno, così il numero del box e quello della modale coincidono:
+	 * - dal primo giorno di `wp5w_hits` in poi le visite grezze (raccolta propria, aggiornate a ogni visita), con la SELECT con cui
+	 *   OwnSource scrive `referrer_daily` (ingressi con un referrer esterno, canale «ai» con Channels::ai_sql());
+	 * - prima di quel giorno `referrer_daily` con la regola dell'origine, con il referrer normalizzato da Channels::host_sql()
+	 *   (WP Statistics salva le app come `android-app://pacchetto/`, la raccolta propria come `pacchetto`).
+	 * Il referrer di ogni riga è quindi nella forma di Referrers::hits_key(). Un visitatore conta una volta per contenuto e per giorno.
 	 *
 	 * @param int $days Giorni fino a oggi compreso (1 = solo oggi).
-	 * @return array{range:array{from:string,to:string},live:bool,rows:array<int,array<string,mixed>>}
+	 * @return array<string,mixed>
 	 */
 	public function referrers( int $days ): array {
 		global $wpdb;
 
+		// Passo 1: periodo e divisione tra aggregato e visite grezze sul primo giorno di wp5w_hits.
 		$range = DateRange::last_days( $days, wp_date( 'Y-m-d' ) );
-		$live  = 1 === $days;
+		$hits  = Schema::table( 'hits' );
+		$first = $wpdb->get_var( "SELECT MIN(day) FROM {$hits}" );
 
-		if ( $live ) {
-			$ai  = Channels::ai_sql( 'referrer_host', 'utm_source' );
-			$sql = $wpdb->prepare(
-				"SELECT referrer, MAX(source) AS source, MAX(channel) AS channel, SUM(visitors) AS visitors, COUNT(*) AS contents
-				FROM (
-					SELECT referrer_host AS referrer, MAX(IF( {$ai} <> '', 'ai', channel )) AS channel, MAX(IF( {$ai} <> '', {$ai}, source )) AS source,
-						COUNT(DISTINCT visitor) AS visitors
-					FROM " . Schema::table( 'hits' ) . " WHERE is_entry = 1 AND referrer_host <> '' AND day = %s
-					GROUP BY object_type, object_id, referrer_host
-				) t
-				GROUP BY referrer ORDER BY visitors DESC, referrer LIMIT %d",
-				$range->to,
-				self::LIMIT
+		[ $aggregate, $raw ] = $range->split_at( is_string( $first ) && '' !== $first ? $first : null );
+
+		$parts = array();
+
+		// Passo 2: visite grezze, visitatori distinti per contenuto e giorno, sommati per sito e contenuto.
+		if ( $raw ) {
+			$ai      = Channels::ai_sql( 'referrer_host', 'utm_source' );
+			$parts[] = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT referrer, object_type, object_id, MAX(channel) AS channel, MAX(source) AS source, SUM(visitors) AS visitors
+					FROM (
+						SELECT referrer_host AS referrer, object_type, object_id, MAX(IF( {$ai} <> '', 'ai', channel )) AS channel,
+							MAX(IF( {$ai} <> '', {$ai}, source )) AS source, COUNT(DISTINCT visitor) AS visitors
+						FROM {$hits} WHERE is_entry = 1 AND referrer_host <> '' AND day BETWEEN %s AND %s
+						GROUP BY referrer_host, object_type, object_id, day
+					) t
+					GROUP BY referrer, object_type, object_id",
+					$raw->from,
+					$raw->to
+				),
+				ARRAY_A
 			);
-		} else {
-			// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
-			$origin = Origin::where( Settings::own_since() );
-			$sql    = $wpdb->prepare(
-				'SELECT referrer, MAX(source) AS source, MAX(channel) AS channel, SUM(visitors) AS visitors,
-					COUNT(DISTINCT object_type, object_id) AS contents
-				FROM ' . Schema::table( 'referrer_daily' ) . ' WHERE day BETWEEN %s AND %s AND ' . $origin . '
-				GROUP BY referrer ORDER BY visitors DESC, referrer LIMIT %d',
-				$range->from,
-				$range->to,
-				self::LIMIT
+		}
+
+		// Passo 3: giorni precedenti dall'aggregato (regola dell'origine: solo righe wps, o own dalla data di passaggio).
+		if ( $aggregate ) {
+			$parts[] = $wpdb->get_results(
+				$wpdb->prepare(
+					'SELECT ' . Channels::host_sql( 'referrer' ) . ' AS referrer, object_type, object_id, MAX(channel) AS channel, MAX(source) AS source, SUM(visitors) AS visitors
+					FROM ' . Schema::table( 'referrer_daily' ) . ' WHERE day BETWEEN %s AND %s AND ' . Origin::where( Settings::own_since() ) . '
+					GROUP BY 1, object_type, object_id',
+					$aggregate->from,
+					$aggregate->to
+				),
+				ARRAY_A
+			);
+		}
+
+		// Passo 4: un sito per riga (visitatori, contenuti diversi, canale e sorgente), dal più visitato.
+		$sites = array();
+		foreach ( $parts as $rows ) {
+			foreach ( (array) $rows as $row ) {
+				$key = (string) $row['referrer'];
+				if ( '' === $key ) {
+					continue;
+				}
+				$sites[ $key ]            ??= array(
+					'visitors' => 0,
+					'contents' => array(),
+					'channel'  => '',
+					'source'   => '',
+				);
+				$sites[ $key ]['visitors'] += (int) $row['visitors'];
+				$sites[ $key ]['contents'][ $row['object_type'] . '|' . $row['object_id'] ] = true;
+				// Canale e sorgente: quelli delle visite grezze (la prima parte) se ci sono, altrimenti dell'aggregato.
+				$sites[ $key ]['channel'] = '' !== $sites[ $key ]['channel'] ? $sites[ $key ]['channel'] : (string) $row['channel'];
+				$sites[ $key ]['source']  = '' !== $sites[ $key ]['source'] ? $sites[ $key ]['source'] : (string) $row['source'];
+			}
+		}
+		uksort( $sites, static fn( $a, $b ): int => array( $sites[ $b ]['visitors'], (string) $a ) <=> array( $sites[ $a ]['visitors'], (string) $b ) );
+
+		$out = array();
+		foreach ( array_slice( $sites, 0, self::LIMIT, true ) as $referrer => $site ) {
+			$out[] = array(
+				'referrer' => (string) $referrer,
+				'label'    => Referrers::label( (string) $referrer ),
+				'source'   => $site['source'],
+				'channel'  => $site['channel'],
+				'visitors' => $site['visitors'],
+				'contents' => count( $site['contents'] ),
 			);
 		}
 
 		return array(
-			'range' => array(
+			'range'   => array(
 				'from' => $range->from,
 				'to'   => $range->to,
 			),
-			'live'  => $live,
-			'rows'  => array_map(
-				static fn( array $row ): array => array(
-					'referrer' => (string) $row['referrer'],
-					'label'    => Referrers::label( (string) $row['referrer'] ),
-					'source'   => (string) $row['source'],
-					'channel'  => (string) $row['channel'],
-					'visitors' => (int) $row['visitors'],
-					'contents' => (int) $row['contents'],
-				),
-				(array) $wpdb->get_results( $sql, ARRAY_A )
+			'live'    => 1 === $days,
+			'sources' => array(
+				'aggregate' => $aggregate ? array(
+					'from' => $aggregate->from,
+					'to'   => $aggregate->to,
+				) : null,
+				'raw'       => $raw ? array(
+					'from' => $raw->from,
+					'to'   => $raw->to,
+				) : null,
 			),
+			'rows'    => $out,
 		);
 	}
 

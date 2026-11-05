@@ -17,7 +17,7 @@ const maybe = ( value ) => ( value === null ? '–' : formatNumber( value ) );
  *
  * @param {Object} sources { aggregate, raw }, ognuno { from, to } oppure null.
  */
-const sourcesNote = ( { aggregate, raw } ) => {
+export const sourcesNote = ( { aggregate, raw } ) => {
 	const parts = [];
 	if ( raw ) {
 		parts.push(

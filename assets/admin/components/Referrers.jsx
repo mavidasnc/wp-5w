@@ -5,7 +5,7 @@ import { api, formatDay, formatNumber } from '../api';
 import Card from './Card';
 import PeriodSwitch, { PERIODS } from './PeriodSwitch';
 import ShowMore from './ShowMore';
-import ReferrerModal from './ReferrerModal';
+import ReferrerModal, { sourcesNote } from './ReferrerModal';
 import { LABELS } from './ChannelList';
 
 // «Oggi» (1 giorno) prima dei tre periodi soliti.
@@ -88,9 +88,8 @@ export default function Referrers() {
 			{ data && (
 				<p className="wp5w-note">
 					{ __( 'Contenuti: quanti articoli o pagine diversi hanno ricevuto visitatori da quel sito; clic sul sito per vederli.', 'wp-5w' ) }{ ' ' }
-					{ data.live
-						? __( 'Oggi: dati della raccolta propria, in tempo reale (vuoto se la raccolta propria è spenta).', 'wp-5w' )
-						: __( 'Dati aggregati: oggi è parziale (raccolta propria, aggiornata ogni ora) o assente (WP Statistics, importato di notte).', 'wp-5w' ) }
+					{ /* Stessa scelta della sorgente della modale, giorno per giorno: i numeri coincidono. */ }
+					{ sourcesNote( data.sources ) }
 				</p>
 			) }
 			{ site && data && <ReferrerModal site={ site } days={ days } onClose={ () => setSite( null ) } /> }
