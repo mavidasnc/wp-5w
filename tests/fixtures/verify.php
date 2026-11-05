@@ -544,6 +544,8 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 
 	// `tools` (le serie dei tre strumenti) legge di proposito tutte le origini: non fa parte del confronto prima/dopo le righe own.
 	// Lo stesso per `no_js` (0.17.0), che legge le righe `logbot` dei log di accesso.
+	// Il box «Provenienza» non c'è: dalla 0.19.0 legge le visite grezze dal loro primo giorno, qualunque sia wp5w_own_since
+	// (come la modale), quindi cambia di proposito dopo le visite simulate. La sezione 19 lo confronta con la modale.
 	$overview_data = $overview->get( $r30 );
 	unset( $overview_data['tools'], $overview_data['no_js'] );
 
@@ -556,7 +558,6 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 		'top 30'       => (string) wp_json_encode( $posts->top( 30 ) ),
 		'dettaglio'    => (string) wp_json_encode( $posts->detail( $post_a, $r60 ) ),
 		'visitatori'   => (string) wp_json_encode( $audience->get() ),
-		'provenienza'  => (string) wp_json_encode( $audience->referrers( 7 ) ),
 		'pubblico'     => (string) wp_json_encode( $audience->dimensions( $r30 ) ),
 		'trend sito'   => (string) wp_json_encode( $trend->site() ),
 		'trend oggetti' => (string) wp_json_encode( $trend->objects( $seed_posts ) ),
@@ -1794,7 +1795,8 @@ if ( false === $state_backup ) {
 // Passo 4: etichette delle app (solo presentazione: i dati nelle tabelle non cambiano).
 if ( $has_seed ) {
 	$seed_referrer = static fn( array $rows ): string => (string) ( array_column( $rows, 'label', 'referrer' )['android-app://com.linkedin.android/'] ?? 'nessuna riga' );
-	$check( 'etichette: referrer della scheda Visitatori', 'LinkedIn (app)', $seed_referrer( ( new AudienceQuery( new SearchQuery() ) )->referrers( 7 )['rows'] ) );
+	// Dalla 0.19.0 il box normalizza il referrer come le visite grezze (Referrers::hits_key()): la riga wps è com.linkedin.android.
+	$check( 'etichette: referrer della scheda Visitatori', 'LinkedIn (app)', (string) ( array_column( ( new AudienceQuery( new SearchQuery() ) )->referrers( 7 )['rows'], 'label', 'referrer' )['com.linkedin.android'] ?? 'nessuna riga' ) );
 	$check( 'etichette: referrer del dettaglio', 'LinkedIn (app)', $seed_referrer( ( new PostsQuery() )->detail( $post_a, DateRange::last_days( 60, $today ) )['referrers'] ?? array() ) );
 	$check( 'etichette: il dato in referrer_daily non cambia', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'wps' AND day = %s AND referrer = 'android-app://com.linkedin.android/'", $seed_day ) ) );
 }
@@ -3517,8 +3519,9 @@ $check( 'modale oggi: stessi contenuti dell\'aggregazione oraria', implode( ',',
 $wpdb->query( "TRUNCATE TABLE {$hits_table}" );
 $wpdb->query( $wpdb->prepare( "DELETE FROM {$ref_table} WHERE origin = 'own' AND day = %s", $ref_today ) );
 
-// Nessuna visita in wp5w_hits (raccolta spenta o sito senza visite oggi): «Oggi» è vuoto senza errori.
-$check( 'oggi senza visite: nessun sito', 0, count( $ref_query->referrers( 1 )['rows'] ) );
+// Nessuna visita in wp5w_hits (raccolta mai accesa): dalla 0.19.0 «Oggi» viene dall'aggregato, come ogni giorno prima delle visite grezze.
+$ref_none = $ref_query->referrers( 1 );
+$check( 'oggi senza visite grezze: tutto dall\'aggregato, nessun errore', $ref_today . '|' . $ref_today . '|null', $ref_none['sources']['aggregate']['from'] . '|' . $ref_none['sources']['aggregate']['to'] . '|' . wp_json_encode( $ref_none['sources']['raw'] ) );
 
 // ---------------------------------------------------------------------------
 // 19. Iterazione 0.19.0: hash dell'IP e user agent (schema v7), conservazione, modale del referrer, dettaglio delle visite e avvisi.
@@ -3611,6 +3614,19 @@ $v19_today_pages = $v19_query->referrer_pages( 'spam19.wp5w-verify.example', 1 )
 $check( 'modale 0.19 oggi: ieri non disponibile, totale = oggi', '2|null|2|1', $v19_cols( $v19_today_pages['rows'][0] ) );
 $v19_app = $v19_query->referrer_pages( 'android-app://com.wp5w.app/', 7 );
 $check( 'modale 0.19: referrer android-app:// di WP Statistics trova le visite grezze com.wp5w.app', '1|0|4|1', $v19_cols( $v19_app['rows'][0] ?? array() ) );
+
+// Box «Provenienza» allineato alla modale: stessa sorgente giorno per giorno, stessi visitatori e contenuti per ogni periodo.
+// Il referrer android-app:// di WP Statistics e com.wp5w.app delle visite grezze sono una sola riga (com.wp5w.app).
+foreach ( array( 1, 7, 30, 90 ) as $wp5w_days ) {
+	$v19_box = array_column( $v19_query->referrers( $wp5w_days )['rows'], null, 'referrer' );
+	foreach ( array( 'spam19.wp5w-verify.example', 'com.wp5w.app' ) as $wp5w_ref ) {
+		$v19_modal = $v19_query->referrer_pages( $wp5w_ref, $wp5w_days )['totals'];
+		$check( "box = modale, {$wp5w_ref} a {$wp5w_days} giorni (visitatori e contenuti)", $v19_modal['visitors'] . '|' . $v19_modal['contents'], ( $v19_box[ $wp5w_ref ]['visitors'] ?? 0 ) . '|' . ( $v19_box[ $wp5w_ref ]['contents'] ?? 0 ) );
+	}
+}
+$v19_box7 = $v19_query->referrers( 7 );
+$check( 'box 0.19: spam19 a 7 giorni = 13 visitatori su 2 contenuti', '13|2', ( array_column( $v19_box7['rows'], 'visitors', 'referrer' )['spam19.wp5w-verify.example'] ?? '' ) . '|' . ( array_column( $v19_box7['rows'], 'contents', 'referrer' )['spam19.wp5w-verify.example'] ?? '' ) );
+$check( 'box 0.19: nessuna riga con la chiave android-app:// e sorgenti come nella modale', '0|' . wp_json_encode( $v19_pages['sources'] ), count( array_filter( $v19_box7['rows'], static fn( array $row ): bool => str_starts_with( $row['referrer'], 'android-app://' ) ) ) . '|' . wp_json_encode( $v19_box7['sources'] ) );
 
 // Dettaglio delle visite: filtri, conteggi su tutte le visite, raggruppamenti, orario del sito e hash corto.
 $v19_visits = new Mavida\FiveW\Query\VisitsQuery();
@@ -3772,6 +3788,36 @@ $check( 'avvisi: risposta senza la chiave visitor', 0, (int) str_contains( (stri
 $admin_user( 0 );
 update_option( Settings::OPTION, Settings::defaults() );
 delete_option( Mavida\FiveW\Etl\Anomalies::OPTION );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+// Pulizia manuale delle visite grezze (mai automatica): con 30 giorni restano oggi e i 29 precedenti.
+update_option( Settings::OPTION, Settings::defaults() );
+foreach ( array( 40, 31, 30, 29, 0 ) as $wp5w_days ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri) VALUES (%s, %s, UNHEX(%s), 'home', 0, '/')", $v19_ago( $wp5w_days ) . ' 12:00:00', $v19_ago( $wp5w_days ), md5( "purge-{$wp5w_days}" ) ) );
+}
+( new OwnSource() )->import( new DateRange( $v19_ago( 40 ), $v19_today ) );
+$pg_own     = static fn(): string => (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day IN (%s, %s, %s)", $v19_ago( 40 ), $v19_ago( 31 ), $v19_ago( 30 ) ) );
+$pg_preview = Mavida\FiveW\Admin\Privacy::old_hits();
+$check( 'pulizia: anteprima con 30 giorni, 3 visite prima del primo giorno conservato', '30|' . $v19_ago( 29 ) . '|3|' . $v19_ago( 40 ), implode( '|', $pg_preview ) );
+$check( 'pulizia: righe own dei tre giorni prima della cancellazione', '3', $pg_own() );
+$pg_route = '/wp5w/v1/admin/hits/purge';
+$check( 'pulizia senza utente: 401 o 403 (anteprima e cancellazione)', '1|1', (int) in_array( $rest_call( 'GET', $pg_route )->get_status(), array( 401, 403 ), true ) . '|' . (int) in_array( $rest_call( 'POST', $pg_route, array( 'before' => $pg_preview['before'] ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$check( 'pulizia: GET con amministratore, 3 righe', '200|3', $rest_call( 'GET', $pg_route )->get_status() . '|' . ( $rest_call( 'GET', $pg_route )->get_data()['rows'] ?? '' ) );
+$check( 'pulizia senza before: 400', 400, $rest_call( 'POST', $pg_route )->get_status() );
+$check( 'pulizia con un before diverso dall\'anteprima: 409 e nessuna riga cancellata', '409|5', $rest_call( 'POST', $pg_route, array( 'before' => $v19_ago( 10 ) ) )->get_status() . '|' . $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table}" ) );
+$pg_done = $rest_call( 'POST', $pg_route, array( 'before' => $pg_preview['before'] ) );
+$check( 'pulizia: 200, 3 righe cancellate e anteprima successiva vuota', '200|3|0', $pg_done->get_status() . '|' . ( $pg_done->get_data()['deleted'] ?? '' ) . '|' . ( $pg_done->get_data()['after']['rows'] ?? '' ) );
+$admin_user( 0 );
+$check( 'pulizia: restano le 2 visite dal primo giorno conservato', '2|' . $v19_ago( 29 ), $wpdb->get_var( "SELECT CONCAT(COUNT(*), '|', MIN(day)) FROM {$hits_table}" ) );
+( new OwnSource() )->import( new DateRange( $v19_ago( 40 ), $v19_today ) );
+$check( 'pulizia: le righe own dei giorni cancellati restano anche dopo una nuova aggregazione', '3', $pg_own() );
+// Una visita di nuovo più vecchia della conservazione: il passaggio orario non la cancella (solo il pulsante lo fa).
+$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri) VALUES (%s, %s, UNHEX(%s), 'home', 0, '/')", $v19_ago( 40 ) . ' 12:00:00', $v19_ago( 40 ), md5( 'purge-again' ) ) );
+$check( 'pulizia: nessuna cancellazione automatica nel passaggio orario', 3, ( static function () use ( $wpdb, $hits_table ): int {
+	( new Mavida\FiveW\Etl\Scheduler( Plugin::importer() ) )->run_hourly();
+	return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table}" );
+} )() );
 $wpdb->query( "TRUNCATE TABLE {$hits_table}" );
 
 // ---------------------------------------------------------------------------

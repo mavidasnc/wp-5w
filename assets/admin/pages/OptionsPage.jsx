@@ -4,6 +4,7 @@ import { Button, Notice, RadioControl, Spinner, TextControl, TextareaControl, To
 import { api, formatDay, today } from '../api';
 import Card from '../components/Card';
 import GscCard from '../components/GscCard';
+import HitsPurge from '../components/HitsPurge';
 
 /**
  * Messaggio leggibile di un errore REST: per i parametri non validi (400) è quello della validazione
@@ -50,6 +51,8 @@ const toFields = ( data ) => ( {
 
 export default function OptionsPage() {
 	const [ fields, setFields ] = useState( null );
+	// Giorni di conservazione salvati: la pulizia manuale usa questi, non quelli nel campo.
+	const [ savedRetention, setSavedRetention ] = useState( null );
 	const [ firstDay, setFirstDay ] = useState( null );
 	const [ saving, setSaving ] = useState( false );
 	const [ notice, setNotice ] = useState( null );
@@ -59,6 +62,7 @@ export default function OptionsPage() {
 		api( '/admin/settings' )
 			.then( ( data ) => {
 				setFields( toFields( data ) );
+				setSavedRetention( String( data.retention_days ) );
 				setFirstDay( data.own_first_day );
 			} )
 			.catch( ( e ) => setNotice( { status: 'error', text: errorMessage( e ) } ) );
@@ -96,6 +100,7 @@ export default function OptionsPage() {
 		} )
 			.then( ( data ) => {
 				setFields( toFields( data ) );
+				setSavedRetention( String( data.retention_days ) );
 				setFirstDay( data.own_first_day );
 				setNotice( { status: 'success', text: __( 'Opzioni salvate.', 'wp-5w' ) } );
 			} )
@@ -196,7 +201,7 @@ export default function OptionsPage() {
 					max={ 365 }
 					label={ __( 'Giorni (da 7 a 365)', 'wp-5w' ) }
 					help={ __(
-						'Gli aggregati restano per sempre. La pulizia automatica delle visite grezze arriverà con il passaggio alla raccolta propria.',
+						'Gli aggregati restano per sempre. Le visite grezze non si cancellano da sole: si cancellano quelle più vecchie di questi giorni solo con il pulsante qui sotto, dopo l\'anteprima.',
 						'wp-5w'
 					) }
 					value={ fields.retention_days }
@@ -215,6 +220,7 @@ export default function OptionsPage() {
 					value={ fields.ip_retention_days }
 					onChange={ set( 'ip_retention_days' ) }
 				/>
+				<HitsPurge unsaved={ fields.retention_days !== savedRetention } />
 			</Card>
 
 			<Card id="options-alerts" title={ __( 'Avvisi sulle visite anomale', 'wp-5w' ) }>

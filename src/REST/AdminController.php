@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Mavida\FiveW\REST;
 
+use Mavida\FiveW\Admin\Privacy;
 use Mavida\FiveW\Etl\Anomalies;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
@@ -266,6 +267,32 @@ final class AdminController extends RestController {
 					'ip'       => array(
 						'type'    => 'string',
 						'pattern' => '^[0-9a-fA-F]{16}$',
+					),
+				),
+			)
+		);
+
+		// Pulizia manuale delle visite grezze più vecchie di retention_days (mai automatica): anteprima e cancellazione.
+		// La cancellazione riceve il primo giorno conservato dell'anteprima e risponde 409 se nel frattempo è cambiato.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/hits/purge',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => fn() => $this->respond( Privacy::old_hits() ),
+					'permission_callback' => array( $this, 'check_admin_permission' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'purge_hits' ),
+					'permission_callback' => array( $this, 'check_admin_permission' ),
+					'args'                => array(
+						'before' => array(
+							'type'              => 'string',
+							'required'          => true,
+							'validate_callback' => array( DateRange::class, 'is_valid' ),
+						),
 					),
 				),
 			)
@@ -578,6 +605,26 @@ final class AdminController extends RestController {
 		return Settings::get() + array(
 			'own_since'     => Settings::own_since(),
 			'own_first_day' => Settings::own_first_day(),
+		);
+	}
+
+	/**
+	 * Cancella le visite grezze più vecchie di retention_days, solo se il primo giorno conservato è ancora quello dell'anteprima.
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function purge_hits( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$preview = Privacy::old_hits();
+		if ( (string) $request->get_param( 'before' ) !== $preview['before'] ) {
+			return new \WP_Error( 'wp5w_purge_changed', __( 'L\'anteprima non è più valida (sono cambiati i giorni di conservazione o la data): riaprila e riprova.', 'wp-5w' ), array( 'status' => 409 ) );
+		}
+
+		return $this->respond(
+			array(
+				'deleted' => Privacy::delete_old_hits( $preview['before'] ),
+				'before'  => $preview['before'],
+			) + array( 'after' => Privacy::old_hits() )
 		);
 	}
 

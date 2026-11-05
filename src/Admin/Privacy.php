@@ -23,6 +23,13 @@ defined( 'ABSPATH' ) || exit;
 final class Privacy {
 
 	/**
+	 * Righe cancellate per ogni DELETE della pulizia manuale.
+	 *
+	 * @var int
+	 */
+	private const DELETE_BATCH = 5000;
+
+	/**
 	 * Aggancia il testo dell'informativa (Impostazioni > Privacy > Guida).
 	 *
 	 * @return void
@@ -86,5 +93,51 @@ final class Privacy {
 				$keep
 			)
 		);
+	}
+
+	/**
+	 * Anteprima della pulizia manuale delle visite grezze: quante righe di `wp5w_hits` sono più vecchie di `retention_days` giorni.
+	 *
+	 * La pulizia delle visite grezze non è automatica (scelta di Maurizio del 5/11/2026): la avvia solo il pulsante della scheda Opzioni.
+	 *
+	 * @param string|null $today Oggi (Y-m-d), solo per i test: predefinito il giorno del sito.
+	 * @return array{retention_days:int,before:string,rows:int,first_day:?string}
+	 */
+	public static function old_hits( ?string $today = null ): array {
+		global $wpdb;
+
+		$hits   = Schema::table( 'hits' );
+		$days   = Settings::get()['retention_days'];
+		$before = IpHash::first_kept_day( $today ?? wp_date( 'Y-m-d' ), $days );
+		$first  = $wpdb->get_var( "SELECT MIN(day) FROM {$hits}" );
+
+		return array(
+			'retention_days' => $days,
+			'before'         => $before,
+			'rows'           => (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits} WHERE day < %s", $before ) ),
+			'first_day'      => is_string( $first ) && '' !== $first ? $first : null,
+		);
+	}
+
+	/**
+	 * Cancella le visite grezze con `day` precedente a $before, a blocchi (niente lock lunghi sulla tabella che riceve le visite).
+	 *
+	 * Gli aggregati restano: OwnSource sostituisce solo i giorni presenti in `wp5w_hits` (replace_by_month), quindi le righe own
+	 * dei giorni cancellati non cambiano più.
+	 *
+	 * @param string $before Primo giorno conservato (Y-m-d), quello dell'anteprima.
+	 * @return int Righe cancellate.
+	 */
+	public static function delete_old_hits( string $before ): int {
+		global $wpdb;
+
+		$hits    = Schema::table( 'hits' );
+		$deleted = 0;
+		do {
+			$batch    = (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$hits} WHERE day < %s ORDER BY id LIMIT %d", $before, self::DELETE_BATCH ) );
+			$deleted += $batch;
+		} while ( self::DELETE_BATCH === $batch );
+
+		return $deleted;
 	}
 }
