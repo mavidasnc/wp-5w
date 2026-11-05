@@ -119,7 +119,7 @@ export default function VisitsDetail( { filter } ) {
 								<tr key={ row.ua || 'nd' }>
 									<td className="wp5w-ua">{ row.ua || __( 'n.d.', 'wp-5w' ) }</td>
 									<td className="num">{ formatNumber( row.visits ) }</td>
-									<td className="num">{ formatNumber( row.ips ) }</td>
+									<td className="num">{ row.ua ? formatNumber( row.ips ) : __( 'n.d.', 'wp-5w' ) }</td>
 								</tr>
 							) ) }
 						</tbody>

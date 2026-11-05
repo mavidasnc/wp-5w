@@ -23,7 +23,7 @@ const errorMessage = ( error ) => {
 const ALERT_FIELDS = [
 	{ key: 'alert_hours', min: 1, max: 168, label: __( 'Finestra (ore)', 'wp-5w' ), help: __( 'Le ultime ore controllate a ogni calcolo.', 'wp-5w' ) },
 	{ key: 'alert_min_visitors', min: 1, max: 10000, label: __( 'Visitatori minimi', 'wp-5w' ), help: __( 'Sotto questo numero una coppia sito-contenuto non è mai un picco.', 'wp-5w' ) },
-	{ key: 'alert_factor', min: 1, max: 100, label: __( 'Volte la mediana', 'wp-5w' ), help: __( 'Il picco deve superare questa volta la mediana dei visitatori al giorno (con mediana minima 1).', 'wp-5w' ) },
+	{ key: 'alert_factor', min: 1, max: 100, label: __( 'Volte la mediana', 'wp-5w' ), help: __( 'Il picco deve valere almeno tante volte la mediana dei visitatori al giorno (con mediana minima 1).', 'wp-5w' ) },
 	{ key: 'alert_baseline_days', min: 7, max: 90, label: __( 'Giorni della mediana', 'wp-5w' ), help: __( 'Giorni interi prima della finestra su cui si calcola la mediana.', 'wp-5w' ) },
 	{ key: 'alert_countries', min: 2, max: 250, label: __( 'Paesi diversi', 'wp-5w' ), help: __( 'Firma anomala: visitatori da almeno tanti paesi.', 'wp-5w' ) },
 	{ key: 'alert_share', min: 50, max: 100, label: __( 'Stesso browser e sistema (%)', 'wp-5w' ), help: __( 'Firma anomala: quota dei visitatori con la stessa combinazione di browser e sistema operativo.', 'wp-5w' ) },
