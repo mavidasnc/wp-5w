@@ -18,10 +18,11 @@ final class Visit {
 
 	/**
 	 * Hash del visitatore: md5 grezzo (16 byte) di IP, user agent e chiave del giorno.
-	 * Con la chiave che cambia ogni giorno nessuno può collegare le visite di giorni diversi.
+	 * Con la chiave che cambia ogni giorno questo hash non collega le visite di giorni diversi (lo fa, per ip_retention_days
+	 * giorni, l'hash dell'IP dello schema v7: Support\IpHash).
 	 *
-	 * @param string $ip  Indirizzo IP (non viene mai salvato).
-	 * @param string $ua  User agent (non viene mai salvato).
+	 * @param string $ip  Indirizzo IP (in chiaro non viene mai salvato).
+	 * @param string $ua  User agent (dalla v7 salvato a parte, troncato, per ip_retention_days giorni).
 	 * @param string $key Chiave del giorno.
 	 * @return string 16 byte binari.
 	 */

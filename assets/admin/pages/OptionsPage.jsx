@@ -120,7 +120,7 @@ export default function OptionsPage() {
 					__nextHasNoMarginBottom
 					label={ __( 'Registra le visite con il tracker di wp-5w', 'wp-5w' ) }
 					help={ __(
-						'Nessun cookie e nessun IP in chiaro: un visitatore si riconosce da un hash che cambia ogni giorno. Per l\'analisi delle visite anomale si salvano anche un hash dell\'IP (con una chiave segreta del sito) e lo user agent, cancellati dopo i giorni indicati più sotto.',
+						'Nessun cookie e nessun IP in chiaro: un visitatore si riconosce da un hash che cambia ogni giorno. Per l\'analisi delle visite anomale si salvano anche un hash dell\'IP (con una chiave segreta del sito: è lo stesso per lo stesso IP, quindi collega le visite di giorni diversi finché resta) e lo user agent, cancellati dopo i giorni indicati più sotto.',
 						'wp-5w'
 					) }
 					checked={ fields.own_tracking }

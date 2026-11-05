@@ -76,7 +76,8 @@ export default function VisitsDetail( { filter } ) {
 					__( '%1$s visite, %2$s visitatori, %3$s IP diversi', 'wp-5w' ),
 					formatNumber( totals.visits ),
 					formatNumber( totals.visitors ),
-					data.ip_first ? formatNumber( totals.ips ) : __( 'n.d.', 'wp-5w' )
+					// Una visita ha sempre un IP: zero IP con delle visite vuol dire «hash non disponibile» (visite di prima della v7 o oltre la conservazione).
+					totals.ips > 0 ? formatNumber( totals.ips ) : __( 'n.d.', 'wp-5w' )
 				) }
 			</p>
 
