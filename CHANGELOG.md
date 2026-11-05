@@ -4,6 +4,15 @@ Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](ht
 
 ## [Non rilasciato]
 
+Analisi delle visite anomale: hash dell'IP e user agent nelle visite della raccolta propria (schema v7). **Dati personali in più:** prima del rilascio serve il sì di Maurizio; dopo l'installazione va aggiornata a mano la pagina privacy del blog (il testo suggerito è in Impostazioni > Privacy > Guida).
+
+### Added
+- **Hash dell'IP e user agent** (schema v7, colonne `ip_hash` binary(8) NULL e `ua` varchar(255) di `wp5w_hits`): HMAC-SHA256 dell'IP di `REMOTE_ADDR`, troncato a 8 byte, con una chiave derivata da `wp_salt( 'auth' )` (contesto `wp5w-ip`, mai salvata nel database: `Support\IpHash`); user agent troncato a 255 caratteri. L'IP in chiaro non si salva mai. Migrazione con un solo `ALTER TABLE` sotto il lock esistente (`Schema::migrate_hits_columns()` aggiunge ora tutte le colonne mancanti: `bot`, `ip_hash`, `ua`). Le query dell'endpoint restano 2 (3 per 404 e ricerche).
+- **Conservazione di hash dell'IP e user agent:** opzione `ip_retention_days` (14 di default, da 1 a `retention_days`) nella scheda Opzioni; il passaggio orario (`Scheduler::run_hourly()` → `Admin\Privacy::purge()`) azzera le due colonne delle visite più vecchie, le righe restano.
+- **Testo per l'informativa privacy** (`wp_add_privacy_policy_content`, `Admin\Privacy`).
+
+## [0.18.0] — 2026-11-05
+
 Filtro del periodo e modale dei contenuti nel box «Provenienza» della scheda Visitatori. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.
 
 ### Added

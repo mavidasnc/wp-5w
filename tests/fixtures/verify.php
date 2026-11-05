@@ -4,7 +4,7 @@
  *
  * Uso: npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php
  *
- * Controlla lo schema v6 e le migrazioni da v3, da v4 e da v5, confronta le tabelle wp5w_* con le sorgenti, simula le visite
+ * Controlla lo schema v7 e le migrazioni da v3, da v4, da v5 e da v6, confronta le tabelle wp5w_* con le sorgenti, simula le visite
  * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine, le rotte delle opzioni, il confronto con WP Statistics
  * e, dalla fase 3, il box Pubblico, il database dei paesi (download reale e guasti simulati) e paese e user agent delle visite.
  * La fase 4 aggiunge il canale «ai» sulle due origini, le dimensioni UTM, «Online adesso», le pagine 404, le ricerche interne,
@@ -99,10 +99,10 @@ $v5_keys = array(
 );
 
 // ---------------------------------------------------------------------------
-// 1. Schema v6.
+// 1. Schema v7.
 // ---------------------------------------------------------------------------
 $check( 'schema: wp5w_db_version = Schema::DB_VERSION', Schema::DB_VERSION, get_option( 'wp5w_db_version' ) );
-$check( 'schema: versione 6', '6', Schema::DB_VERSION );
+$check( 'schema: versione 7', '7', Schema::DB_VERSION );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "schema: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 	$check( "schema: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
@@ -132,12 +132,22 @@ $check( 'schema: wp5w_hits.bot è varchar(20)', 'varchar(20)', $bot_column['colu
 $check( 'schema: wp5w_hits.bot è NOT NULL', 'NO', $bot_column['is_nullable'] ?? 'assente' );
 $check( 'schema: wp5w_hits.bot ha il default vuoto', '', trim( (string) ( $bot_column['column_default'] ?? 'assente' ), "'" ) );
 $check( 'schema: wp5w_hits.bot viene subito dopo os', $os_position + 1, $bot_column['ordinal_position'] ?? 'assente' );
+// Colonne ip_hash e ua (schema v7): binary(8) NULL e varchar(255) NOT NULL con default vuoto, subito dopo bot. Nessun'altra colonna per l'IP.
+$v7_columns = $wpdb->get_results(
+	$wpdb->prepare(
+		"SELECT column_name, column_type, is_nullable, column_default, ordinal_position FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name IN ('ip_hash', 'ua')",
+		Schema::table( 'hits' )
+	),
+	OBJECT_K
+);
+$check( 'schema: wp5w_hits.ip_hash è binary(8) NULL dopo bot', 'binary(8)|YES|' . ( (int) ( $bot_column['ordinal_position'] ?? 0 ) + 1 ), ( $v7_columns['ip_hash']->column_type ?? 'assente' ) . '|' . ( $v7_columns['ip_hash']->is_nullable ?? '' ) . '|' . ( $v7_columns['ip_hash']->ordinal_position ?? '' ) );
+$check( 'schema: wp5w_hits.ua è varchar(255) NOT NULL vuoto dopo ip_hash', 'varchar(255)|NO||' . ( (int) ( $bot_column['ordinal_position'] ?? 0 ) + 2 ), ( $v7_columns['ua']->column_type ?? 'assente' ) . '|' . ( $v7_columns['ua']->is_nullable ?? '' ) . '|' . trim( (string) ( $v7_columns['ua']->column_default ?? 'assente' ), "'" ) . '|' . ( $v7_columns['ua']->ordinal_position ?? '' ) );
 $check(
-	'schema: wp5w_hits senza colonne ip o agent',
-	0,
+	'schema: wp5w_hits ha una sola colonna con ip o agent nel nome (ip_hash)',
+	'ip_hash',
 	$wpdb->get_var(
 		$wpdb->prepare(
-			"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND ( column_name LIKE '%%ip%%' OR column_name LIKE '%%agent%%' )",
+			"SELECT GROUP_CONCAT(column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND ( column_name LIKE '%%ip%%' OR column_name LIKE '%%agent%%' )",
 			Schema::table( 'hits' )
 		)
 	)
@@ -216,7 +226,7 @@ $other->query( "SELECT RELEASE_LOCK( 'wp5w_schema_upgrade' )" );
 $other->close();
 Schema::maybe_upgrade();
 // Le migrazioni da v3 e da v4 non eseguono ALTER su wp5w_hits solo perché la tabella ha già la colonna bot in questo momento.
-$check( 'migrazione da v3: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v3: versione 7', '7', get_option( 'wp5w_db_version' ) );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "migrazione da v3: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 }
@@ -248,7 +258,7 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'install() rieseguito: nessun errore', '', $wpdb->last_error );
 $check( 'install() rieseguito: nessun ALTER', 0, $alters );
-$check( 'install() rieseguito: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'install() rieseguito: versione 7', '7', get_option( 'wp5w_db_version' ) );
 $check( 'install() rieseguito: SHOW CREATE TABLE identico', md5( $create_before ), md5( $show_create() ) );
 
 // Da v4 a v5: schema v4 completo, senza le due tabelle nuove e con la versione 4. install() le crea, non esegue nessun ALTER e salva 5.
@@ -263,7 +273,7 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'migrazione da v4: nessun errore', '', $wpdb->last_error );
 $check( 'migrazione da v4: nessun ALTER', 0, $alters );
-$check( 'migrazione da v4: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v4: versione 7', '7', get_option( 'wp5w_db_version' ) );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "migrazione da v4: creata wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 	$check( "migrazione da v4: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
@@ -272,9 +282,9 @@ $create_v5 = $show_create();
 update_option( 'wp5w_db_version', '4' );
 Schema::install();
 $check( 'migrazione da v4 rieseguita: SHOW CREATE TABLE identico', md5( $create_v5 ), md5( $show_create() ) );
-$check( 'migrazione da v4 rieseguita: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v4 rieseguita: versione 7', '7', get_option( 'wp5w_db_version' ) );
 
-// Da v5 a v6: wp5w_hits senza la colonna bot, con almeno una riga.
+// Da v5 a v7: wp5w_hits senza le colonne bot, ip_hash e ua, con almeno una riga.
 $hits_name  = Schema::table( 'hits' );
 $hits_probe = 0 === (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" );
 if ( $hits_probe ) {
@@ -282,7 +292,8 @@ if ( $hits_probe ) {
 }
 $hits_rows = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" );
 $has_bot   = static fn(): int => count( array_filter( $wpdb->get_col( "SHOW COLUMNS FROM {$hits_name}" ), static fn( $c ) => 'bot' === $c ) );
-$wpdb->query( "ALTER TABLE {$hits_name} DROP COLUMN bot" );
+$has_v7    = static fn(): int => count( array_intersect( array( 'ip_hash', 'ua' ), $wpdb->get_col( "SHOW COLUMNS FROM {$hits_name}" ) ) );
+$wpdb->query( "ALTER TABLE {$hits_name} DROP COLUMN bot, DROP COLUMN ip_hash, DROP COLUMN ua" );
 update_option( 'wp5w_db_version', '5' );
 $check( 'v5 simulata: nessuna colonna bot', 0, $has_bot() );
 
@@ -295,7 +306,7 @@ $check( 'migrazione v5 con lock occupato: nessuna colonna bot', 0, $has_bot() );
 $other->query( "SELECT RELEASE_LOCK( 'wp5w_schema_upgrade' )" );
 $other->close();
 
-// Lock libero: un solo ALTER TABLE, riga esistente con bot vuoto, versione 6.
+// Lock libero: un solo ALTER TABLE per le tre colonne, riga esistente con bot vuoto, versione 7.
 $alters = 0;
 add_filter( 'query', $count_alters );
 $wpdb->last_error = '';
@@ -307,7 +318,8 @@ $check( 'migrazione da v5: colonna bot presente', 1, $has_bot() );
 $check( 'migrazione da v5: posizione di bot dopo os', $os_position + 1, (int) $wpdb->get_var( $wpdb->prepare( "SELECT ordinal_position FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'bot'", $hits_name ) ) );
 $check( 'migrazione da v5: righe conservate', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
 $check( 'migrazione da v5: righe esistenti con bot vuoto', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name} WHERE bot = ''" ) );
-$check( 'migrazione da v5: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v5: colonne ip_hash e ua presenti, righe esistenti senza hash e user agent', '2|' . $hits_rows, $has_v7() . '|' . $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name} WHERE ip_hash IS NULL AND ua = ''" ) );
+$check( 'migrazione da v5: versione 7', '7', get_option( 'wp5w_db_version' ) );
 
 // Idempotenza: con la versione forzata a 5 nessun ALTER e SHOW CREATE TABLE identico.
 $create_hits = (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 );
@@ -318,7 +330,20 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'migrazione da v5 rieseguita: nessun ALTER', 0, $alters );
 $check( 'migrazione da v5 rieseguita: SHOW CREATE TABLE identico', md5( $create_hits ), md5( (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 ) ) );
-$check( 'migrazione da v5 rieseguita: versione 6', '6', get_option( 'wp5w_db_version' ) );
+
+// Da v6 a v7: solo ip_hash e ua mancanti, un solo ALTER, nessuna riga persa.
+$wpdb->query( "ALTER TABLE {$hits_name} DROP COLUMN ip_hash, DROP COLUMN ua" );
+update_option( 'wp5w_db_version', '6' );
+$alters = 0;
+add_filter( 'query', $count_alters );
+$wpdb->last_error = '';
+Schema::install();
+remove_filter( 'query', $count_alters );
+$check( 'migrazione da v6: nessun errore e un solo ALTER', '|1', $wpdb->last_error . '|' . $alters );
+$check( 'migrazione da v6: colonne ip_hash e ua presenti e righe conservate', '2|' . $hits_rows, $has_v7() . '|' . $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
+$check( 'migrazione da v6: SHOW CREATE TABLE uguale a quello della migrazione da v5', md5( $create_hits ), md5( (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 ) ) );
+$check( 'migrazione da v6: versione 7', '7', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v5 rieseguita: versione 7', '7', get_option( 'wp5w_db_version' ) );
 
 /**
  * Definizione di una tabella da information_schema: colonne (nome, tipo, NULL, default, posizione) e indici.
@@ -358,7 +383,7 @@ $check( 'installazione senza hits: nessun errore', '', $wpdb->last_error );
 $check( 'installazione senza hits: nessun ALTER', 0, $alters );
 $check( 'installazione senza hits: tabella ricreata con bot', 1, $has_bot() );
 $check( 'installazione senza hits: colonne e indici uguali alla migrazione', md5( $migrated ), md5( $table_definition( $hits_name ) ) );
-$check( 'installazione senza hits: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'installazione senza hits: versione 7', '7', get_option( 'wp5w_db_version' ) );
 $wpdb->query( "DROP TABLE {$hits_name}" );
 $wpdb->query( "RENAME TABLE {$hits_backup} TO {$hits_name}" );
 $check( 'installazione senza hits: tabella migrata ripristinata', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
@@ -979,7 +1004,7 @@ $check( 'POST settings: purge di LiteSpeed alla modifica di own_tracking', 1, $p
 $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'retention_days' => 61 ) );
 $check( 'POST settings: nessun purge se own_tracking e DNT non cambiano', 1, $purges );
 $get = $rest_call( 'GET', '/wp5w/v1/admin/settings' )->get_data();
-$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,log_glob,log_excluded_paths,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
+$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,ip_retention_days,log_glob,log_excluded_paths,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
 $check( 'GET settings: own_first_day', $today, $get['own_first_day'] ?? '' );
 $check( 'GET settings: own_since', $today, $get['own_since'] ?? '' );
 update_option( Settings::OPTION, Settings::defaults() );
@@ -1532,13 +1557,18 @@ if ( 2 !== count( $queries ) ) {
 	WP_CLI::log( 'Query catturate: ' . implode( ' || ', array_map( static fn( $q ) => substr( trim( $q ), 0, 120 ), $queries ) ) );
 }
 
-// Passo 9: privacy. Nessuna colonna di wp5w_hits contiene un IP usato nei test o una parte dello user agent.
-$privacy_columns = "CONCAT_WS('|', object_type, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, country, device, browser, os, bot)";
+// Passo 9: privacy (schema v7). Nessuna colonna di wp5w_hits contiene un IP usato nei test, in chiaro o come HEX, md5 o sha256 senza chiave;
+// lo user agent invece si salva nella sola colonna ua, e ip_hash è l'HMAC con la chiave derivata dalle salt.
+$privacy_columns = "CONCAT_WS('|', object_type, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, country, device, browser, os, bot, LOWER(HEX(ip_hash)), ua, LOWER(HEX(visitor)))";
 $privacy_hits    = 0;
-foreach ( array( '8.8.8.8', '8.8.4.4', '151.38.1.1', '198.51.100.30', 'Mozilla', 'AppleWebKit' ) as $wp5w_needle ) {
-	$privacy_hits += (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits_table} WHERE {$privacy_columns} LIKE %s", '%' . $wpdb->esc_like( $wp5w_needle ) . '%' ) );
+foreach ( array( '8.8.8.8', '8.8.4.4', '151.38.1.1', '198.51.100.30' ) as $wp5w_ip ) {
+	foreach ( array( $wp5w_ip, bin2hex( (string) inet_pton( $wp5w_ip ) ), md5( $wp5w_ip ), hash( 'sha256', $wp5w_ip ) ) as $wp5w_needle ) {
+		$privacy_hits += (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits_table} WHERE {$privacy_columns} LIKE %s", '%' . $wpdb->esc_like( substr( $wp5w_needle, 0, 16 ) ) . '%' ) );
+	}
 }
-$check( 'privacy: nessun IP né user agent nelle colonne di wp5w_hits', 0, $privacy_hits );
+$check( 'privacy: nessun IP (in chiaro, HEX, md5 o sha256) nelle colonne di wp5w_hits', 0, $privacy_hits );
+$check( 'privacy: lo user agent solo nella colonna ua', '0', $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table} WHERE CONCAT_WS('|', uri, referrer_host, source, utm_source, utm_medium, utm_campaign, browser, os, bot) LIKE '%AppleWebKit%'" ) );
+$check( 'privacy: la visita da 8.8.8.8 ha hash HMAC e user agent', Mavida\FiveW\Support\IpHash::hash( '8.8.8.8', Mavida\FiveW\Support\IpHash::key( wp_salt( 'auth' ) ) ) . '|' . $ua_iphone, $wpdb->get_var( "SELECT CONCAT(LOWER(HEX(ip_hash)), '|', ua) FROM {$hits_table} WHERE uri = '/wp5w-v11-query/' LIMIT 1" ) );
 
 // Passo 10: aggregazione. La somma dei visitatori è uguale per tutte le dimensioni e ai visitatori own di site_daily.
 $wps_digest_before = $rows_digest( 'wps' );
@@ -3491,7 +3521,37 @@ $wpdb->query( $wpdb->prepare( "DELETE FROM {$ref_table} WHERE origin = 'own' AND
 $check( 'oggi senza visite: nessun sito', 0, count( $ref_query->referrers( 1 )['rows'] ) );
 
 // ---------------------------------------------------------------------------
-// 19. Pulizia finale.
+// 19. Iterazione 0.19.0: hash dell'IP e user agent (schema v7), conservazione, modale del referrer, dettaglio delle visite e avvisi.
+// ---------------------------------------------------------------------------
+// Conservazione: con 14 giorni restano oggi e i 13 giorni precedenti; le righe restano, si azzerano solo ip_hash e ua.
+update_option( Settings::OPTION, Settings::defaults() );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$v19_today = wp_date( 'Y-m-d' );
+$v19_ago   = static fn( int $days ): string => ( new DateTimeImmutable( $v19_today, new DateTimeZone( 'UTC' ) ) )->modify( "-{$days} days" )->format( 'Y-m-d' );
+foreach ( array( 0, 13, 14, 20 ) as $wp5w_days ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, ip_hash, ua) VALUES (UTC_TIMESTAMP(), %s, UNHEX(%s), 'home', 0, '/', UNHEX(%s), 'Mozilla/5.0 verify')", $v19_ago( $wp5w_days ), md5( "v19-{$wp5w_days}" ), substr( md5( "ip-{$wp5w_days}" ), 0, 16 ) ) );
+}
+$v19_kept = static fn(): string => (string) $wpdb->get_var( "SELECT GROUP_CONCAT(IF( ip_hash IS NULL AND ua = '', 0, 1 ) ORDER BY day DESC) FROM {$hits_table}" );
+$check( 'conservazione 14 giorni: azzerate 2 righe', 2, Mavida\FiveW\Admin\Privacy::purge() );
+$check( 'conservazione 14 giorni: oggi e 13 giorni fa conservati, 14 e 20 azzerati', '1,1,0,0', $v19_kept() );
+$check( 'conservazione: le righe restano', 4, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table}" ) );
+$check( 'conservazione rieseguita: nessuna riga', 0, Mavida\FiveW\Admin\Privacy::purge() );
+update_option( Settings::OPTION, array( 'ip_retention_days' => 1 ) + Settings::defaults() );
+$check( 'conservazione 1 giorno: resta solo oggi', '1,0,0,0', ( static function () use ( $v19_kept ): string {
+	Mavida\FiveW\Admin\Privacy::purge();
+	return $v19_kept();
+} )() );
+$check( 'conservazione: oltre retention_days si limita a retention_days, sotto 1 vale 1', '30|1', Settings::sanitize( array( 'ip_retention_days' => 50 ) )['ip_retention_days'] . '|' . Settings::sanitize( array( 'ip_retention_days' => 0 ) )['ip_retention_days'] );
+$check( 'conservazione: con retention_days 10 il massimo è 10', 10, Settings::sanitize( array( 'retention_days' => 10, 'ip_retention_days' => 14 ) )['ip_retention_days'] );
+$admin_user( $admin_id );
+$check( 'POST settings con ip_retention_days 0: 400', 400, $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'ip_retention_days' => 0 ) )->get_status() );
+$check( 'POST settings con ip_retention_days 7: salvato', 7, $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'ip_retention_days' => 7 ) )->get_data()['ip_retention_days'] ?? '' );
+$admin_user( 0 );
+update_option( Settings::OPTION, Settings::defaults() );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+// ---------------------------------------------------------------------------
+// 20. Pulizia finale.
 // ---------------------------------------------------------------------------
 // Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
 remove_filter( 'pre_http_request', $github_mock, 10 );

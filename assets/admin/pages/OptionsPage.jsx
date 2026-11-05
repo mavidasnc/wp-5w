@@ -30,6 +30,7 @@ const toFields = ( data ) => ( {
 	excluded_ips: ( data.excluded_ips ?? [] ).join( '\n' ),
 	respect_dnt: !! data.respect_dnt,
 	retention_days: String( data.retention_days ),
+	ip_retention_days: String( data.ip_retention_days ),
 	own_since: data.own_since ?? '',
 	log_glob: data.log_glob ?? '',
 	log_excluded_paths: ( data.log_excluded_paths ?? [] ).join( '\n' ),
@@ -71,6 +72,7 @@ export default function OptionsPage() {
 					.filter( Boolean ),
 				respect_dnt: fields.respect_dnt,
 				retention_days: parseInt( fields.retention_days, 10 ) || 0,
+				ip_retention_days: parseInt( fields.ip_retention_days, 10 ) || 0,
 				own_since: fields.own_since,
 				log_glob: fields.log_glob.trim(),
 				log_excluded_paths: fields.log_excluded_paths
@@ -105,7 +107,7 @@ export default function OptionsPage() {
 					__nextHasNoMarginBottom
 					label={ __( 'Registra le visite con il tracker di wp-5w', 'wp-5w' ) }
 					help={ __(
-						'Nessun cookie e nessun IP salvato: un visitatore si riconosce da un hash che cambia ogni giorno.',
+						'Nessun cookie e nessun IP in chiaro: un visitatore si riconosce da un hash che cambia ogni giorno. Per l\'analisi delle visite anomale si salvano anche un hash dell\'IP (con una chiave segreta del sito) e lo user agent, cancellati dopo i giorni indicati più sotto.',
 						'wp-5w'
 					) }
 					checked={ fields.own_tracking }
@@ -186,6 +188,19 @@ export default function OptionsPage() {
 					) }
 					value={ fields.retention_days }
 					onChange={ set( 'retention_days' ) }
+				/>
+				<TextControl
+					__nextHasNoMarginBottom
+					type="number"
+					min={ 1 }
+					max={ fields.retention_days }
+					label={ __( 'Hash dell\'IP e user agent: giorni (da 1 ai giorni qui sopra)', 'wp-5w' ) }
+					help={ __(
+						'Servono al dettaglio delle visite e agli avvisi sulle visite anomale. Ogni ora si cancellano dalle visite più vecchie (la visita resta, senza hash dell\'IP né user agent). L\'IP in chiaro non viene mai salvato; se cambiano le salt di WordPress lo stesso IP dà un hash diverso.',
+						'wp-5w'
+					) }
+					value={ fields.ip_retention_days }
+					onChange={ set( 'ip_retention_days' ) }
 				/>
 			</Card>
 

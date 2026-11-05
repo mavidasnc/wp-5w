@@ -19,6 +19,8 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Opzioni `wp5w_settings` (un array) e `wp5w_own_since` (data di passaggio alla raccolta propria).
+ *
+ * @phpstan-type SettingsArray array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,ip_retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
  */
 final class Settings {
 
@@ -46,7 +48,7 @@ final class Settings {
 	/**
 	 * Valori predefiniti.
 	 *
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
+	 * @return SettingsArray
 	 */
 	public static function defaults(): array {
 		return array(
@@ -55,6 +57,8 @@ final class Settings {
 			'excluded_ips'       => array(),
 			'respect_dnt'        => true,
 			'retention_days'     => 30,
+			// Giorni di conservazione di hash dell'IP e user agent (schema v7), da 1 a retention_days.
+			'ip_retention_days'  => 14,
 			// Log di accesso del server (0.14.0): percorso dei file (con * e ?) e prefissi di percorso da ignorare. Vuoto = sorgente spenta.
 			'log_glob'           => '',
 			'log_excluded_paths' => array(),
@@ -64,7 +68,7 @@ final class Settings {
 	/**
 	 * Impostazioni salvate, unite ai valori predefiniti.
 	 *
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
+	 * @return SettingsArray
 	 */
 	public static function get(): array {
 		$saved = get_option( self::OPTION, array() );
@@ -156,7 +160,7 @@ final class Settings {
 	 * Gli IP non validi si scartano qui: la risposta 400 con l'elenco delle righe errate la dà la REST prima di salvare.
 	 *
 	 * @param mixed $value Valore ricevuto.
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
+	 * @return SettingsArray
 	 */
 	public static function sanitize( mixed $value ): array {
 		$defaults = self::defaults();
@@ -180,13 +184,15 @@ final class Settings {
 			}
 		}
 
-		// Passo 3: booleani, modalità ammessa e conservazione tra 7 e 365 giorni.
+		// Passo 3: booleani, modalità ammessa, conservazione tra 7 e 365 giorni e, per hash dell'IP e user agent, tra 1 e quella delle visite.
+		$retention = max( 7, min( 365, (int) $value['retention_days'] ) );
 		return array(
 			'own_tracking'       => filter_var( $value['own_tracking'], FILTER_VALIDATE_BOOLEAN ),
 			'exclude_users'      => in_array( $value['exclude_users'], self::USER_MODES, true ) ? (string) $value['exclude_users'] : $defaults['exclude_users'],
 			'excluded_ips'       => array_values( array_unique( $ips ) ),
 			'respect_dnt'        => filter_var( $value['respect_dnt'], FILTER_VALIDATE_BOOLEAN ),
-			'retention_days'     => max( 7, min( 365, (int) $value['retention_days'] ) ),
+			'retention_days'     => $retention,
+			'ip_retention_days'  => max( 1, min( $retention, (int) $value['ip_retention_days'] ) ),
 			'log_glob'           => trim( sanitize_text_field( (string) $value['log_glob'] ) ),
 			'log_excluded_paths' => array_values( array_unique( $paths ) ),
 		);

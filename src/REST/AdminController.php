@@ -335,6 +335,12 @@ final class AdminController extends RestController {
 							'minimum' => 7,
 							'maximum' => 365,
 						),
+						// Il massimo vero è retention_days: lo applica Settings::sanitize().
+						'ip_retention_days'  => array(
+							'type'    => 'integer',
+							'minimum' => 1,
+							'maximum' => 365,
+						),
 						'own_since'          => array(
 							'type'              => 'string',
 							'validate_callback' => array( self::class, 'validate_own_since' ),

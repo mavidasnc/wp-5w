@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace Mavida\FiveW;
 
 use Mavida\FiveW\Admin\AdminMenu;
+use Mavida\FiveW\Admin\Privacy;
 use Mavida\FiveW\Admin\PostViews;
 use Mavida\FiveW\Cli\Command;
 use Mavida\FiveW\Database\Schema;
@@ -132,6 +133,8 @@ final class Plugin {
 
 		if ( is_admin() ) {
 			( new AdminMenu() )->register();
+			// Testo suggerito per l'informativa privacy (hash dell'IP e user agent, schema v7).
+			( new Privacy() )->register();
 			// Partenza e ritorno del collegamento OAuth a Search Console (admin-post.php conta come admin).
 			( new OAuthHandler() )->register();
 		}

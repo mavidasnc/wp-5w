@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Mavida\FiveW\Etl;
 
+use Mavida\FiveW\Admin\Privacy;
 use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Gsc\Client;
 use Mavida\FiveW\Sources\OwnSource;
@@ -79,7 +80,7 @@ final class Scheduler {
 	public function register(): void {
 		add_action( self::DAILY_HOOK, array( $this, 'run_daily' ) );
 		add_action( self::FULL_HOOK, array( $this, 'run_full' ) );
-		add_action( self::OWN_HOURLY_HOOK, static fn() => ( new OwnSource() )->run_hourly() );
+		add_action( self::OWN_HOURLY_HOOK, array( $this, 'run_hourly' ) );
 		add_action(
 			self::GEO_HOOK,
 			static function (): void {
@@ -102,6 +103,23 @@ final class Scheduler {
 		// Si pianifica qui e non all'attivazione, perché "wp plugin install --force" non esegue l'hook di attivazione.
 		if ( ! wp_next_scheduled( self::GEO_HOOK ) ) {
 			wp_schedule_event( time() + 5 * MINUTE_IN_SECONDS, 'daily', self::GEO_HOOK );
+		}
+	}
+
+	/**
+	 * Passaggio orario: aggregazione della raccolta propria, poi conservazione di hash dell'IP e user agent.
+	 *
+	 * Ogni passo ha il suo try: un errore della pulizia non deve fermare l'aggregazione, e viceversa.
+	 *
+	 * @return void
+	 */
+	public function run_hourly(): void {
+		( new OwnSource() )->run_hourly();
+
+		try {
+			Privacy::purge();
+		} catch ( \Throwable $e ) {
+			error_log( 'wp5w: pulizia di hash IP e user agent fallita: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il passaggio orario non ha altra interfaccia per gli errori.
 		}
 	}
 
