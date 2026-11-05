@@ -22,11 +22,16 @@ export default function Referrers() {
 	const [ site, setSite ] = useState( null );
 
 	useEffect( () => {
+		// Una risposta arrivata dopo un cambio di periodo (90 giorni è più lenta di Oggi) non deve sovrascrivere quella nuova.
+		let active = true;
 		setData( null );
 		setError( null );
 		api( `/admin/audience/referrers?days=${ days }` )
-			.then( setData )
-			.catch( ( e ) => setError( e.message ) );
+			.then( ( result ) => active && setData( result ) )
+			.catch( ( e ) => active && setError( e.message ) );
+		return () => {
+			active = false;
+		};
 	}, [ days ] );
 
 	return (

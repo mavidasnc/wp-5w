@@ -17,12 +17,17 @@ export default function ReferrerModal( { site, days, onClose } ) {
 	const [ error, setError ] = useState( null );
 
 	useEffect( () => {
+		// Come nel box: una risposta arrivata dopo la chiusura o un cambio di sito si ignora.
+		let active = true;
 		setData( null );
 		setError( null );
 		// Il referrer grezzo (non l'etichetta), codificato: può essere android-app://pacchetto/.
 		api( `/admin/audience/referrer?referrer=${ encodeURIComponent( site.referrer ) }&days=${ days }` )
-			.then( setData )
-			.catch( ( e ) => setError( e.message ) );
+			.then( ( result ) => active && setData( result ) )
+			.catch( ( e ) => active && setError( e.message ) );
+		return () => {
+			active = false;
+		};
 	}, [ site.referrer, days ] );
 
 	return (
