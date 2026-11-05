@@ -15,6 +15,7 @@ use Mavida\FiveW\Geo\CountryDatabase;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\BotFilter;
 use Mavida\FiveW\Support\Channels;
+use Mavida\FiveW\Support\IpHash;
 use Mavida\FiveW\Support\SearchTerm;
 use Mavida\FiveW\Support\UserAgent;
 use Mavida\FiveW\Support\Visit;
@@ -140,7 +141,7 @@ final class HitController extends RestController {
 			}
 		}
 
-		// Passo 6: hash del visitatore con la chiave del giorno. IP e user agent non si salvano.
+		// Passo 6: hash del visitatore con la chiave del giorno (l'IP in chiaro non si salva mai).
 		$hash = bin2hex( Visit::visitor_hash( $ip, $ua, $this->daily_key() ) );
 
 		// Passo 7: una sola SELECT per il limite di frequenza e per le visite del giorno (serve per l'ingresso).
@@ -155,7 +156,9 @@ final class HitController extends RestController {
 		}
 
 		// Passo 8: referrer, canale, sorgente, ingresso, paese, user agent ed etichetta bot (solo per le visite che si registrano:
-		// gli scarti restano veloci e il paese non può mai bloccare una visita). IP e user agent non si salvano.
+		// gli scarti restano veloci e il paese non può mai bloccare una visita). Dalla v7 si salvano l'hash dell'IP (HMAC con una chiave
+		// derivata dalle salt, mai in wp_options: Support\IpHash) e lo user agent troncato a 255 caratteri; Admin\Privacy li azzera
+		// dopo ip_retention_days giorni. L'IP è quello di REMOTE_ADDR, come per l'hash del visitatore e le esclusioni.
 		// Il flag `w` del tracker non è firmato: vale solo se è esattamente '1' e l'etichetta finale viene da un elenco fisso.
 		$site_host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
 		$referrer  = Channels::host( substr( $this->param( $request, 'r' ), 0, 2000 ), $site_host );
@@ -171,12 +174,13 @@ final class HitController extends RestController {
 		$country   = CountryDatabase::lookup( $ip );
 		$uri       = $this->relative_uri( $this->param( $request, 'u' ) );
 		$day       = wp_date( 'Y-m-d' );
+		$ip_hash   = IpHash::hash( $ip, IpHash::key( wp_salt( 'auth' ) ) );
 
 		// Passo 9: scrittura della visita (ts in UTC, day nel fuso del sito).
 		$wpdb->query(
 			$wpdb->prepare(
-				"INSERT INTO {$hits} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, is_entry, country, device, browser, os, bot)
-				VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s)",
+				"INSERT INTO {$hits} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, is_entry, country, device, browser, os, bot, ip_hash, ua)
+				VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s, NULLIF(UNHEX(%s), ''), %s)",
 				gmdate( 'Y-m-d H:i:s' ),
 				$day,
 				$hash,
@@ -194,7 +198,9 @@ final class HitController extends RestController {
 				substr( $agent['device'], 0, 20 ),
 				substr( $agent['browser'], 0, 40 ),
 				substr( $agent['os'], 0, 40 ),
-				substr( $bot, 0, 20 )
+				substr( $bot, 0, 20 ),
+				$ip_hash,
+				IpHash::user_agent( $ua )
 			)
 		);
 

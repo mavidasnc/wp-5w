@@ -76,6 +76,25 @@ final class DateRange {
 	}
 
 	/**
+	 * Divide l'intervallo in due parti: i giorni prima di $day e quelli da $day in poi (null se una parte è vuota).
+	 *
+	 * Senza $day tutto l'intervallo sta nella prima parte.
+	 *
+	 * @param string|null $day Primo giorno della seconda parte (Y-m-d).
+	 * @return array{0:DateRange|null,1:DateRange|null}
+	 */
+	public function split_at( ?string $day ): array {
+		if ( null === $day ) {
+			return array( $this, null );
+		}
+		$before = ( new \DateTimeImmutable( $day ) )->modify( '-1 day' )->format( 'Y-m-d' );
+		return array(
+			$this->from <= $before ? new self( $this->from, min( $this->to, $before ) ) : null,
+			$this->to >= $day ? new self( max( $this->from, $day ), $this->to ) : null,
+		);
+	}
+
+	/**
 	 * Divide l'intervallo in blocchi per mese solare, per contenere memoria e durata delle query.
 	 *
 	 * @return array<int,DateRange>

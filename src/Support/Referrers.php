@@ -63,4 +63,17 @@ final class Referrers {
 		// Passo 4: host web dentro un URL android-app, oppure il referrer così com'è.
 		return $is_app ? $name : $referrer;
 	}
+
+	/**
+	 * Referrer nella forma di `wp5w_hits.referrer_host`: WP Statistics salva `android-app://com.linkedin.android/`,
+	 * la raccolta propria `com.linkedin.android`. Stessa regola di Channels::host_sql() (minuscolo, senza schema
+	 * android-app, senza «/» finali e senza «www.» iniziale), così le due chiavi di un sito coincidono.
+	 *
+	 * @param string $referrer Referrer come salvato in una delle due origini.
+	 * @return string
+	 */
+	public static function hits_key( string $referrer ): string {
+		$host = rtrim( str_replace( 'android-app://', '', strtolower( trim( $referrer ) ) ), '/' );
+		return (string) preg_replace( '/^(?:www\.)+/', '', $host );
+	}
 }

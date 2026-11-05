@@ -4,7 +4,7 @@
  *
  * Uso: npx wp-env run cli wp eval-file wp-content/plugins/wp-5w/tests/fixtures/verify.php
  *
- * Controlla lo schema v6 e le migrazioni da v3, da v4 e da v5, confronta le tabelle wp5w_* con le sorgenti, simula le visite
+ * Controlla lo schema v7 e le migrazioni da v3, da v4, da v5 e da v6, confronta le tabelle wp5w_* con le sorgenti, simula le visite
  * all'endpoint /hit, verifica l'aggregazione, la regola dell'origine, le rotte delle opzioni, il confronto con WP Statistics
  * e, dalla fase 3, il box Pubblico, il database dei paesi (download reale e guasti simulati) e paese e user agent delle visite.
  * La fase 4 aggiunge il canale «ai» sulle due origini, le dimensioni UTM, «Online adesso», le pagine 404, le ricerche interne,
@@ -99,10 +99,10 @@ $v5_keys = array(
 );
 
 // ---------------------------------------------------------------------------
-// 1. Schema v6.
+// 1. Schema v7.
 // ---------------------------------------------------------------------------
 $check( 'schema: wp5w_db_version = Schema::DB_VERSION', Schema::DB_VERSION, get_option( 'wp5w_db_version' ) );
-$check( 'schema: versione 6', '6', Schema::DB_VERSION );
+$check( 'schema: versione 7', '7', Schema::DB_VERSION );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "schema: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 	$check( "schema: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
@@ -132,12 +132,22 @@ $check( 'schema: wp5w_hits.bot è varchar(20)', 'varchar(20)', $bot_column['colu
 $check( 'schema: wp5w_hits.bot è NOT NULL', 'NO', $bot_column['is_nullable'] ?? 'assente' );
 $check( 'schema: wp5w_hits.bot ha il default vuoto', '', trim( (string) ( $bot_column['column_default'] ?? 'assente' ), "'" ) );
 $check( 'schema: wp5w_hits.bot viene subito dopo os', $os_position + 1, $bot_column['ordinal_position'] ?? 'assente' );
+// Colonne ip_hash e ua (schema v7): binary(8) NULL e varchar(255) NOT NULL con default vuoto, subito dopo bot. Nessun'altra colonna per l'IP.
+$v7_columns = $wpdb->get_results(
+	$wpdb->prepare(
+		"SELECT column_name, column_type, is_nullable, column_default, ordinal_position FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name IN ('ip_hash', 'ua')",
+		Schema::table( 'hits' )
+	),
+	OBJECT_K
+);
+$check( 'schema: wp5w_hits.ip_hash è binary(8) NULL dopo bot', 'binary(8)|YES|' . ( (int) ( $bot_column['ordinal_position'] ?? 0 ) + 1 ), ( $v7_columns['ip_hash']->column_type ?? 'assente' ) . '|' . ( $v7_columns['ip_hash']->is_nullable ?? '' ) . '|' . ( $v7_columns['ip_hash']->ordinal_position ?? '' ) );
+$check( 'schema: wp5w_hits.ua è varchar(255) NOT NULL vuoto dopo ip_hash', 'varchar(255)|NO||' . ( (int) ( $bot_column['ordinal_position'] ?? 0 ) + 2 ), ( $v7_columns['ua']->column_type ?? 'assente' ) . '|' . ( $v7_columns['ua']->is_nullable ?? '' ) . '|' . trim( (string) ( $v7_columns['ua']->column_default ?? 'assente' ), "'" ) . '|' . ( $v7_columns['ua']->ordinal_position ?? '' ) );
 $check(
-	'schema: wp5w_hits senza colonne ip o agent',
-	0,
+	'schema: wp5w_hits ha una sola colonna con ip o agent nel nome (ip_hash)',
+	'ip_hash',
 	$wpdb->get_var(
 		$wpdb->prepare(
-			"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND ( column_name LIKE '%%ip%%' OR column_name LIKE '%%agent%%' )",
+			"SELECT GROUP_CONCAT(column_name) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND ( column_name LIKE '%%ip%%' OR column_name LIKE '%%agent%%' )",
 			Schema::table( 'hits' )
 		)
 	)
@@ -216,7 +226,7 @@ $other->query( "SELECT RELEASE_LOCK( 'wp5w_schema_upgrade' )" );
 $other->close();
 Schema::maybe_upgrade();
 // Le migrazioni da v3 e da v4 non eseguono ALTER su wp5w_hits solo perché la tabella ha già la colonna bot in questo momento.
-$check( 'migrazione da v3: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v3: versione 7', '7', get_option( 'wp5w_db_version' ) );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "migrazione da v3: esiste wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 }
@@ -248,7 +258,7 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'install() rieseguito: nessun errore', '', $wpdb->last_error );
 $check( 'install() rieseguito: nessun ALTER', 0, $alters );
-$check( 'install() rieseguito: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'install() rieseguito: versione 7', '7', get_option( 'wp5w_db_version' ) );
 $check( 'install() rieseguito: SHOW CREATE TABLE identico', md5( $create_before ), md5( $show_create() ) );
 
 // Da v4 a v5: schema v4 completo, senza le due tabelle nuove e con la versione 4. install() le crea, non esegue nessun ALTER e salva 5.
@@ -263,7 +273,7 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'migrazione da v4: nessun errore', '', $wpdb->last_error );
 $check( 'migrazione da v4: nessun ALTER', 0, $alters );
-$check( 'migrazione da v4: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v4: versione 7', '7', get_option( 'wp5w_db_version' ) );
 foreach ( $v5_keys as $wp5w_name => $wp5w_expected ) {
 	$check( "migrazione da v4: creata wp5w_{$wp5w_name}", Schema::table( $wp5w_name ), $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', Schema::table( $wp5w_name ) ) ) );
 	$check( "migrazione da v4: chiave primaria di {$wp5w_name}", $wp5w_expected, $primary_key( $wp5w_name ) );
@@ -272,9 +282,9 @@ $create_v5 = $show_create();
 update_option( 'wp5w_db_version', '4' );
 Schema::install();
 $check( 'migrazione da v4 rieseguita: SHOW CREATE TABLE identico', md5( $create_v5 ), md5( $show_create() ) );
-$check( 'migrazione da v4 rieseguita: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v4 rieseguita: versione 7', '7', get_option( 'wp5w_db_version' ) );
 
-// Da v5 a v6: wp5w_hits senza la colonna bot, con almeno una riga.
+// Da v5 a v7: wp5w_hits senza le colonne bot, ip_hash e ua, con almeno una riga.
 $hits_name  = Schema::table( 'hits' );
 $hits_probe = 0 === (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" );
 if ( $hits_probe ) {
@@ -282,7 +292,8 @@ if ( $hits_probe ) {
 }
 $hits_rows = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" );
 $has_bot   = static fn(): int => count( array_filter( $wpdb->get_col( "SHOW COLUMNS FROM {$hits_name}" ), static fn( $c ) => 'bot' === $c ) );
-$wpdb->query( "ALTER TABLE {$hits_name} DROP COLUMN bot" );
+$has_v7    = static fn(): int => count( array_intersect( array( 'ip_hash', 'ua' ), $wpdb->get_col( "SHOW COLUMNS FROM {$hits_name}" ) ) );
+$wpdb->query( "ALTER TABLE {$hits_name} DROP COLUMN bot, DROP COLUMN ip_hash, DROP COLUMN ua" );
 update_option( 'wp5w_db_version', '5' );
 $check( 'v5 simulata: nessuna colonna bot', 0, $has_bot() );
 
@@ -295,7 +306,7 @@ $check( 'migrazione v5 con lock occupato: nessuna colonna bot', 0, $has_bot() );
 $other->query( "SELECT RELEASE_LOCK( 'wp5w_schema_upgrade' )" );
 $other->close();
 
-// Lock libero: un solo ALTER TABLE, riga esistente con bot vuoto, versione 6.
+// Lock libero: un solo ALTER TABLE per le tre colonne, riga esistente con bot vuoto, versione 7.
 $alters = 0;
 add_filter( 'query', $count_alters );
 $wpdb->last_error = '';
@@ -307,7 +318,8 @@ $check( 'migrazione da v5: colonna bot presente', 1, $has_bot() );
 $check( 'migrazione da v5: posizione di bot dopo os', $os_position + 1, (int) $wpdb->get_var( $wpdb->prepare( "SELECT ordinal_position FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name = 'bot'", $hits_name ) ) );
 $check( 'migrazione da v5: righe conservate', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
 $check( 'migrazione da v5: righe esistenti con bot vuoto', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name} WHERE bot = ''" ) );
-$check( 'migrazione da v5: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v5: colonne ip_hash e ua presenti, righe esistenti senza hash e user agent', '2|' . $hits_rows, $has_v7() . '|' . $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name} WHERE ip_hash IS NULL AND ua = ''" ) );
+$check( 'migrazione da v5: versione 7', '7', get_option( 'wp5w_db_version' ) );
 
 // Idempotenza: con la versione forzata a 5 nessun ALTER e SHOW CREATE TABLE identico.
 $create_hits = (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 );
@@ -318,7 +330,20 @@ Schema::install();
 remove_filter( 'query', $count_alters );
 $check( 'migrazione da v5 rieseguita: nessun ALTER', 0, $alters );
 $check( 'migrazione da v5 rieseguita: SHOW CREATE TABLE identico', md5( $create_hits ), md5( (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 ) ) );
-$check( 'migrazione da v5 rieseguita: versione 6', '6', get_option( 'wp5w_db_version' ) );
+
+// Da v6 a v7: solo ip_hash e ua mancanti, un solo ALTER, nessuna riga persa.
+$wpdb->query( "ALTER TABLE {$hits_name} DROP COLUMN ip_hash, DROP COLUMN ua" );
+update_option( 'wp5w_db_version', '6' );
+$alters = 0;
+add_filter( 'query', $count_alters );
+$wpdb->last_error = '';
+Schema::install();
+remove_filter( 'query', $count_alters );
+$check( 'migrazione da v6: nessun errore e un solo ALTER', '|1', $wpdb->last_error . '|' . $alters );
+$check( 'migrazione da v6: colonne ip_hash e ua presenti e righe conservate', '2|' . $hits_rows, $has_v7() . '|' . $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
+$check( 'migrazione da v6: SHOW CREATE TABLE uguale a quello della migrazione da v5', md5( $create_hits ), md5( (string) $wpdb->get_var( "SHOW CREATE TABLE {$hits_name}", 1 ) ) );
+$check( 'migrazione da v6: versione 7', '7', get_option( 'wp5w_db_version' ) );
+$check( 'migrazione da v5 rieseguita: versione 7', '7', get_option( 'wp5w_db_version' ) );
 
 /**
  * Definizione di una tabella da information_schema: colonne (nome, tipo, NULL, default, posizione) e indici.
@@ -358,7 +383,7 @@ $check( 'installazione senza hits: nessun errore', '', $wpdb->last_error );
 $check( 'installazione senza hits: nessun ALTER', 0, $alters );
 $check( 'installazione senza hits: tabella ricreata con bot', 1, $has_bot() );
 $check( 'installazione senza hits: colonne e indici uguali alla migrazione', md5( $migrated ), md5( $table_definition( $hits_name ) ) );
-$check( 'installazione senza hits: versione 6', '6', get_option( 'wp5w_db_version' ) );
+$check( 'installazione senza hits: versione 7', '7', get_option( 'wp5w_db_version' ) );
 $wpdb->query( "DROP TABLE {$hits_name}" );
 $wpdb->query( "RENAME TABLE {$hits_backup} TO {$hits_name}" );
 $check( 'installazione senza hits: tabella migrata ripristinata', $hits_rows, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_name}" ) );
@@ -519,6 +544,8 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 
 	// `tools` (le serie dei tre strumenti) legge di proposito tutte le origini: non fa parte del confronto prima/dopo le righe own.
 	// Lo stesso per `no_js` (0.17.0), che legge le righe `logbot` dei log di accesso.
+	// Il box «Provenienza» non c'è: dalla 0.19.0 legge le visite grezze dal loro primo giorno, qualunque sia wp5w_own_since
+	// (come la modale), quindi cambia di proposito dopo le visite simulate. La sezione 19 lo confronta con la modale.
 	$overview_data = $overview->get( $r30 );
 	unset( $overview_data['tools'], $overview_data['no_js'] );
 
@@ -531,7 +558,6 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 		'top 30'       => (string) wp_json_encode( $posts->top( 30 ) ),
 		'dettaglio'    => (string) wp_json_encode( $posts->detail( $post_a, $r60 ) ),
 		'visitatori'   => (string) wp_json_encode( $audience->get() ),
-		'provenienza'  => (string) wp_json_encode( $audience->referrers( 7 ) ),
 		'pubblico'     => (string) wp_json_encode( $audience->dimensions( $r30 ) ),
 		'trend sito'   => (string) wp_json_encode( $trend->site() ),
 		'trend oggetti' => (string) wp_json_encode( $trend->objects( $seed_posts ) ),
@@ -979,7 +1005,7 @@ $check( 'POST settings: purge di LiteSpeed alla modifica di own_tracking', 1, $p
 $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'retention_days' => 61 ) );
 $check( 'POST settings: nessun purge se own_tracking e DNT non cambiano', 1, $purges );
 $get = $rest_call( 'GET', '/wp5w/v1/admin/settings' )->get_data();
-$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,log_glob,log_excluded_paths,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
+$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,ip_retention_days,alert_hours,alert_min_visitors,alert_factor,alert_baseline_days,alert_countries,alert_share,alert_ip_visits,log_glob,log_excluded_paths,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
 $check( 'GET settings: own_first_day', $today, $get['own_first_day'] ?? '' );
 $check( 'GET settings: own_since', $today, $get['own_since'] ?? '' );
 update_option( Settings::OPTION, Settings::defaults() );
@@ -1532,13 +1558,18 @@ if ( 2 !== count( $queries ) ) {
 	WP_CLI::log( 'Query catturate: ' . implode( ' || ', array_map( static fn( $q ) => substr( trim( $q ), 0, 120 ), $queries ) ) );
 }
 
-// Passo 9: privacy. Nessuna colonna di wp5w_hits contiene un IP usato nei test o una parte dello user agent.
-$privacy_columns = "CONCAT_WS('|', object_type, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, country, device, browser, os, bot)";
+// Passo 9: privacy (schema v7). Nessuna colonna di wp5w_hits contiene un IP usato nei test, in chiaro o come HEX, md5 o sha256 senza chiave;
+// lo user agent invece si salva nella sola colonna ua, e ip_hash è l'HMAC con la chiave derivata dalle salt.
+$privacy_columns = "CONCAT_WS('|', object_type, uri, referrer_host, channel, source, utm_source, utm_medium, utm_campaign, country, device, browser, os, bot, LOWER(HEX(ip_hash)), ua, LOWER(HEX(visitor)))";
 $privacy_hits    = 0;
-foreach ( array( '8.8.8.8', '8.8.4.4', '151.38.1.1', '198.51.100.30', 'Mozilla', 'AppleWebKit' ) as $wp5w_needle ) {
-	$privacy_hits += (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits_table} WHERE {$privacy_columns} LIKE %s", '%' . $wpdb->esc_like( $wp5w_needle ) . '%' ) );
+foreach ( array( '8.8.8.8', '8.8.4.4', '151.38.1.1', '198.51.100.30' ) as $wp5w_ip ) {
+	foreach ( array( $wp5w_ip, bin2hex( (string) inet_pton( $wp5w_ip ) ), md5( $wp5w_ip ), hash( 'sha256', $wp5w_ip ) ) as $wp5w_needle ) {
+		$privacy_hits += (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$hits_table} WHERE {$privacy_columns} LIKE %s", '%' . $wpdb->esc_like( substr( $wp5w_needle, 0, 16 ) ) . '%' ) );
+	}
 }
-$check( 'privacy: nessun IP né user agent nelle colonne di wp5w_hits', 0, $privacy_hits );
+$check( 'privacy: nessun IP (in chiaro, HEX, md5 o sha256) nelle colonne di wp5w_hits', 0, $privacy_hits );
+$check( 'privacy: lo user agent solo nella colonna ua', '0', $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table} WHERE CONCAT_WS('|', uri, referrer_host, source, utm_source, utm_medium, utm_campaign, browser, os, bot) LIKE '%AppleWebKit%'" ) );
+$check( 'privacy: la visita da 8.8.8.8 ha hash HMAC e user agent', Mavida\FiveW\Support\IpHash::hash( '8.8.8.8', Mavida\FiveW\Support\IpHash::key( wp_salt( 'auth' ) ) ) . '|' . $ua_iphone, $wpdb->get_var( "SELECT CONCAT(LOWER(HEX(ip_hash)), '|', ua) FROM {$hits_table} WHERE uri = '/wp5w-v11-query/' LIMIT 1" ) );
 
 // Passo 10: aggregazione. La somma dei visitatori è uguale per tutte le dimensioni e ai visitatori own di site_daily.
 $wps_digest_before = $rows_digest( 'wps' );
@@ -1764,7 +1795,8 @@ if ( false === $state_backup ) {
 // Passo 4: etichette delle app (solo presentazione: i dati nelle tabelle non cambiano).
 if ( $has_seed ) {
 	$seed_referrer = static fn( array $rows ): string => (string) ( array_column( $rows, 'label', 'referrer' )['android-app://com.linkedin.android/'] ?? 'nessuna riga' );
-	$check( 'etichette: referrer della scheda Visitatori', 'LinkedIn (app)', $seed_referrer( ( new AudienceQuery( new SearchQuery() ) )->referrers( 7 )['rows'] ) );
+	// Dalla 0.19.0 il box normalizza il referrer come le visite grezze (Referrers::hits_key()): la riga wps è com.linkedin.android.
+	$check( 'etichette: referrer della scheda Visitatori', 'LinkedIn (app)', (string) ( array_column( ( new AudienceQuery( new SearchQuery() ) )->referrers( 7 )['rows'], 'label', 'referrer' )['com.linkedin.android'] ?? 'nessuna riga' ) );
 	$check( 'etichette: referrer del dettaglio', 'LinkedIn (app)', $seed_referrer( ( new PostsQuery() )->detail( $post_a, DateRange::last_days( 60, $today ) )['referrers'] ?? array() ) );
 	$check( 'etichette: il dato in referrer_daily non cambia', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'wps' AND day = %s AND referrer = 'android-app://com.linkedin.android/'", $seed_day ) ) );
 }
@@ -3487,11 +3519,309 @@ $check( 'modale oggi: stessi contenuti dell\'aggregazione oraria', implode( ',',
 $wpdb->query( "TRUNCATE TABLE {$hits_table}" );
 $wpdb->query( $wpdb->prepare( "DELETE FROM {$ref_table} WHERE origin = 'own' AND day = %s", $ref_today ) );
 
-// Nessuna visita in wp5w_hits (raccolta spenta o sito senza visite oggi): «Oggi» è vuoto senza errori.
-$check( 'oggi senza visite: nessun sito', 0, count( $ref_query->referrers( 1 )['rows'] ) );
+// Nessuna visita in wp5w_hits (raccolta mai accesa): dalla 0.19.0 «Oggi» viene dall'aggregato, come ogni giorno prima delle visite grezze.
+$ref_none = $ref_query->referrers( 1 );
+$check( 'oggi senza visite grezze: tutto dall\'aggregato, nessun errore', $ref_today . '|' . $ref_today . '|null', $ref_none['sources']['aggregate']['from'] . '|' . $ref_none['sources']['aggregate']['to'] . '|' . wp_json_encode( $ref_none['sources']['raw'] ) );
 
 // ---------------------------------------------------------------------------
-// 19. Pulizia finale.
+// 19. Iterazione 0.19.0: hash dell'IP e user agent (schema v7), conservazione, modale del referrer, dettaglio delle visite e avvisi.
+// ---------------------------------------------------------------------------
+// Conservazione: con 14 giorni restano oggi e i 13 giorni precedenti; le righe restano, si azzerano solo ip_hash e ua.
+update_option( Settings::OPTION, Settings::defaults() );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$v19_today = wp_date( 'Y-m-d' );
+$v19_ago   = static fn( int $days ): string => ( new DateTimeImmutable( $v19_today, new DateTimeZone( 'UTC' ) ) )->modify( "-{$days} days" )->format( 'Y-m-d' );
+foreach ( array( 0, 13, 14, 20 ) as $wp5w_days ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, ip_hash, ua) VALUES (UTC_TIMESTAMP(), %s, UNHEX(%s), 'home', 0, '/', UNHEX(%s), 'Mozilla/5.0 verify')", $v19_ago( $wp5w_days ), md5( "v19-{$wp5w_days}" ), substr( md5( "ip-{$wp5w_days}" ), 0, 16 ) ) );
+}
+$v19_kept = static fn(): string => (string) $wpdb->get_var( "SELECT GROUP_CONCAT(IF( ip_hash IS NULL AND ua = '', 0, 1 ) ORDER BY day DESC) FROM {$hits_table}" );
+$check( 'conservazione 14 giorni: azzerate 2 righe', 2, Mavida\FiveW\Admin\Privacy::purge() );
+$check( 'conservazione 14 giorni: oggi e 13 giorni fa conservati, 14 e 20 azzerati', '1,1,0,0', $v19_kept() );
+$check( 'conservazione: le righe restano', 4, $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table}" ) );
+$check( 'conservazione rieseguita: nessuna riga', 0, Mavida\FiveW\Admin\Privacy::purge() );
+update_option( Settings::OPTION, array( 'ip_retention_days' => 1 ) + Settings::defaults() );
+$check( 'conservazione 1 giorno: resta solo oggi', '1,0,0,0', ( static function () use ( $v19_kept ): string {
+	Mavida\FiveW\Admin\Privacy::purge();
+	return $v19_kept();
+} )() );
+$check( 'conservazione: oltre retention_days si limita a retention_days, sotto 1 vale 1', '30|1', Settings::sanitize( array( 'ip_retention_days' => 50 ) )['ip_retention_days'] . '|' . Settings::sanitize( array( 'ip_retention_days' => 0 ) )['ip_retention_days'] );
+$check( 'conservazione: con retention_days 10 il massimo è 10', 10, Settings::sanitize( array( 'retention_days' => 10, 'ip_retention_days' => 14 ) )['ip_retention_days'] );
+$admin_user( $admin_id );
+$check( 'POST settings con ip_retention_days 0: 400', 400, $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'ip_retention_days' => 0 ) )->get_status() );
+$check( 'POST settings con ip_retention_days 7: salvato', 7, $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'ip_retention_days' => 7 ) )->get_data()['ip_retention_days'] ?? '' );
+$admin_user( 0 );
+update_option( Settings::OPTION, Settings::defaults() );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+// Modale del referrer: oggi, ieri, totale e IP diversi. Visite grezze dal primo giorno di wp5w_hits (3 giorni fa), prima l'aggregato.
+// A = un IP con tre visitatori (v1 due volte oggi, v2 oggi, v4 ieri), B = v3, C = v6; v5 (ieri) è di prima della v7 (senza hash).
+$v19_ref    = Schema::table( 'referrer_daily' );
+$v19_clean  = static function () use ( $wpdb, $v19_ref, $hits_table ): void {
+	$wpdb->query( "DELETE FROM {$v19_ref} WHERE referrer IN ('spam19.wp5w-verify.example', 'android-app://com.wp5w.app/')" );
+	$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+};
+$v19_clean();
+$v19_ip     = array(
+	'A' => substr( md5( 'ip-A' ), 0, 16 ),
+	'B' => substr( md5( 'ip-B' ), 0, 16 ),
+	'C' => substr( md5( 'ip-C' ), 0, 16 ),
+);
+$v19_hit    = static function ( int $ago, string $who, string $type, int $id, string $referrer, ?string $ip, int $entry = 1, string $time = '10:00:00' ) use ( $wpdb, $hits_table, $v19_ago, $v19_ip ): void {
+	$day = $v19_ago( $ago );
+	$wpdb->query(
+		$wpdb->prepare(
+			"INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, is_entry, country, browser, os, ip_hash, ua) VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, 'referral', %d, 'IT', 'Chrome', 'Windows', IF( %s = '', NULL, UNHEX(%s) ), %s)",
+			"{$day} {$time}",
+			$day,
+			md5( "v19-{$day}-{$who}" ),
+			$type,
+			$id,
+			'/v19-' . $id . '/',
+			$referrer,
+			$entry,
+			null === $ip ? '' : $v19_ip[ $ip ],
+			null === $ip ? '' : $v19_ip[ $ip ],
+			null === $ip ? '' : "UA-{$who}"
+		)
+	);
+};
+$v19_hit( 0, 'v1', 'post', $post_a, 'spam19.wp5w-verify.example', 'A', 1, '10:00:00' );
+$v19_hit( 0, 'v1', 'post', $post_a, 'spam19.wp5w-verify.example', 'A', 1, '10:05:00' );
+$v19_hit( 0, 'v2', 'post', $post_a, 'spam19.wp5w-verify.example', 'A', 1, '10:10:00' );
+$v19_hit( 0, 'v3', 'post', $post_b, 'spam19.wp5w-verify.example', 'B' );
+$v19_hit( 1, 'v4', 'post', $post_a, 'spam19.wp5w-verify.example', 'A' );
+$v19_hit( 1, 'v5', 'post', $post_a, 'spam19.wp5w-verify.example', null );
+$v19_hit( 2, 'v6', 'post', $post_a, 'spam19.wp5w-verify.example', 'C' );
+$v19_hit( 3, 'v0', 'home', 0, '', null );
+$v19_hit( 0, 'v7', 'post', $post_a, 'com.wp5w.app', 'B' );
+$v19_hit( 0, 'v8', 'post', $post_a, '', 'B' );
+// Aggregato (wps): 5 giorni fa entra nel totale, 2 giorni fa no (quel giorno viene dalle visite grezze).
+foreach ( array( array( 5, 'spam19.wp5w-verify.example', 7 ), array( 2, 'spam19.wp5w-verify.example', 50 ), array( 5, 'android-app://com.wp5w.app/', 3 ) ) as $wp5w_row ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$v19_ref} (day, object_type, object_id, referrer, channel, source, visitors, origin) VALUES (%s, 'post', %d, %s, 'referral', '', %d, 'wps')", $v19_ago( $wp5w_row[0] ), $post_a, $wp5w_row[1], $wp5w_row[2] ) );
+}
+
+$v19_query = new AudienceQuery( new SearchQuery() );
+$v19_pages = $v19_query->referrer_pages( 'spam19.wp5w-verify.example', 7 );
+$v19_cols  = static fn( array $row ): string => implode( '|', array( $row['today'] ?? 'null', $row['yesterday'] ?? 'null', $row['visitors'], $row['ips'] ?? 'null' ) );
+$check( 'modale 0.19: due contenuti, A prima di B', $post_a . ',' . $post_b, implode( ',', array_column( $v19_pages['rows'], 'id' ) ) );
+$check( 'modale 0.19: articolo A oggi 2, ieri 2, totale 12 (5 grezzi + 7 aggregati), 2 IP diversi', '2|2|12|2', $v19_cols( $v19_pages['rows'][0] ) );
+$check( 'modale 0.19: articolo B oggi 1, ieri 0, totale 1, 1 IP', '1|0|1|1', $v19_cols( $v19_pages['rows'][1] ) );
+$check( 'modale 0.19: totale mai sotto oggi + ieri', 0, count( array_filter( $v19_pages['rows'], static fn( array $row ): bool => $row['visitors'] < (int) $row['today'] + (int) $row['yesterday'] ) ) );
+$check( 'modale 0.19: intestazione dalle righe (13 visitatori, 2 contenuti)', '13|2', $v19_pages['totals']['visitors'] . '|' . $v19_pages['totals']['contents'] );
+$check( 'modale 0.19: sorgenti (aggregato fino al giorno prima delle visite grezze)', $v19_ago( 6 ) . '|' . $v19_ago( 4 ) . '|' . $v19_ago( 3 ) . '|' . $v19_today, $v19_pages['sources']['aggregate']['from'] . '|' . $v19_pages['sources']['aggregate']['to'] . '|' . $v19_pages['sources']['raw']['from'] . '|' . $v19_pages['sources']['raw']['to'] );
+$check( 'modale 0.19: IP disponibili dal primo giorno con hash', $v19_ago( 2 ), $v19_pages['ip_from'] ?? 'null' );
+$v19_today_pages = $v19_query->referrer_pages( 'spam19.wp5w-verify.example', 1 );
+$check( 'modale 0.19 oggi: ieri non disponibile, totale = oggi', '2|null|2|1', $v19_cols( $v19_today_pages['rows'][0] ) );
+$v19_app = $v19_query->referrer_pages( 'android-app://com.wp5w.app/', 7 );
+$check( 'modale 0.19: referrer android-app:// di WP Statistics trova le visite grezze com.wp5w.app', '1|0|4|1', $v19_cols( $v19_app['rows'][0] ?? array() ) );
+
+// Box «Provenienza» allineato alla modale: stessa sorgente giorno per giorno, stessi visitatori e contenuti per ogni periodo.
+// Il referrer android-app:// di WP Statistics e com.wp5w.app delle visite grezze sono una sola riga (com.wp5w.app).
+foreach ( array( 1, 7, 30, 90 ) as $wp5w_days ) {
+	$v19_box = array_column( $v19_query->referrers( $wp5w_days )['rows'], null, 'referrer' );
+	foreach ( array( 'spam19.wp5w-verify.example', 'com.wp5w.app' ) as $wp5w_ref ) {
+		$v19_modal = $v19_query->referrer_pages( $wp5w_ref, $wp5w_days )['totals'];
+		$check( "box = modale, {$wp5w_ref} a {$wp5w_days} giorni (visitatori e contenuti)", $v19_modal['visitors'] . '|' . $v19_modal['contents'], ( $v19_box[ $wp5w_ref ]['visitors'] ?? 0 ) . '|' . ( $v19_box[ $wp5w_ref ]['contents'] ?? 0 ) );
+	}
+}
+$v19_box7 = $v19_query->referrers( 7 );
+$check( 'box 0.19: spam19 a 7 giorni = 13 visitatori su 2 contenuti', '13|2', ( array_column( $v19_box7['rows'], 'visitors', 'referrer' )['spam19.wp5w-verify.example'] ?? '' ) . '|' . ( array_column( $v19_box7['rows'], 'contents', 'referrer' )['spam19.wp5w-verify.example'] ?? '' ) );
+$check( 'box 0.19: nessuna riga con la chiave android-app:// e sorgenti come nella modale', '0|' . wp_json_encode( $v19_pages['sources'] ), count( array_filter( $v19_box7['rows'], static fn( array $row ): bool => str_starts_with( $row['referrer'], 'android-app://' ) ) ) . '|' . wp_json_encode( $v19_box7['sources'] ) );
+
+// Dettaglio delle visite: filtri, conteggi su tutte le visite, raggruppamenti, orario del sito e hash corto.
+$v19_visits = new Mavida\FiveW\Query\VisitsQuery();
+$v19_detail = $v19_visits->get( 'post', $post_a, 7, 'spam19.wp5w-verify.example', null );
+$check( 'dettaglio: 6 visite, 5 visitatori, 2 IP', '6|5|2', implode( '|', $v19_detail['totals'] ) );
+$check( 'dettaglio: per IP, A con 4 visite in testa e hash corto', substr( $v19_ip['A'], 0, 8 ) . '|4', $v19_detail['by_ip'][0]['ip'] . '|' . $v19_detail['by_ip'][0]['visits'] );
+$check( 'dettaglio: la visita senza hash è n.d. (ip vuoto e user agent vuoto)', 1, count( array_filter( $v19_detail['rows'], static fn( array $row ): bool => '' === $row['ip'] && '' === $row['ua'] ) ) );
+$check( 'dettaglio: la più recente prima, orario del sito', get_date_from_gmt( $v19_today . ' 10:10:00', 'Y-m-d H:i:s' ), $v19_detail['rows'][0]['time'] );
+$check( 'dettaglio: per user agent, UA-v1 con 2 visite in testa', 'UA-v1|2', $v19_detail['by_ua'][0]['ua'] . '|' . $v19_detail['by_ua'][0]['visits'] );
+$check( 'dettaglio: titolo del contenuto', html_entity_decode( get_the_title( $post_a ), ENT_QUOTES, 'UTF-8' ), $v19_detail['content']['title'] );
+$check( 'dettaglio per IP (tutte le provenienze): A ha 4 visite sull\'articolo A', 4, $v19_visits->get( 'post', $post_a, 7, null, $v19_ip['A'] )['totals']['visits'] );
+$check( 'dettaglio diretto (referrer vuoto): una visita', 1, $v19_visits->get( 'post', $post_a, 7, '', null )['totals']['visits'] );
+$check( 'dettaglio con referrer android-app://: la visita com.wp5w.app', 1, $v19_visits->get( 'post', $post_a, 7, 'android-app://com.wp5w.app/', null )['totals']['visits'] );
+$check( 'dettaglio: nessuna chiave visitor nella risposta', 0, (int) str_contains( (string) wp_json_encode( $v19_detail ), '"visitor"' ) );
+for ( $wp5w_i = 0; $wp5w_i < 510; $wp5w_i++ ) {
+	$v19_hit( 0, "m{$wp5w_i}", 'post', $post_b, '', 'B' );
+}
+$v19_many = $v19_visits->get( 'post', $post_b, 7, '', null );
+$check( 'dettaglio: al massimo 500 righe, conteggi su tutte le 510', '500|510|510', count( $v19_many['rows'] ) . '|' . $v19_many['totals']['visits'] . '|' . $v19_many['by_ip'][0]['visits'] );
+
+// Rotta REST del dettaglio: permessi, parametri e referrer vuoto («diretto») distinto da quello assente.
+$v19_route = '/wp5w/v1/admin/visits';
+$check( 'dettaglio senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$check( 'dettaglio con amministratore e referrer vuoto: 200 e una visita', '200|1', ( static function () use ( $rest_call, $v19_route, $post_a ): string {
+	$response = $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'days' => 7, 'referrer' => '' ) );
+	return $response->get_status() . '|' . ( $response->get_data()['totals']['visits'] ?? '' );
+} )() );
+$check( 'dettaglio senza referrer: tutte le visite dell\'articolo A (8)', 8, $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'days' => 7 ) )->get_data()['totals']['visits'] ?? '' );
+$check( 'dettaglio con hash IP non valido: 400', 400, $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'ip' => 'zz' ) )->get_status() );
+$check( 'dettaglio con days 91: 400', 400, $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'days' => 91 ) )->get_status() );
+$check( 'dettaglio senza tipo: 400', 400, $rest_call( 'GET', $v19_route, array( 'id' => $post_a ) )->get_status() );
+$check( 'modale via REST: colonne today, yesterday, visitors e ips', 'today,yesterday,visitors,ips', implode( ',', array_values( array_intersect( array( 'today', 'yesterday', 'visitors', 'ips' ), array_keys( $rest_call( 'GET', '/wp5w/v1/admin/audience/referrer', array( 'referrer' => 'spam19.wp5w-verify.example', 'days' => 7 ) )->get_data()['rows'][0] ?? array() ) ) ) ) );
+$admin_user( 0 );
+$v19_clean();
+
+// Avvisi sulle visite anomale (Anomalies, regola in Support\Anomaly): casi sintetici con le forme di quelli reali del blog.
+// Base: la home in accesso diretto ha 5 visitatori al giorno nei 10 giorni prima della finestra (il primo giorno di raccolta,
+// 12 giorni fa, è parziale e non conta). Finestra: le ultime 24 ore prima di $al_now.
+update_option( Settings::OPTION, Settings::defaults() );
+delete_option( Mavida\FiveW\Etl\Anomalies::OPTION );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$al_now = time();
+$al_n   = 0;
+$al_hit = static function ( int $ts, string $referrer, string $type, int $id, string $country, string $combo, ?string $ip = null, int $entry = 1 ) use ( $wpdb, $hits_table, &$al_n ): void {
+	[ $browser, $os ] = explode( '|', $combo );
+	++$al_n;
+	$wpdb->query(
+		$wpdb->prepare(
+			"INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, is_entry, country, browser, os, ip_hash, ua) VALUES (%s, %s, UNHEX(%s), %s, %d, '/al/', %s, 'referral', %d, %s, %s, %s, IF( %s = '', NULL, UNHEX(%s) ), 'UA-al')",
+			gmdate( 'Y-m-d H:i:s', $ts ),
+			wp_date( 'Y-m-d', $ts ),
+			md5( "al-{$al_n}" ),
+			$type,
+			$id,
+			$referrer,
+			$entry,
+			$country,
+			$browser,
+			$os,
+			$ip ?? '',
+			$ip ?? ''
+		)
+	);
+};
+$al_countries = array( 'IT', 'DE', 'FR', 'US', 'GB', 'NL', 'JP', 'IN', 'BR', 'PL', 'SE', 'RO' );
+$al_combos    = array( 'Chrome|Windows', 'Safari|Mac', 'Chrome Mobile|Android', 'Mobile Safari|iOS', 'Firefox|GNU/Linux' );
+// Mezzogiorno del sito N giorni fa (giorni della base lontani dalla mezzanotte).
+$al_noon = static fn( int $days ): int => ( new DateTimeImmutable( wp_date( 'Y-m-d', $al_now - $days * DAY_IN_SECONDS ) . ' 12:00:00', wp_timezone() ) )->getTimestamp();
+$al_hit( $al_noon( 12 ), '', 'home', 0, 'IT', 'Chrome|Windows' );
+for ( $wp5w_d = 2; $wp5w_d <= 11; $wp5w_d++ ) {
+	for ( $wp5w_i = 0; $wp5w_i < 5; $wp5w_i++ ) {
+		$al_hit( $al_noon( $wp5w_d ), '', 'home', 0, 'IT', $al_combos[ $wp5w_i ] );
+	}
+}
+for ( $wp5w_i = 0; $wp5w_i < 32; $wp5w_i++ ) {
+	// Spam (come aocr.org): 32 visitori, 12 paesi, tutti Chrome/Windows, su un contenuto senza storico.
+	$al_hit( $al_now - 3 * HOUR_IN_SECONDS + $wp5w_i, 'spam.wp5w-al.example', 'post', $post_a, $al_countries[ $wp5w_i % 12 ], 'Chrome|Windows' );
+}
+for ( $wp5w_i = 0; $wp5w_i < 30; $wp5w_i++ ) {
+	// Bot sulla home: 30 ingressi diretti (6 volte la mediana 5), 12 paesi, due combinazioni alla pari.
+	$al_hit( $al_now - 5 * HOUR_IN_SECONDS + $wp5w_i, '', 'home', 0, $al_countries[ $wp5w_i % 12 ], $wp5w_i % 2 ? 'Chrome Mobile|Android' : 'Chrome Mobile iOS|iOS' );
+}
+for ( $wp5w_i = 0; $wp5w_i < 25; $wp5w_i++ ) {
+	// LinkedIn su un articolo nuovo: 25 visitatori, 2 paesi, browser vari. Picco senza firma.
+	$al_hit( $al_now - 2 * HOUR_IN_SECONDS + $wp5w_i, 'linkedin.com', 'post', $post_b, $wp5w_i % 2 ? 'IT' : 'CH', $al_combos[ $wp5w_i % 5 ] );
+	// Visite senza browser e sistema riconosciuti: la combinazione sconosciuta non è mai dominante.
+	$al_hit( $al_now - 2 * HOUR_IN_SECONDS + $wp5w_i, 'ignoto.wp5w-al.example', 'post', $post_b, 'IT', '|' );
+}
+for ( $wp5w_i = 0; $wp5w_i < 5; $wp5w_i++ ) {
+	// Poche visite tutte uguali: sotto il minimo, niente.
+	$al_hit( $al_now - HOUR_IN_SECONDS, 'piccolo.wp5w-al.example', 'post', $post_a, 'RU', 'Chrome|Windows' );
+}
+$al_ip = array(
+	'X' => substr( md5( 'al-ip-X' ), 0, 16 ),
+	'Y' => substr( md5( 'al-ip-Y' ), 0, 16 ),
+	'Z' => substr( md5( 'al-ip-Z' ), 0, 16 ),
+);
+for ( $wp5w_i = 0; $wp5w_i < 16; $wp5w_i++ ) {
+	// Un IP con 16 visite (non ingressi) allo stesso contenuto: avviso per IP. Un altro con 14: niente.
+	$al_hit( $al_now - 4 * HOUR_IN_SECONDS + $wp5w_i, '', 'post', $post_b, 'IT', 'Chrome|Windows', $al_ip['X'], 0 );
+	if ( $wp5w_i < 14 ) {
+		$al_hit( $al_now - 4 * HOUR_IN_SECONDS + $wp5w_i, '', 'post', $post_a, 'IT', 'Chrome|Windows', $al_ip['Y'], 0 );
+	}
+}
+for ( $wp5w_i = 0; $wp5w_i < 20; $wp5w_i++ ) {
+	// Coppia con picco e un solo IP che fa 15 dei 20 ingressi: firma «ip».
+	$al_hit( $al_now - 6 * HOUR_IN_SECONDS + $wp5w_i, 'ripetuto.wp5w-al.example', 'page', 99, $wp5w_i % 2 ? 'IT' : 'FR', $al_combos[ $wp5w_i % 5 ], $wp5w_i < 15 ? $al_ip['Z'] : null );
+}
+// Fuori dalla finestra (25 ore fa): non conta.
+for ( $wp5w_i = 0; $wp5w_i < 30; $wp5w_i++ ) {
+	$al_hit( $al_now - 25 * HOUR_IN_SECONDS, 'vecchio.wp5w-al.example', 'post', $post_a, $al_countries[ $wp5w_i % 12 ], 'Chrome|Windows' );
+}
+
+$al_res   = Mavida\FiveW\Etl\Anomalies::compute( $al_now );
+$al_keys  = static fn( array $items ): string => implode( ',', array_map( static fn( array $a ): string => 'pair' === $a['kind'] ? ( '' === $a['referrer'] ? '(diretto)' : $a['referrer'] ) . '>' . $a['type'] . ':' . implode( '+', $a['reasons'] ) : 'ip>' . substr( $a['ip'], 0, 4 ) . '>' . $a['visits'], $items ) );
+$al_alert = static fn( string $referrer ) => array_values( array_filter( $al_res['alerts'], static fn( array $a ): bool => 'pair' === $a['kind'] && $a['referrer'] === $referrer ) )[0] ?? array();
+$check( 'avvisi: spam, bot sulla home, IP ripetuto e due IP con 16 e 15 visite (dal più grande)', 'spam.wp5w-al.example>post:countries+combo,(diretto)>home:countries,ripetuto.wp5w-al.example>page:ip,ip>' . substr( $al_ip['X'], 0, 4 ) . '>16,ip>' . substr( $al_ip['Z'], 0, 4 ) . '>15', $al_keys( $al_res['alerts'] ) );
+// Stessi visitatori (25): l'ordine tra i due non è definito, si confrontano ordinati.
+$al_sorted = static function ( string $keys ): string {
+	$list = explode( ',', $keys );
+	sort( $list );
+	return implode( ',', $list );
+};
+$check( 'avvisi: picchi senza firma (LinkedIn e visite senza browser riconosciuto)', 'ignoto.wp5w-al.example>post:,linkedin.com>post:', $al_sorted( $al_keys( $al_res['peaks'] ) ) );
+$check( 'avvisi: spam con 32 visitatori, mediana 0, 12 paesi e 100% Chrome/Windows', '32|0|12|Chrome|Windows|100', implode( '|', array( $al_alert( 'spam.wp5w-al.example' )['visitors'] ?? '', $al_alert( 'spam.wp5w-al.example' )['median'] ?? '', $al_alert( 'spam.wp5w-al.example' )['countries'] ?? '', $al_alert( 'spam.wp5w-al.example' )['combo']['combo'] ?? '', $al_alert( 'spam.wp5w-al.example' )['combo']['share'] ?? '' ) ) );
+$check( 'avvisi: home con mediana 5 su 10 giorni (il primo giorno di raccolta non conta)', '30|5|10', implode( '|', array( $al_alert( '' )['visitors'] ?? '', $al_alert( '' )['median'] ?? '', $al_alert( '' )['base_days'] ?? '' ) ) );
+$check( 'avvisi: IP ripetuto con 15 ingressi dallo stesso hash', 15, $al_alert( 'ripetuto.wp5w-al.example' )['ip_max'] ?? '' );
+$check( 'avvisi: titolo dell\'articolo nello spam', html_entity_decode( get_the_title( $post_a ), ENT_QUOTES, 'UTF-8' ), $al_alert( 'spam.wp5w-al.example' )['title'] ?? '' );
+
+// Soglie: con 33 visitatori minimi restano solo gli avvisi per IP; con K = 7 la home (30 contro 7 x 5) non è più un picco.
+update_option( Settings::OPTION, array( 'alert_min_visitors' => 33 ) + Settings::defaults() );
+$check( 'avvisi con MIN 33: solo gli avvisi per IP', 'ip>' . substr( $al_ip['X'], 0, 4 ) . '>16,ip>' . substr( $al_ip['Z'], 0, 4 ) . '>15',$al_keys( Mavida\FiveW\Etl\Anomalies::compute( $al_now )['alerts'] ) );
+update_option( Settings::OPTION, array( 'alert_factor' => 7 ) + Settings::defaults() );
+$check( 'avvisi con K 7: la home non scatta più', 0, (int) str_contains( $al_keys( Mavida\FiveW\Etl\Anomalies::compute( $al_now )['alerts'] ), '(diretto)' ) );
+update_option( Settings::OPTION, array( 'alert_hours' => 2 ) + Settings::defaults() );
+$check( 'avvisi con finestra di 2 ore: solo il piccolo e LinkedIn sono dentro, nessun avviso', '', $al_keys( Mavida\FiveW\Etl\Anomalies::compute( $al_now )['alerts'] ) );
+update_option( Settings::OPTION, Settings::defaults() );
+
+// Salvataggio: run() salva l'opzione e conserva la data del primo avviso; con la raccolta spenta si svuota.
+$al_first = Mavida\FiveW\Etl\Anomalies::run( $al_now - HOUR_IN_SECONDS );
+$al_again = Mavida\FiveW\Etl\Anomalies::run( $al_now );
+$check( 'avvisi salvati: la data del primo avviso resta quella del primo calcolo', $al_now - HOUR_IN_SECONDS, array_column( $al_again['alerts'], 'since', 'key' )[ 'pair:spam.wp5w-al.example|post|' . $post_a ] ?? '' );
+$check( 'avvisi salvati: opzione non caricata in automatico', 1, (int) in_array( $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", Mavida\FiveW\Etl\Anomalies::OPTION ) ), array( 'no', 'off' ), true ) );
+update_option( Settings::OPTION, array( 'own_tracking' => false ) + Settings::defaults() );
+$check( 'avvisi con la raccolta spenta: nessuno', 0, count( Mavida\FiveW\Etl\Anomalies::run( $al_now )['alerts'] ) );
+update_option( Settings::OPTION, Settings::defaults() );
+
+// Rotte: GET /admin/alerts e ricalcolo al salvataggio delle Opzioni (con l'ora attuale).
+$al_route = '/wp5w/v1/admin/alerts';
+$check( 'avvisi senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $al_route )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$check( 'POST settings con alert_share 40: 400', 400, $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'alert_share' => 40 ) )->get_status() );
+$rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'alert_min_visitors' => 20 ) );
+$al_response = $rest_call( 'GET', $al_route );
+$check( 'avvisi con amministratore: 200, raccolta attiva e 7 soglie', '200|1|7', $al_response->get_status() . '|' . (int) $al_response->get_data()['tracking'] . '|' . count( $al_response->get_data()['thresholds'] ) );
+$check( 'avvisi dopo il salvataggio delle Opzioni: ricalcolati adesso', 1, (int) ( abs( (int) $al_response->get_data()['computed_at'] - time() ) < 120 ) );
+$check( 'avvisi: risposta senza la chiave visitor', 0, (int) str_contains( (string) wp_json_encode( $al_response->get_data() ), '"visitor"' ) );
+$admin_user( 0 );
+update_option( Settings::OPTION, Settings::defaults() );
+delete_option( Mavida\FiveW\Etl\Anomalies::OPTION );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+// Pulizia manuale delle visite grezze (mai automatica): con 30 giorni restano oggi e i 29 precedenti.
+update_option( Settings::OPTION, Settings::defaults() );
+foreach ( array( 40, 31, 30, 29, 0 ) as $wp5w_days ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri) VALUES (%s, %s, UNHEX(%s), 'home', 0, '/')", $v19_ago( $wp5w_days ) . ' 12:00:00', $v19_ago( $wp5w_days ), md5( "purge-{$wp5w_days}" ) ) );
+}
+( new OwnSource() )->import( new DateRange( $v19_ago( 40 ), $v19_today ) );
+$pg_own     = static fn(): string => (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'site_daily' ) . " WHERE origin = 'own' AND day IN (%s, %s, %s)", $v19_ago( 40 ), $v19_ago( 31 ), $v19_ago( 30 ) ) );
+$pg_preview = Mavida\FiveW\Admin\Privacy::old_hits();
+$check( 'pulizia: anteprima con 30 giorni, 3 visite prima del primo giorno conservato', '30|' . $v19_ago( 29 ) . '|3|' . $v19_ago( 40 ), implode( '|', $pg_preview ) );
+$check( 'pulizia: righe own dei tre giorni prima della cancellazione', '3', $pg_own() );
+$pg_route = '/wp5w/v1/admin/hits/purge';
+$check( 'pulizia senza utente: 401 o 403 (anteprima e cancellazione)', '1|1', (int) in_array( $rest_call( 'GET', $pg_route )->get_status(), array( 401, 403 ), true ) . '|' . (int) in_array( $rest_call( 'POST', $pg_route, array( 'before' => $pg_preview['before'] ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$check( 'pulizia: GET con amministratore, 3 righe', '200|3', $rest_call( 'GET', $pg_route )->get_status() . '|' . ( $rest_call( 'GET', $pg_route )->get_data()['rows'] ?? '' ) );
+$check( 'pulizia senza before: 400', 400, $rest_call( 'POST', $pg_route )->get_status() );
+$check( 'pulizia con un before diverso dall\'anteprima: 409 e nessuna riga cancellata', '409|5', $rest_call( 'POST', $pg_route, array( 'before' => $v19_ago( 10 ) ) )->get_status() . '|' . $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table}" ) );
+$pg_done = $rest_call( 'POST', $pg_route, array( 'before' => $pg_preview['before'] ) );
+$check( 'pulizia: 200, 3 righe cancellate e anteprima successiva vuota', '200|3|0', $pg_done->get_status() . '|' . ( $pg_done->get_data()['deleted'] ?? '' ) . '|' . ( $pg_done->get_data()['after']['rows'] ?? '' ) );
+$admin_user( 0 );
+$check( 'pulizia: restano le 2 visite dal primo giorno conservato', '2|' . $v19_ago( 29 ), $wpdb->get_var( "SELECT CONCAT(COUNT(*), '|', MIN(day)) FROM {$hits_table}" ) );
+( new OwnSource() )->import( new DateRange( $v19_ago( 40 ), $v19_today ) );
+$check( 'pulizia: le righe own dei giorni cancellati restano anche dopo una nuova aggregazione', '3', $pg_own() );
+// Una visita di nuovo più vecchia della conservazione: il passaggio orario non la cancella (solo il pulsante lo fa).
+$wpdb->query( $wpdb->prepare( "INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri) VALUES (%s, %s, UNHEX(%s), 'home', 0, '/')", $v19_ago( 40 ) . ' 12:00:00', $v19_ago( 40 ), md5( 'purge-again' ) ) );
+$check( 'pulizia: nessuna cancellazione automatica nel passaggio orario', 3, ( static function () use ( $wpdb, $hits_table ): int {
+	( new Mavida\FiveW\Etl\Scheduler( Plugin::importer() ) )->run_hourly();
+	return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table}" );
+} )() );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+
+// ---------------------------------------------------------------------------
+// 20. Pulizia finale.
 // ---------------------------------------------------------------------------
 // Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
 remove_filter( 'pre_http_request', $github_mock, 10 );

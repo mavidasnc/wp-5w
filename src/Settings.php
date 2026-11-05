@@ -19,6 +19,8 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Opzioni `wp5w_settings` (un array) e `wp5w_own_since` (data di passaggio alla raccolta propria).
+ *
+ * @phpstan-type SettingsArray array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,ip_retention_days:int,alert_hours:int,alert_min_visitors:int,alert_factor:int,alert_baseline_days:int,alert_countries:int,alert_share:int,alert_ip_visits:int,log_glob:string,log_excluded_paths:array<int,string>}
  */
 final class Settings {
 
@@ -44,27 +46,55 @@ final class Settings {
 	public const USER_MODES = array( 'admins', 'logged_in', 'none' );
 
 	/**
+	 * Limiti (minimo e massimo) delle soglie degli avvisi: li usano la sanificazione e gli `args` della REST.
+	 *
+	 * @var array<string,array{0:int,1:int}>
+	 */
+	public const ALERT_LIMITS = array(
+		'alert_hours'         => array( 1, 168 ),
+		'alert_min_visitors'  => array( 1, 10000 ),
+		'alert_factor'        => array( 1, 100 ),
+		'alert_baseline_days' => array( 7, 90 ),
+		'alert_countries'     => array( 2, 250 ),
+		'alert_share'         => array( 50, 100 ),
+		'alert_ip_visits'     => array( 2, 10000 ),
+	);
+
+	/**
 	 * Valori predefiniti.
 	 *
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
+	 * @return SettingsArray
 	 */
 	public static function defaults(): array {
 		return array(
-			'own_tracking'       => true,
-			'exclude_users'      => 'admins',
-			'excluded_ips'       => array(),
-			'respect_dnt'        => true,
-			'retention_days'     => 30,
+			'own_tracking'        => true,
+			'exclude_users'       => 'admins',
+			'excluded_ips'        => array(),
+			'respect_dnt'         => true,
+			'retention_days'      => 30,
+			// Giorni di conservazione di hash dell'IP e user agent (schema v7), da 1 a retention_days.
+			'ip_retention_days'   => 14,
+			// Avvisi sulle visite anomale (0.19.0, Support\Anomaly), calibrati sulle visite del blog dal 14/10 al 5/11/2026:
+			// finestra W in ore, visitatori minimi MIN, volte la mediana K, giorni della base B, paesi P, quota browser + sistema Q (%),
+			// visite di un solo IP allo stesso contenuto M. M = 15 e non 10: senza hash dell'IP nei dati storici, il limite inferiore è lo stesso
+			// visitatore del giorno (IP + user agent) sullo stesso contenuto, che nel traffico normale arriva a 13 (una persona, 13 visite in 2 minuti).
+			'alert_hours'         => 24,
+			'alert_min_visitors'  => 20,
+			'alert_factor'        => 5,
+			'alert_baseline_days' => 28,
+			'alert_countries'     => 10,
+			'alert_share'         => 90,
+			'alert_ip_visits'     => 15,
 			// Log di accesso del server (0.14.0): percorso dei file (con * e ?) e prefissi di percorso da ignorare. Vuoto = sorgente spenta.
-			'log_glob'           => '',
-			'log_excluded_paths' => array(),
+			'log_glob'            => '',
+			'log_excluded_paths'  => array(),
 		);
 	}
 
 	/**
 	 * Impostazioni salvate, unite ai valori predefiniti.
 	 *
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
+	 * @return SettingsArray
 	 */
 	public static function get(): array {
 		$saved = get_option( self::OPTION, array() );
@@ -151,12 +181,23 @@ final class Settings {
 	}
 
 	/**
+	 * Intero tra minimo e massimo.
+	 *
+	 * @param mixed              $value  Valore ricevuto.
+	 * @param array{0:int,1:int} $limits Minimo e massimo.
+	 * @return int
+	 */
+	private static function clamp( mixed $value, array $limits ): int {
+		return max( $limits[0], min( $limits[1], is_numeric( $value ) ? (int) $value : $limits[0] ) );
+	}
+
+	/**
 	 * Porta qualunque valore a un array di impostazioni valido.
 	 *
 	 * Gli IP non validi si scartano qui: la risposta 400 con l'elenco delle righe errate la dà la REST prima di salvare.
 	 *
 	 * @param mixed $value Valore ricevuto.
-	 * @return array{own_tracking:bool,exclude_users:string,excluded_ips:array<int,string>,respect_dnt:bool,retention_days:int,log_glob:string,log_excluded_paths:array<int,string>}
+	 * @return SettingsArray
 	 */
 	public static function sanitize( mixed $value ): array {
 		$defaults = self::defaults();
@@ -180,15 +221,24 @@ final class Settings {
 			}
 		}
 
-		// Passo 3: booleani, modalità ammessa e conservazione tra 7 e 365 giorni.
+		// Passo 3: booleani, modalità ammessa, conservazione tra 7 e 365 giorni e, per hash dell'IP e user agent, tra 1 e quella delle visite.
+		$retention = max( 7, min( 365, (int) $value['retention_days'] ) );
 		return array(
-			'own_tracking'       => filter_var( $value['own_tracking'], FILTER_VALIDATE_BOOLEAN ),
-			'exclude_users'      => in_array( $value['exclude_users'], self::USER_MODES, true ) ? (string) $value['exclude_users'] : $defaults['exclude_users'],
-			'excluded_ips'       => array_values( array_unique( $ips ) ),
-			'respect_dnt'        => filter_var( $value['respect_dnt'], FILTER_VALIDATE_BOOLEAN ),
-			'retention_days'     => max( 7, min( 365, (int) $value['retention_days'] ) ),
-			'log_glob'           => trim( sanitize_text_field( (string) $value['log_glob'] ) ),
-			'log_excluded_paths' => array_values( array_unique( $paths ) ),
+			'own_tracking'        => filter_var( $value['own_tracking'], FILTER_VALIDATE_BOOLEAN ),
+			'exclude_users'       => in_array( $value['exclude_users'], self::USER_MODES, true ) ? (string) $value['exclude_users'] : $defaults['exclude_users'],
+			'excluded_ips'        => array_values( array_unique( $ips ) ),
+			'respect_dnt'         => filter_var( $value['respect_dnt'], FILTER_VALIDATE_BOOLEAN ),
+			'retention_days'      => $retention,
+			'ip_retention_days'   => max( 1, min( $retention, (int) $value['ip_retention_days'] ) ),
+			'alert_hours'         => self::clamp( $value['alert_hours'], self::ALERT_LIMITS['alert_hours'] ),
+			'alert_min_visitors'  => self::clamp( $value['alert_min_visitors'], self::ALERT_LIMITS['alert_min_visitors'] ),
+			'alert_factor'        => self::clamp( $value['alert_factor'], self::ALERT_LIMITS['alert_factor'] ),
+			'alert_baseline_days' => self::clamp( $value['alert_baseline_days'], self::ALERT_LIMITS['alert_baseline_days'] ),
+			'alert_countries'     => self::clamp( $value['alert_countries'], self::ALERT_LIMITS['alert_countries'] ),
+			'alert_share'         => self::clamp( $value['alert_share'], self::ALERT_LIMITS['alert_share'] ),
+			'alert_ip_visits'     => self::clamp( $value['alert_ip_visits'], self::ALERT_LIMITS['alert_ip_visits'] ),
+			'log_glob'            => trim( sanitize_text_field( (string) $value['log_glob'] ) ),
+			'log_excluded_paths'  => array_values( array_unique( $paths ) ),
 		);
 	}
 }

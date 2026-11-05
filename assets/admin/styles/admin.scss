@@ -397,6 +397,33 @@
 	text-align: left;
 }
 
+// Avvisi sulle visite anomale della Panoramica (bordo come i Notice di WordPress).
+.wp5w-alert {
+	border-left: 4px solid #dba617;
+	background: #fcf9e8;
+	padding: 8px 12px;
+	margin-bottom: 8px;
+
+	p {
+		margin: 0 0 6px;
+	}
+}
+
+.wp5w-alert__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+
+// User agent completo nel dettaglio delle visite: testo lungo e senza spazi utili, va a capo ovunque.
+.wp5w-ua {
+	font-family: monospace;
+	font-size: 11px;
+	word-break: break-all;
+	min-width: 240px;
+}
+
 .wp5w-spark {
 	display: block;
 }
@@ -635,4 +662,9 @@
 		font-weight: 600;
 		vertical-align: middle;
 	}
+}
+
+// Pulsante della pulizia manuale delle visite grezze, sotto i campi della conservazione.
+.wp5w-purge {
+	margin-top: 16px;
 }

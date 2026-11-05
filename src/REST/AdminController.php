@@ -9,6 +9,8 @@ declare(strict_types=1);
 
 namespace Mavida\FiveW\REST;
 
+use Mavida\FiveW\Admin\Privacy;
+use Mavida\FiveW\Etl\Anomalies;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Geo\CountryDatabase;
@@ -21,6 +23,7 @@ use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TodayQuery;
 use Mavida\FiveW\Query\TrendQuery;
+use Mavida\FiveW\Query\VisitsQuery;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Sources\AccessLogSource;
 use Mavida\FiveW\Support\DateRange;
@@ -46,6 +49,7 @@ final class AdminController extends RestController {
 	 * @param OnlineQuery     $online     «Online adesso».
 	 * @param OperationsQuery $operations Pagine non trovate e ricerche interne.
 	 * @param TodayQuery      $today      Scheda «Oggi».
+	 * @param VisitsQuery     $visits     Dettaglio delle singole visite.
 	 */
 	public function __construct(
 		private readonly Importer $importer,
@@ -57,7 +61,8 @@ final class AdminController extends RestController {
 		private readonly CompareQuery $compare,
 		private readonly OnlineQuery $online,
 		private readonly OperationsQuery $operations,
-		private readonly TodayQuery $today
+		private readonly TodayQuery $today,
+		private readonly VisitsQuery $visits = new VisitsQuery()
 	) {}
 
 	/**
@@ -221,6 +226,89 @@ final class AdminController extends RestController {
 			)
 		);
 
+		// Dettaglio delle visite di un contenuto (modale del referrer e avvisi): solo raccolta propria. Il referrer vuoto vuol dire
+		// «diretto», assente vuol dire «qualunque»; l'hash dell'IP è quello completo (16 caratteri) degli avvisi.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/visits',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond(
+					$this->visits->get(
+						(string) $request->get_param( 'type' ),
+						(int) $request->get_param( 'id' ),
+						(int) $request->get_param( 'days' ),
+						null === $request->get_param( 'referrer' ) ? null : (string) $request->get_param( 'referrer' ),
+						null === $request->get_param( 'ip' ) ? null : strtolower( (string) $request->get_param( 'ip' ) )
+					)
+				),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => array(
+					'type'     => array(
+						'type'     => 'string',
+						'required' => true,
+						'pattern'  => '^[a-z0-9_]{1,40}$',
+					),
+					'id'       => array(
+						'type'     => 'integer',
+						'required' => true,
+						'minimum'  => 0,
+					),
+					'days'     => array(
+						'type'    => 'integer',
+						'minimum' => 1,
+						'maximum' => 90,
+						'default' => 7,
+					),
+					'referrer' => array(
+						'type'      => 'string',
+						'maxLength' => 190,
+					),
+					'ip'       => array(
+						'type'    => 'string',
+						'pattern' => '^[0-9a-fA-F]{16}$',
+					),
+				),
+			)
+		);
+
+		// Pulizia manuale delle visite grezze più vecchie di retention_days (mai automatica): anteprima e cancellazione.
+		// La cancellazione riceve il primo giorno conservato dell'anteprima e risponde 409 se nel frattempo è cambiato.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/hits/purge',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => fn() => $this->respond( Privacy::old_hits() ),
+					'permission_callback' => array( $this, 'check_admin_permission' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'purge_hits' ),
+					'permission_callback' => array( $this, 'check_admin_permission' ),
+					'args'                => array(
+						'before' => array(
+							'type'              => 'string',
+							'required'          => true,
+							'validate_callback' => array( DateRange::class, 'is_valid' ),
+						),
+					),
+				),
+			)
+		);
+
+		// Avvisi sulle visite anomale della Panoramica: l'ultimo calcolo del passaggio orario (calcolato qui solo se manca).
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/alerts',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn() => $this->respond( self::alerts_data() ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+			)
+		);
+
 		// «Online adesso»: nessun parametro, la finestra è di 5 minuti.
 		register_rest_route(
 			self::API_NAMESPACE,
@@ -335,6 +423,12 @@ final class AdminController extends RestController {
 							'minimum' => 7,
 							'maximum' => 365,
 						),
+						// Il massimo vero è retention_days: lo applica Settings::sanitize().
+						'ip_retention_days'  => array(
+							'type'    => 'integer',
+							'minimum' => 1,
+							'maximum' => 365,
+						),
 						'own_since'          => array(
 							'type'              => 'string',
 							'validate_callback' => array( self::class, 'validate_own_since' ),
@@ -347,6 +441,14 @@ final class AdminController extends RestController {
 							'type'  => 'array',
 							'items' => array( 'type' => 'string' ),
 						),
+					) + array_map(
+						// Soglie degli avvisi (0.19.0): interi con i limiti di Settings::ALERT_LIMITS.
+						static fn( array $limits ): array => array(
+							'type'    => 'integer',
+							'minimum' => $limits[0],
+							'maximum' => $limits[1],
+						),
+						Settings::ALERT_LIMITS
 					),
 				),
 			)
@@ -507,6 +609,40 @@ final class AdminController extends RestController {
 	}
 
 	/**
+	 * Cancella le visite grezze più vecchie di retention_days, solo se il primo giorno conservato è ancora quello dell'anteprima.
+	 *
+	 * @param \WP_REST_Request $request Richiesta.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function purge_hits( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$preview = Privacy::old_hits();
+		if ( (string) $request->get_param( 'before' ) !== $preview['before'] ) {
+			return new \WP_Error( 'wp5w_purge_changed', __( 'L\'anteprima non è più valida (sono cambiati i giorni di conservazione o la data): riaprila e riprova.', 'wp-5w' ), array( 'status' => 409 ) );
+		}
+
+		return $this->respond(
+			array(
+				'deleted' => Privacy::delete_old_hits( $preview['before'] ),
+				'before'  => $preview['before'],
+			) + array( 'after' => Privacy::old_hits() )
+		);
+	}
+
+	/**
+	 * Ultimo calcolo degli avvisi con le soglie in uso e lo stato della raccolta propria.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function alerts_data(): array {
+		$saved    = get_option( Anomalies::OPTION, null );
+		$settings = Settings::get();
+		return ( is_array( $saved ) ? $saved : Anomalies::run() ) + array(
+			'tracking'   => $settings['own_tracking'],
+			'thresholds' => array_intersect_key( $settings, Settings::ALERT_LIMITS ),
+		);
+	}
+
+	/**
 	 * Controlla gli IP esclusi: un array di stringhe, ognuna un IP o un intervallo CIDR valido.
 	 *
 	 * @param mixed            $value   Valore ricevuto.
@@ -580,7 +716,14 @@ final class AdminController extends RestController {
 			update_option( Settings::OWN_SINCE, (string) $request->get_param( 'own_since' ) );
 		}
 
-		// Passo 3: «Raccolta propria» e «Rispetta DNT» finiscono nell'HTML in cache (blocco JSON e dnt): si svuota LiteSpeed.
+		// Passo 3: gli avvisi si ricalcolano subito con le soglie nuove (o si svuotano se la raccolta è spenta).
+		try {
+			Anomalies::run();
+		} catch ( \Throwable $e ) {
+			error_log( 'wp5w: calcolo degli avvisi fallito: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il salvataggio delle opzioni non deve fallire per gli avvisi.
+		}
+
+		// Passo 4: «Raccolta propria» e «Rispetta DNT» finiscono nell'HTML in cache (blocco JSON e dnt): si svuota LiteSpeed.
 		$saved = Settings::get();
 		if ( $saved['own_tracking'] !== $current['own_tracking'] || $saved['respect_dnt'] !== $current['respect_dnt'] ) {
 			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Hook di LiteSpeed Cache.

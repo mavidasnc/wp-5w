@@ -25,7 +25,7 @@ final class Schema {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '6';
+	public const DB_VERSION = '7';
 
 	/**
 	 * Nomi brevi delle tabelle, nell'ordine in cui compaiono nella pagina Stato.
@@ -52,6 +52,17 @@ final class Schema {
 		'entry_daily'    => array( 'day', 'object_type', 'object_id', 'channel', 'origin' ),
 		'referrer_daily' => array( 'day', 'object_type', 'object_id', 'referrer', 'origin' ),
 		'dim_daily'      => array( 'day', 'dim', 'value', 'origin' ),
+	);
+
+	/**
+	 * Colonne aggiunte a wp5w_hits dopo la v4, con la posizione: bot (v6), ip_hash e ua (v7).
+	 *
+	 * @var array<string,string>
+	 */
+	private const HITS_COLUMNS = array(
+		'bot'     => "varchar(20) NOT NULL DEFAULT '' AFTER os",
+		'ip_hash' => 'binary(8) DEFAULT NULL AFTER bot',
+		'ua'      => "varchar(255) NOT NULL DEFAULT '' AFTER ip_hash",
 	);
 
 	/**
@@ -121,7 +132,7 @@ final class Schema {
 				return;
 			}
 
-			// Passo 4: colonna bot di wp5w_hits (schema v6). Se fallisce non si aggiorna la versione.
+			// Passo 4: colonne bot (schema v6), ip_hash e ua (schema v7) di wp5w_hits. Se fallisce non si aggiorna la versione.
 			if ( ! self::migrate_hits_columns() ) {
 				return;
 			}
@@ -185,10 +196,10 @@ final class Schema {
 	}
 
 	/**
-	 * Aggiunge a wp5w_hits la colonna bot (schema v6), dopo os.
+	 * Aggiunge a wp5w_hits le colonne mancanti: bot (schema v6) dopo os, ip_hash e ua (schema v7) dopo bot.
 	 *
-	 * Un solo ALTER TABLE, solo se la colonna manca: rieseguirla su uno schema già migrato non esegue nulla.
-	 * Le righe esistenti ricevono bot = ''.
+	 * Un solo ALTER TABLE con tutte le colonne che mancano: rieseguirla su uno schema già migrato non esegue nulla.
+	 * Le righe esistenti ricevono bot = '', ip_hash = NULL e ua = '' (le visite di prima della v7 non hanno né IP né user agent).
 	 *
 	 * @return bool Falso se l'ALTER è fallito.
 	 */
@@ -202,12 +213,21 @@ final class Schema {
 			return true;
 		}
 
-		// Colonna già presente: niente da fare.
-		if ( in_array( 'bot', $wpdb->get_col( "SHOW COLUMNS FROM {$table}" ), true ) ) {
+		// Colonne nell'ordine della definizione: ognuna va dopo la precedente, anche se aggiunta nello stesso ALTER.
+		$columns = $wpdb->get_col( "SHOW COLUMNS FROM {$table}" );
+		$clauses = array();
+		foreach ( self::HITS_COLUMNS as $column => $definition ) {
+			if ( ! in_array( $column, $columns, true ) ) {
+				$clauses[] = "ADD COLUMN {$column} {$definition}";
+			}
+		}
+
+		// Colonne già presenti: niente da fare.
+		if ( ! $clauses ) {
 			return true;
 		}
 
-		if ( false === $wpdb->query( "ALTER TABLE {$table} ADD COLUMN bot varchar(20) NOT NULL DEFAULT '' AFTER os" ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Migrazione dello schema del plugin.
+		if ( false === $wpdb->query( "ALTER TABLE {$table} " . implode( ', ', $clauses ) ) ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Migrazione dello schema del plugin.
 			error_log( "wp5w: migrazione di {$table} fallita: " . $wpdb->last_error ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il fallimento della migrazione deve restare nel log di PHP.
 			return false;
 		}
@@ -327,7 +347,8 @@ final class Schema {
 		) {$charset};"
 		);
 
-		// Visite grezze della raccolta propria: nessun IP e nessuno user agent, solo l'hash del giorno (md5 grezzo, 16 byte).
+		// Visite grezze della raccolta propria: l'hash del giorno (md5 grezzo, 16 byte) e, dalla v7, l'hash dell'IP (HMAC troncato
+		// a 8 byte, mai l'IP in chiaro: Support\IpHash) e lo user agent, che Admin\Privacy azzera dopo ip_retention_days giorni.
 		// ts è in UTC, day è il giorno del sito. country (ISO a 2 lettere), device, browser e os (nomi di WP Statistics) sono vuoti se non riconosciuti o se il database dei paesi manca.
 		// bot è vuoto per le visite normali e vale ua-corto, webdriver o la firma del bot dichiarato (0.11.0, schema v6).
 		dbDelta(
@@ -351,6 +372,8 @@ final class Schema {
 			browser varchar(40) NOT NULL DEFAULT '',
 			os varchar(40) NOT NULL DEFAULT '',
 			bot varchar(20) NOT NULL DEFAULT '',
+			ip_hash binary(8) DEFAULT NULL,
+			ua varchar(255) NOT NULL DEFAULT '',
 			PRIMARY KEY  (id),
 			KEY visitor_ts (visitor,ts),
 			KEY day (day)

@@ -45,4 +45,33 @@ final class ReferrersTest extends TestCase {
 			'vuoto'                      => array( '', '' ),
 		);
 	}
+
+	/**
+	 * La chiave dei referrer di WP Statistics coincide con quella della raccolta propria.
+	 *
+	 * @dataProvider hits_keys
+	 *
+	 * @param string $referrer Referrer salvato.
+	 * @param string $expected Chiave di wp5w_hits.
+	 */
+	public function test_hits_key( string $referrer, string $expected ): void {
+		$this->assertSame( $expected, Referrers::hits_key( $referrer ) );
+	}
+
+	/**
+	 * Casi di hits_key().
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public static function hits_keys(): array {
+		return array(
+			'app di WP Statistics'  => array( 'android-app://com.linkedin.android/', 'com.linkedin.android' ),
+			'app della raccolta'    => array( 'com.linkedin.android', 'com.linkedin.android' ),
+			'host con www'          => array( 'www.aocr.org', 'aocr.org' ),
+			'host maiuscolo'        => array( ' AOCR.org ', 'aocr.org' ),
+			'host senza www'        => array( 'aocr.org', 'aocr.org' ),
+			'web dentro android'    => array( 'android-app://www.example.com/', 'example.com' ),
+			'diretto'               => array( '', '' ),
+		);
+	}
 }
