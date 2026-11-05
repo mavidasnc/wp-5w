@@ -11,6 +11,7 @@ namespace Mavida\FiveW\Query;
 
 use Mavida\FiveW\Database\Schema;
 use Mavida\FiveW\Settings;
+use Mavida\FiveW\Support\Channels;
 use Mavida\FiveW\Support\DateRange;
 use Mavida\FiveW\Support\Dimensions;
 use Mavida\FiveW\Support\Months;
@@ -23,7 +24,7 @@ defined( 'ABSPATH' ) || exit;
 // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- Tabelle del plugin, nomi costruiti con $wpdb->prefix in Schema::table().
 
 /**
- * Ultimi 7 giorni, ultimi 6 mesi, referrer e keyword recenti.
+ * Ultimi 7 giorni, ultimi 6 mesi, keyword recenti, siti di provenienza e contenuti raggiunti da ciascuno.
  */
 final class AudienceQuery {
 
@@ -47,6 +48,13 @@ final class AudienceQuery {
 	 * @var int
 	 */
 	private const LIMIT = 50;
+
+	/**
+	 * Righe del dettaglio di un sito di provenienza (contenuti raggiunti).
+	 *
+	 * @var int
+	 */
+	private const PAGES_LIMIT = 100;
 
 	/**
 	 * Costruttore.
@@ -101,13 +109,6 @@ final class AudienceQuery {
 					'to'   => $half->to,
 				),
 				'months' => Months::group( $half_rows, $half->from, self::MONTHS ),
-			),
-			'referrers' => array(
-				'range' => array(
-					'from' => $week->from,
-					'to'   => $week->to,
-				),
-				'rows'  => $this->referrers( $week ),
 			),
 			'keywords'  => array(
 				'range'      => $gsc_week ? array(
@@ -211,19 +212,43 @@ final class AudienceQuery {
 	}
 
 	/**
-	 * Siti di provenienza nel periodo.
+	 * Siti di provenienza degli ultimi N giorni (box «Provenienza»).
 	 *
-	 * @param DateRange $range Intervallo.
-	 * @return array<int,array<string,mixed>>
+	 * Con 7, 30 e 90 giorni legge `referrer_daily` con la regola dell'origine: oggi è parziale (le righe own arrivano con
+	 * l'aggregazione oraria) o assente (le righe wps arrivano con l'ETL notturno di domani).
+	 * Con 1 giorno («Oggi») legge `wp5w_hits`, come TodayQuery: sempre raccolta propria e in tempo reale, quindi nessuna regola
+	 * dell'origine. La SELECT interna è quella con cui OwnSource scrive `referrer_daily` (ingressi con un referrer esterno,
+	 * visitatori distinti per contenuto, canale «ai» con Channels::ai_sql()), così i numeri coincidono con quelli che
+	 * l'aggregazione oraria scriverà per oggi.
+	 * Un visitatore conta una volta per contenuto e per giorno (come in `referrer_daily`).
+	 *
+	 * @param int $days Giorni fino a oggi compreso (1 = solo oggi).
+	 * @return array{range:array{from:string,to:string},live:bool,rows:array<int,array<string,mixed>>}
 	 */
-	private function referrers( DateRange $range ): array {
+	public function referrers( int $days ): array {
 		global $wpdb;
 
-		// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
-		$origin = Origin::where( Settings::own_since() );
+		$range = DateRange::last_days( $days, wp_date( 'Y-m-d' ) );
+		$live  = 1 === $days;
 
-		$rows = $wpdb->get_results(
-			$wpdb->prepare(
+		if ( $live ) {
+			$ai  = Channels::ai_sql( 'referrer_host', 'utm_source' );
+			$sql = $wpdb->prepare(
+				"SELECT referrer, MAX(source) AS source, MAX(channel) AS channel, SUM(visitors) AS visitors, COUNT(*) AS contents
+				FROM (
+					SELECT referrer_host AS referrer, MAX(IF( {$ai} <> '', 'ai', channel )) AS channel, MAX(IF( {$ai} <> '', {$ai}, source )) AS source,
+						COUNT(DISTINCT visitor) AS visitors
+					FROM " . Schema::table( 'hits' ) . " WHERE is_entry = 1 AND referrer_host <> '' AND day = %s
+					GROUP BY object_type, object_id, referrer_host
+				) t
+				GROUP BY referrer ORDER BY visitors DESC, referrer LIMIT %d",
+				$range->to,
+				self::LIMIT
+			);
+		} else {
+			// Regola dell'origine: solo righe wps, o own dalla data di passaggio.
+			$origin = Origin::where( Settings::own_since() );
+			$sql    = $wpdb->prepare(
 				'SELECT referrer, MAX(source) AS source, MAX(channel) AS channel, SUM(visitors) AS visitors,
 					COUNT(DISTINCT object_type, object_id) AS contents
 				FROM ' . Schema::table( 'referrer_daily' ) . ' WHERE day BETWEEN %s AND %s AND ' . $origin . '
@@ -231,20 +256,94 @@ final class AudienceQuery {
 				$range->from,
 				$range->to,
 				self::LIMIT
-			),
-			ARRAY_A
-		);
+			);
+		}
 
-		return array_map(
-			static fn( array $row ): array => array(
-				'referrer' => (string) $row['referrer'],
-				'label'    => Referrers::label( (string) $row['referrer'] ),
-				'source'   => (string) $row['source'],
-				'channel'  => (string) $row['channel'],
-				'visitors' => (int) $row['visitors'],
-				'contents' => (int) $row['contents'],
+		return array(
+			'range' => array(
+				'from' => $range->from,
+				'to'   => $range->to,
 			),
-			$rows
+			'live'  => $live,
+			'rows'  => array_map(
+				static fn( array $row ): array => array(
+					'referrer' => (string) $row['referrer'],
+					'label'    => Referrers::label( (string) $row['referrer'] ),
+					'source'   => (string) $row['source'],
+					'channel'  => (string) $row['channel'],
+					'visitors' => (int) $row['visitors'],
+					'contents' => (int) $row['contents'],
+				),
+				(array) $wpdb->get_results( $sql, ARRAY_A )
+			),
+		);
+	}
+
+	/**
+	 * Contenuti raggiunti da un sito di provenienza negli ultimi N giorni, dal più visitato (modale del box «Provenienza»).
+	 *
+	 * Stesse tabelle e stesse regole di referrers(): `referrer_daily` per 7, 30 e 90 giorni, `wp5w_hits` per «Oggi».
+	 * Il conteggio sono i visitatori entrati da quel sito (un visitatore per contenuto e per giorno): `referrer_daily` non ha
+	 * le visualizzazioni, quindi la somma delle righe è il numero della tabella dei siti.
+	 * `referrer_daily` non ha l'URI: per titolo e link dei contenuti che non sono post (home, archivi) viene da `object_daily`
+	 * dello stesso giorno e della stessa origine.
+	 *
+	 * @param string $referrer Referrer come salvato (host o `android-app://...`), non l'etichetta.
+	 * @param int    $days     Giorni fino a oggi compreso (1 = solo oggi).
+	 * @return array{range:array{from:string,to:string},live:bool,referrer:string,label:string,rows:array<int,array<string,mixed>>}
+	 */
+	public function referrer_pages( string $referrer, int $days ): array {
+		global $wpdb;
+
+		$range = DateRange::last_days( $days, wp_date( 'Y-m-d' ) );
+		$live  = 1 === $days;
+
+		if ( $live ) {
+			$sql = $wpdb->prepare(
+				'SELECT object_type, object_id, MIN(uri) AS uri, COUNT(DISTINCT visitor) AS visitors FROM ' . Schema::table( 'hits' ) . '
+				WHERE is_entry = 1 AND referrer_host = %s AND day = %s
+				GROUP BY object_type, object_id ORDER BY visitors DESC, object_type, object_id LIMIT %d',
+				$referrer,
+				$range->to,
+				self::PAGES_LIMIT
+			);
+		} else {
+			// Regola dell'origine su entrambe le tabelle (la riga di object_daily ha già la stessa origine di quella di referrer_daily).
+			$own_since = Settings::own_since();
+			$sql       = $wpdb->prepare(
+				'SELECT r.object_type, r.object_id, MIN(o.uri) AS uri, SUM(r.visitors) AS visitors
+				FROM ' . Schema::table( 'referrer_daily' ) . ' r
+				LEFT JOIN ' . Schema::table( 'object_daily' ) . ' o
+					ON o.day = r.day AND o.object_type = r.object_type AND o.object_id = r.object_id AND o.origin = r.origin AND ' . Origin::where( $own_since, 'o' ) . '
+				WHERE r.referrer = %s AND r.day BETWEEN %s AND %s AND ' . Origin::where( $own_since, 'r' ) . '
+				GROUP BY r.object_type, r.object_id ORDER BY visitors DESC, r.object_type, r.object_id LIMIT %d',
+				$referrer,
+				$range->from,
+				$range->to,
+				self::PAGES_LIMIT
+			);
+		}
+
+		$rows = array();
+		foreach ( (array) $wpdb->get_results( $sql, ARRAY_A ) as $row ) {
+			$type   = (string) $row['object_type'];
+			$id     = (int) $row['object_id'];
+			$rows[] = array(
+				'type'     => $type,
+				'id'       => $id,
+				'visitors' => (int) $row['visitors'],
+			) + OnlineQuery::describe( $type, $id, (string) $row['uri'] );
+		}
+
+		return array(
+			'range'    => array(
+				'from' => $range->from,
+				'to'   => $range->to,
+			),
+			'live'     => $live,
+			'referrer' => $referrer,
+			'label'    => Referrers::label( $referrer ),
+			'rows'     => $rows,
 		);
 	}
 }

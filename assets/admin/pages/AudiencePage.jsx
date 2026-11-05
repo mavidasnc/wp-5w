@@ -9,7 +9,7 @@ import Card from '../components/Card';
 import AudienceDimensions from '../components/AudienceDimensions';
 import Campaigns from '../components/Campaigns';
 import OnlineNow from '../components/OnlineNow';
-import { LABELS } from '../components/ChannelList';
+import Referrers from '../components/Referrers';
 
 // Indice 0 = lunedì (getUTCDay() spostato di 6, ISO-8601).
 const WEEKDAYS = [
@@ -153,49 +153,7 @@ export default function AudiencePage() {
 
 			<Campaigns />
 
-			<Card
-				id="referrers"
-				title={
-					<>
-						{ __( 'Provenienza degli ultimi 7 giorni', 'wp-5w' ) }{ ' ' }
-						<span className="wp5w-type">
-							{ formatDay( data.referrers.range.from ) } – { formatDay( data.referrers.range.to ) }
-						</span>
-					</>
-				}
-			>
-				{ data.referrers.rows.length ? (
-					<ShowMore rows={ data.referrers.rows } size={ 15 }>
-						{ ( rows ) => (
-							<table className="widefat striped wp5w-table">
-								<thead>
-									<tr>
-										<th>{ __( 'Sito', 'wp-5w' ) }</th>
-										<th>{ __( 'Sorgente', 'wp-5w' ) }</th>
-										<th>{ __( 'Canale', 'wp-5w' ) }</th>
-										<th className="num">{ __( 'Visitatori', 'wp-5w' ) }</th>
-										<th className="num">{ __( 'Contenuti', 'wp-5w' ) }</th>
-									</tr>
-								</thead>
-								<tbody>
-									{ rows.map( ( row ) => (
-										<tr key={ row.referrer }>
-											<td title={ row.referrer }>{ row.label }</td>
-											<td>{ row.source || '–' }</td>
-											<td>{ LABELS[ row.channel ] ?? ( row.channel || '–' ) }</td>
-											<td className="num">{ formatNumber( row.visitors ) }</td>
-											<td className="num">{ formatNumber( row.contents ) }</td>
-										</tr>
-									) ) }
-								</tbody>
-							</table>
-						) }
-					</ShowMore>
-				) : (
-					<p>{ __( 'Nessun sito di provenienza negli ultimi 7 giorni.', 'wp-5w' ) }</p>
-				) }
-				<p className="wp5w-note">{ __( 'Contenuti: quanti articoli o pagine diversi hanno ricevuto visitatori da quel sito.', 'wp-5w' ) }</p>
-			</Card>
+			<Referrers />
 
 			<Card
 				id="keywords"

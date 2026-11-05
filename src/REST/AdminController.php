@@ -183,6 +183,44 @@ final class AdminController extends RestController {
 			)
 		);
 
+		// Box «Provenienza»: siti di provenienza di oggi (1, dalla raccolta propria in tempo reale) o degli ultimi 7, 30 e 90 giorni.
+		$referrer_days = array(
+			'type'    => 'integer',
+			'enum'    => array( 1, 7, 30, 90 ),
+			'default' => 7,
+		);
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/audience/referrers',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->audience->referrers( (int) $request->get_param( 'days' ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => array( 'days' => $referrer_days ),
+			)
+		);
+
+		// Modale del box «Provenienza»: contenuti raggiunti da un sito. Il referrer è un parametro e non un pezzo del percorso,
+		// perché può essere `android-app://pacchetto/`.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/audience/referrer',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->audience->referrer_pages( (string) $request->get_param( 'referrer' ), (int) $request->get_param( 'days' ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => array(
+					'referrer' => array(
+						'type'      => 'string',
+						'required'  => true,
+						'minLength' => 1,
+						'maxLength' => 190,
+					),
+					'days'     => $referrer_days,
+				),
+			)
+		);
+
 		// «Online adesso»: nessun parametro, la finestra è di 5 minuti.
 		register_rest_route(
 			self::API_NAMESPACE,

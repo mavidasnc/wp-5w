@@ -11,6 +11,7 @@
  * le visite nell'elenco dei contenuti e nella barra di amministrazione e il modale aperto dall'URL (sezione 12).
  * L'iterazione 0.11.0 segnala bot e browser automatici nella colonna `bot` senza scartarli (sezioni 5 e 6),
  * aggiunge la migrazione alla v6 (sezione 2) e controlla le rotte degli aggiornamenti e i link nell'admin (sezione 13).
+ * La sezione 18 controlla il box «Provenienza» (periodi, regola dell'origine, «Oggi» da wp5w_hits) e la modale dei contenuti.
  *
  * @package Mavida\FiveW
  */
@@ -530,6 +531,7 @@ $ui_snapshot = static function () use ( $today, $seed_posts, $post_a ): array {
 		'top 30'       => (string) wp_json_encode( $posts->top( 30 ) ),
 		'dettaglio'    => (string) wp_json_encode( $posts->detail( $post_a, $r60 ) ),
 		'visitatori'   => (string) wp_json_encode( $audience->get() ),
+		'provenienza'  => (string) wp_json_encode( $audience->referrers( 7 ) ),
 		'pubblico'     => (string) wp_json_encode( $audience->dimensions( $r30 ) ),
 		'trend sito'   => (string) wp_json_encode( $trend->site() ),
 		'trend oggetti' => (string) wp_json_encode( $trend->objects( $seed_posts ) ),
@@ -1762,7 +1764,7 @@ if ( false === $state_backup ) {
 // Passo 4: etichette delle app (solo presentazione: i dati nelle tabelle non cambiano).
 if ( $has_seed ) {
 	$seed_referrer = static fn( array $rows ): string => (string) ( array_column( $rows, 'label', 'referrer' )['android-app://com.linkedin.android/'] ?? 'nessuna riga' );
-	$check( 'etichette: referrer della scheda Visitatori', 'LinkedIn (app)', $seed_referrer( ( new AudienceQuery( new SearchQuery() ) )->get()['referrers']['rows'] ) );
+	$check( 'etichette: referrer della scheda Visitatori', 'LinkedIn (app)', $seed_referrer( ( new AudienceQuery( new SearchQuery() ) )->referrers( 7 )['rows'] ) );
 	$check( 'etichette: referrer del dettaglio', 'LinkedIn (app)', $seed_referrer( ( new PostsQuery() )->detail( $post_a, DateRange::last_days( 60, $today ) )['referrers'] ?? array() ) );
 	$check( 'etichette: il dato in referrer_daily non cambia', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'wps' AND day = %s AND referrer = 'android-app://com.linkedin.android/'", $seed_day ) ) );
 }
@@ -1770,7 +1772,7 @@ $send_hit( $payload( $post_a, array( 'r' => 'android-app://com.linkedin.android/
 ( new OwnSource() )->run_hourly();
 $check( 'etichette: referrer own com.linkedin.android', 1, $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . Schema::table( 'referrer_daily' ) . " WHERE origin = 'own' AND day = %s AND referrer = 'com.linkedin.android'", $today ) ) );
 update_option( Settings::OWN_SINCE, $today );
-$own_label = array_column( ( new AudienceQuery( new SearchQuery() ) )->get()['referrers']['rows'], 'label', 'referrer' )['com.linkedin.android'] ?? 'nessuna riga';
+$own_label = array_column( ( new AudienceQuery( new SearchQuery() ) )->referrers( 7 )['rows'], 'label', 'referrer' )['com.linkedin.android'] ?? 'nessuna riga';
 update_option( Settings::OWN_SINCE, '' );
 $check( 'etichette: la riga own ha la stessa etichetta', 'LinkedIn (app)', $own_label );
 
@@ -3338,7 +3340,158 @@ update_option( 'timezone_string', (string) $today_tz_backup[0] );
 update_option( 'gmt_offset', $today_tz_backup[1] );
 
 // ---------------------------------------------------------------------------
-// 18. Pulizia finale.
+// 18. Box «Provenienza» con il filtro del periodo (Oggi, 7, 30 e 90 giorni) e modale dei contenuti raggiunti da un sito.
+// ---------------------------------------------------------------------------
+// Righe sintetiche di un referrer che non esiste nel seed: wps a 2, 3 e 40 giorni fa (più un archivio, con l'URI in object_daily),
+// una riga own a 2 giorni fa (da usare solo dopo il passaggio) e un referrer android-app:// per la rotta REST.
+update_option( Settings::OPTION, Settings::defaults() );
+update_option( Settings::OWN_SINCE, '' );
+$ref_table = Schema::table( 'referrer_daily' );
+$obj_table = Schema::table( 'object_daily' );
+$ref_d2    = wp_date( 'Y-m-d', time() - 2 * DAY_IN_SECONDS );
+$ref_d3    = wp_date( 'Y-m-d', time() - 3 * DAY_IN_SECONDS );
+$ref_d40   = wp_date( 'Y-m-d', time() - 40 * DAY_IN_SECONDS );
+$ref_clean = static function () use ( $wpdb, $ref_table, $obj_table ): void {
+	$wpdb->query( "DELETE FROM {$ref_table} WHERE referrer IN ('spam.wp5w-verify.example', 'android-app://com.wp5w.verify/')" );
+	$wpdb->query( "DELETE FROM {$obj_table} WHERE object_type = 'category' AND object_id = 999999" );
+};
+$ref_clean();
+foreach (
+	array(
+		array( $ref_d2, 'post', $post_a, 'spam.wp5w-verify.example', 50, 'wps' ),
+		array( $ref_d2, 'post', $post_b, 'spam.wp5w-verify.example', 20, 'wps' ),
+		array( $ref_d2, 'category', 999999, 'spam.wp5w-verify.example', 30, 'wps' ),
+		array( $ref_d3, 'post', $post_a, 'spam.wp5w-verify.example', 10, 'wps' ),
+		array( $ref_d40, 'post', $post_b, 'spam.wp5w-verify.example', 45, 'wps' ),
+		array( $ref_d2, 'post', $post_a, 'spam.wp5w-verify.example', 90, 'own' ),
+		array( $ref_d2, 'post', $post_a, 'android-app://com.wp5w.verify/', 7, 'wps' ),
+	) as $wp5w_row
+) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$ref_table} (day, object_type, object_id, referrer, channel, source, visitors, origin) VALUES (%s, %s, %d, %s, 'referral', '', %d, %s)", ...$wp5w_row ) );
+}
+$wpdb->query( $wpdb->prepare( "INSERT INTO {$obj_table} (day, object_type, object_id, uri, views, visitors, origin) VALUES (%s, 'category', 999999, '/category/wp5w-verify/', 30, 30, 'wps')", $ref_d2 ) );
+
+$ref_query = new AudienceQuery( new SearchQuery() );
+$ref_row   = static fn( array $data ): array => array_column( $data['rows'], null, 'referrer' )['spam.wp5w-verify.example'] ?? array(
+	'visitors' => 'nessuna riga',
+	'contents' => '',
+);
+$ref_pages = static fn( array $data ): string => implode( ',', array_map( static fn( array $row ): string => $row['type'] . ':' . $row['visitors'], $data['rows'] ) );
+
+// Senza passaggio: solo righe wps. 7 e 30 giorni non vedono la riga di 40 giorni fa, 90 sì.
+$ref_7  = $ref_query->referrers( 7 );
+$ref_30 = $ref_query->referrers( 30 );
+$ref_90 = $ref_query->referrers( 90 );
+$check( 'provenienza 7 giorni: visitatori e contenuti del sito (solo wps)', '110|3', $ref_row( $ref_7 )['visitors'] . '|' . $ref_row( $ref_7 )['contents'] );
+$check( 'provenienza 30 giorni: la riga di 40 giorni fa resta fuori', '110|3', $ref_row( $ref_30 )['visitors'] . '|' . $ref_row( $ref_30 )['contents'] );
+$check( 'provenienza 90 giorni: anche la riga di 40 giorni fa', '155|3', $ref_row( $ref_90 )['visitors'] . '|' . $ref_row( $ref_90 )['contents'] );
+$check( 'provenienza 7 giorni: periodo e live falso', DateRange::last_days( 7, wp_date( 'Y-m-d' ) )->from . '|' . wp_date( 'Y-m-d' ) . '|0', $ref_7['range']['from'] . '|' . $ref_7['range']['to'] . '|' . (int) $ref_7['live'] );
+$ref_sorted = array_column( $ref_90['rows'], 'visitors' );
+rsort( $ref_sorted );
+$check( 'provenienza: righe in ordine decrescente di visitatori', implode( ',', $ref_sorted ), implode( ',', array_column( $ref_90['rows'], 'visitors' ) ) );
+
+$pages_7  = $ref_query->referrer_pages( 'spam.wp5w-verify.example', 7 );
+$pages_90 = $ref_query->referrer_pages( 'spam.wp5w-verify.example', 90 );
+$check( 'modale 7 giorni: contenuti dal più visitato', 'post:60,category:30,post:20', $ref_pages( $pages_7 ) );
+$check( 'modale 7 giorni: la somma delle righe è il numero della tabella', $ref_row( $ref_7 )['visitors'], array_sum( array_column( $pages_7['rows'], 'visitors' ) ) );
+$check( 'modale 7 giorni: articolo con titolo e permalink', html_entity_decode( get_the_title( $post_a ), ENT_QUOTES, 'UTF-8' ) . '|' . get_permalink( $post_a ), $pages_7['rows'][0]['title'] . '|' . $pages_7['rows'][0]['url'] );
+$check( 'modale 7 giorni: archivio con l\'URI di object_daily', '/category/wp5w-verify/|' . home_url( '/category/wp5w-verify/' ), $pages_7['rows'][1]['title'] . '|' . $pages_7['rows'][1]['url'] );
+$check( 'modale 90 giorni: l\'ordine cambia con la riga di 40 giorni fa', 'post:65,post:60,category:30', $ref_pages( $pages_90 ) );
+$check( 'modale 90 giorni: id del primo contenuto', $post_b, $pages_90['rows'][0]['id'] );
+$check( 'modale: referrer sconosciuto senza righe', 0, count( $ref_query->referrer_pages( 'nessuno.wp5w-verify.example', 90 )['rows'] ) );
+
+// Con il passaggio 2 giorni fa: da quel giorno solo own (90), prima wps (10).
+update_option( Settings::OWN_SINCE, $ref_d2 );
+$ref_switch = $ref_row( $ref_query->referrers( 7 ) );
+$check( 'provenienza con passaggio: own dal passaggio e wps prima', '100|1', $ref_switch['visitors'] . '|' . $ref_switch['contents'] );
+$check( 'modale con passaggio: un solo contenuto', 'post:100', $ref_pages( $ref_query->referrer_pages( 'spam.wp5w-verify.example', 7 ) ) );
+update_option( Settings::OWN_SINCE, '' );
+
+// Rotte REST: permessi, periodi ammessi, referrer obbligatorio e referrer android-app:// passato come parametro.
+$referrers_route = '/wp5w/v1/admin/audience/referrers';
+$referrer_route  = '/wp5w/v1/admin/audience/referrer';
+$check( 'provenienza senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $referrers_route, array( 'days' => 7 ) )->get_status(), array( 401, 403 ), true ) );
+$check( 'modale senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $referrer_route, array( 'referrer' => 'spam.wp5w-verify.example' ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$referrers_response = $rest_call( 'GET', $referrers_route, array( 'days' => 1 ) );
+$check( 'provenienza con amministratore e days=1: 200 e live', '200|1', $referrers_response->get_status() . '|' . (int) ( $referrers_response->get_data()['live'] ?? false ) );
+$check( 'provenienza: Cache-Control no-store', 'no-store, max-age=0', $referrers_response->get_headers()['Cache-Control'] ?? '' );
+$check( 'provenienza senza days: 7 giorni', DateRange::last_days( 7, wp_date( 'Y-m-d' ) )->from, $rest_call( 'GET', $referrers_route )->get_data()['range']['from'] ?? '' );
+$check( 'provenienza con days=15: 400', 400, $rest_call( 'GET', $referrers_route, array( 'days' => 15 ) )->get_status() );
+$check( 'modale senza referrer: 400', 400, $rest_call( 'GET', $referrer_route, array( 'days' => 7 ) )->get_status() );
+$check( 'modale con days=15: 400', 400, $rest_call( 'GET', $referrer_route, array( 'referrer' => 'spam.wp5w-verify.example', 'days' => 15 ) )->get_status() );
+$app_response = $rest_call( 'GET', $referrer_route, array( 'referrer' => 'android-app://com.wp5w.verify/', 'days' => 7 ) );
+$app_data     = $app_response->get_data();
+$check( 'modale android-app:// via REST: 200, etichetta e visitatori', '200|com.wp5w.verify (app)|7', $app_response->get_status() . '|' . ( $app_data['label'] ?? '' ) . '|' . ( $app_data['rows'][0]['visitors'] ?? '' ) );
+$admin_user( 0 );
+$ref_clean();
+
+// «Oggi»: letto da wp5w_hits in tempo reale. v1 entra due volte sull'articolo A (conta una), v2 su A, v3 su B, v4 sulla home;
+// v1 poi passa a B con un link interno (non è un ingresso); v5 arriva da un altro sito e v6 da chatgpt.com (canale ai).
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$ref_today = wp_date( 'Y-m-d' );
+$ref_hit   = static function ( string $who, string $type, int $id, string $uri, string $referrer, int $entry, string $channel = 'referral' ) use ( $wpdb, $hits_table, $ref_today ): void {
+	$wpdb->query(
+		$wpdb->prepare(
+			"INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, is_entry) VALUES (UTC_TIMESTAMP(), %s, UNHEX(%s), %s, %d, %s, %s, %s, %d)",
+			$ref_today,
+			md5( "wp5w-ref-{$who}" ),
+			$type,
+			$id,
+			$uri,
+			$referrer,
+			$channel,
+			$entry
+		)
+	);
+};
+$ref_hit( 'v1', 'post', $post_a, '/a/', 'spam.wp5w-verify.example', 1 );
+$ref_hit( 'v1', 'post', $post_a, '/a/', 'spam.wp5w-verify.example', 1 );
+$ref_hit( 'v1', 'post', $post_b, '/b/', '', 0, 'direct' );
+$ref_hit( 'v2', 'post', $post_a, '/a/', 'spam.wp5w-verify.example', 1 );
+$ref_hit( 'v3', 'post', $post_b, '/b/', 'spam.wp5w-verify.example', 1 );
+$ref_hit( 'v4', 'home', 0, '/', 'spam.wp5w-verify.example', 1 );
+$ref_hit( 'v5', 'post', $post_a, '/a/', 'altro.wp5w-verify.example', 1 );
+$ref_hit( 'v6', 'post', $post_a, '/a/', 'chatgpt.com', 1 );
+
+$live       = $ref_query->referrers( 1 );
+$live_pages = $ref_query->referrer_pages( 'spam.wp5w-verify.example', 1 );
+$check( 'oggi: periodo di un giorno e live', $ref_today . '|' . $ref_today . '|1', $live['range']['from'] . '|' . $live['range']['to'] . '|' . (int) $live['live'] );
+$check( 'oggi: visitatori e contenuti del sito', '4|3', $ref_row( $live )['visitors'] . '|' . $ref_row( $live )['contents'] );
+$check( 'oggi: chatgpt.com nel canale ai', 'ai', array_column( $live['rows'], 'channel', 'referrer' )['chatgpt.com'] ?? 'nessuna riga' );
+$check( 'oggi: tre siti (il link interno non è un ingresso)', 3, count( $live['rows'] ) );
+$check( 'modale oggi: contenuti dal più visitato (a parità, per tipo e id)', 'post:2,home:1,post:1', $ref_pages( $live_pages ) );
+$check( 'modale oggi: la home ha il suo nome', __( 'Home', 'wp-5w' ), $live_pages['rows'][1]['title'] );
+
+// Coerenza: dopo l'aggregazione oraria le righe own di oggi in referrer_daily danno gli stessi numeri della lettura in tempo reale.
+( new OwnSource() )->run_hourly();
+$agg_rows  = $wpdb->get_results(
+	$wpdb->prepare( "SELECT referrer, MAX(source) AS source, MAX(channel) AS channel, SUM(visitors) AS visitors, COUNT(*) AS contents FROM {$ref_table} WHERE origin = 'own' AND day = %s GROUP BY referrer ORDER BY visitors DESC, referrer", $ref_today ),
+	ARRAY_A
+);
+$live_rows = array_map(
+	static fn( array $row ): array => array(
+		'referrer' => $row['referrer'],
+		'source'   => $row['source'],
+		'channel'  => $row['channel'],
+		'visitors' => (string) $row['visitors'],
+		'contents' => (string) $row['contents'],
+	),
+	$live['rows']
+);
+$check( 'oggi: stessi siti, canali, sorgenti e numeri dell\'aggregazione oraria', (string) wp_json_encode( $agg_rows ), (string) wp_json_encode( $live_rows ) );
+$agg_pages = $wpdb->get_col(
+	$wpdb->prepare( "SELECT CONCAT(object_type, ':', SUM(visitors)) FROM {$ref_table} WHERE origin = 'own' AND day = %s AND referrer = 'spam.wp5w-verify.example' GROUP BY object_type, object_id ORDER BY SUM(visitors) DESC, object_type, object_id", $ref_today )
+);
+$check( 'modale oggi: stessi contenuti dell\'aggregazione oraria', implode( ',', $agg_pages ), $ref_pages( $live_pages ) );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$wpdb->query( $wpdb->prepare( "DELETE FROM {$ref_table} WHERE origin = 'own' AND day = %s", $ref_today ) );
+
+// Nessuna visita in wp5w_hits (raccolta spenta o sito senza visite oggi): «Oggi» è vuoto senza errori.
+$check( 'oggi senza visite: nessun sito', 0, count( $ref_query->referrers( 1 )['rows'] ) );
+
+// ---------------------------------------------------------------------------
+// 19. Pulizia finale.
 // ---------------------------------------------------------------------------
 // Filtri e simulazioni della sezione 13 (idempotente), stato di plugin-update-checker e utente di prova.
 remove_filter( 'pre_http_request', $github_mock, 10 );
