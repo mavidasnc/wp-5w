@@ -63,4 +63,37 @@ final class DateRangeTest extends TestCase {
 		$this->assertSame( '2026-10-08', $range->from );
 		$this->assertSame( '2026-10-14', $range->to );
 	}
+
+	public function test_split_at_divides_before_and_from_the_day(): void {
+		[ $before, $after ] = ( new DateRange( '2026-08-08', '2026-11-05' ) )->split_at( '2026-10-14' );
+
+		$this->assertSame( array( '2026-08-08', '2026-10-13' ), array( $before?->from, $before?->to ) );
+		$this->assertSame( array( '2026-10-14', '2026-11-05' ), array( $after?->from, $after?->to ) );
+	}
+
+	public function test_split_at_with_the_day_before_or_after_the_range(): void {
+		$range = new DateRange( '2026-10-30', '2026-11-05' );
+
+		// Raccolta propria iniziata prima del periodo: tutto nella seconda parte.
+		[ $before, $after ] = $range->split_at( '2026-10-14' );
+		$this->assertNull( $before );
+		$this->assertSame( '2026-10-30', $after?->from );
+
+		// Nessuna visita grezza: tutto nella prima parte.
+		[ $before, $after ] = $range->split_at( null );
+		$this->assertSame( $range, $before );
+		$this->assertNull( $after );
+
+		// Primo giorno dopo la fine del periodo: niente nella seconda parte.
+		[ $before, $after ] = $range->split_at( '2026-11-06' );
+		$this->assertSame( '2026-11-05', $before?->to );
+		$this->assertNull( $after );
+	}
+
+	public function test_split_at_on_the_first_day(): void {
+		[ $before, $after ] = ( new DateRange( '2026-11-05', '2026-11-05' ) )->split_at( '2026-11-05' );
+
+		$this->assertNull( $before );
+		$this->assertSame( array( '2026-11-05', '2026-11-05' ), array( $after?->from, $after?->to ) );
+	}
 }

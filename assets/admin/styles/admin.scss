@@ -397,6 +397,14 @@
 	text-align: left;
 }
 
+// User agent completo nel dettaglio delle visite: testo lungo e senza spazi utili, va a capo ovunque.
+.wp5w-ua {
+	font-family: monospace;
+	font-size: 11px;
+	word-break: break-all;
+	min-width: 240px;
+}
+
 .wp5w-spark {
 	display: block;
 }

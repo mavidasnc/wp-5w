@@ -21,6 +21,7 @@ use Mavida\FiveW\Query\PostsQuery;
 use Mavida\FiveW\Query\SearchQuery;
 use Mavida\FiveW\Query\TodayQuery;
 use Mavida\FiveW\Query\TrendQuery;
+use Mavida\FiveW\Query\VisitsQuery;
 use Mavida\FiveW\Settings;
 use Mavida\FiveW\Sources\AccessLogSource;
 use Mavida\FiveW\Support\DateRange;
@@ -46,6 +47,7 @@ final class AdminController extends RestController {
 	 * @param OnlineQuery     $online     «Online adesso».
 	 * @param OperationsQuery $operations Pagine non trovate e ricerche interne.
 	 * @param TodayQuery      $today      Scheda «Oggi».
+	 * @param VisitsQuery     $visits     Dettaglio delle singole visite.
 	 */
 	public function __construct(
 		private readonly Importer $importer,
@@ -57,7 +59,8 @@ final class AdminController extends RestController {
 		private readonly CompareQuery $compare,
 		private readonly OnlineQuery $online,
 		private readonly OperationsQuery $operations,
-		private readonly TodayQuery $today
+		private readonly TodayQuery $today,
+		private readonly VisitsQuery $visits = new VisitsQuery()
 	) {}
 
 	/**
@@ -217,6 +220,52 @@ final class AdminController extends RestController {
 						'maxLength' => 190,
 					),
 					'days'     => $referrer_days,
+				),
+			)
+		);
+
+		// Dettaglio delle visite di un contenuto (modale del referrer e avvisi): solo raccolta propria. Il referrer vuoto vuol dire
+		// «diretto», assente vuol dire «qualunque»; l'hash dell'IP è quello completo (16 caratteri) degli avvisi.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/visits',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond(
+					$this->visits->get(
+						(string) $request->get_param( 'type' ),
+						(int) $request->get_param( 'id' ),
+						(int) $request->get_param( 'days' ),
+						null === $request->get_param( 'referrer' ) ? null : (string) $request->get_param( 'referrer' ),
+						null === $request->get_param( 'ip' ) ? null : strtolower( (string) $request->get_param( 'ip' ) )
+					)
+				),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => array(
+					'type'     => array(
+						'type'     => 'string',
+						'required' => true,
+						'pattern'  => '^[a-z0-9_]{1,40}$',
+					),
+					'id'       => array(
+						'type'     => 'integer',
+						'required' => true,
+						'minimum'  => 0,
+					),
+					'days'     => array(
+						'type'    => 'integer',
+						'minimum' => 1,
+						'maximum' => 90,
+						'default' => 7,
+					),
+					'referrer' => array(
+						'type'      => 'string',
+						'maxLength' => 190,
+					),
+					'ip'       => array(
+						'type'    => 'string',
+						'pattern' => '^[0-9a-fA-F]{16}$',
+					),
 				),
 			)
 		);

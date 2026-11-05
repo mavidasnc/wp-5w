@@ -3550,6 +3550,103 @@ $admin_user( 0 );
 update_option( Settings::OPTION, Settings::defaults() );
 $wpdb->query( "TRUNCATE TABLE {$hits_table}" );
 
+// Modale del referrer: oggi, ieri, totale e IP diversi. Visite grezze dal primo giorno di wp5w_hits (3 giorni fa), prima l'aggregato.
+// A = un IP con tre visitatori (v1 due volte oggi, v2 oggi, v4 ieri), B = v3, C = v6; v5 (ieri) è di prima della v7 (senza hash).
+$v19_ref    = Schema::table( 'referrer_daily' );
+$v19_clean  = static function () use ( $wpdb, $v19_ref, $hits_table ): void {
+	$wpdb->query( "DELETE FROM {$v19_ref} WHERE referrer IN ('spam19.wp5w-verify.example', 'android-app://com.wp5w.app/')" );
+	$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+};
+$v19_clean();
+$v19_ip     = array(
+	'A' => substr( md5( 'ip-A' ), 0, 16 ),
+	'B' => substr( md5( 'ip-B' ), 0, 16 ),
+	'C' => substr( md5( 'ip-C' ), 0, 16 ),
+);
+$v19_hit    = static function ( int $ago, string $who, string $type, int $id, string $referrer, ?string $ip, int $entry = 1, string $time = '10:00:00' ) use ( $wpdb, $hits_table, $v19_ago, $v19_ip ): void {
+	$day = $v19_ago( $ago );
+	$wpdb->query(
+		$wpdb->prepare(
+			"INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, is_entry, country, browser, os, ip_hash, ua) VALUES (%s, %s, UNHEX(%s), %s, %d, %s, %s, 'referral', %d, 'IT', 'Chrome', 'Windows', IF( %s = '', NULL, UNHEX(%s) ), %s)",
+			"{$day} {$time}",
+			$day,
+			md5( "v19-{$day}-{$who}" ),
+			$type,
+			$id,
+			'/v19-' . $id . '/',
+			$referrer,
+			$entry,
+			null === $ip ? '' : $v19_ip[ $ip ],
+			null === $ip ? '' : $v19_ip[ $ip ],
+			null === $ip ? '' : "UA-{$who}"
+		)
+	);
+};
+$v19_hit( 0, 'v1', 'post', $post_a, 'spam19.wp5w-verify.example', 'A', 1, '10:00:00' );
+$v19_hit( 0, 'v1', 'post', $post_a, 'spam19.wp5w-verify.example', 'A', 1, '10:05:00' );
+$v19_hit( 0, 'v2', 'post', $post_a, 'spam19.wp5w-verify.example', 'A', 1, '10:10:00' );
+$v19_hit( 0, 'v3', 'post', $post_b, 'spam19.wp5w-verify.example', 'B' );
+$v19_hit( 1, 'v4', 'post', $post_a, 'spam19.wp5w-verify.example', 'A' );
+$v19_hit( 1, 'v5', 'post', $post_a, 'spam19.wp5w-verify.example', null );
+$v19_hit( 2, 'v6', 'post', $post_a, 'spam19.wp5w-verify.example', 'C' );
+$v19_hit( 3, 'v0', 'home', 0, '', null );
+$v19_hit( 0, 'v7', 'post', $post_a, 'com.wp5w.app', 'B' );
+$v19_hit( 0, 'v8', 'post', $post_a, '', 'B' );
+// Aggregato (wps): 5 giorni fa entra nel totale, 2 giorni fa no (quel giorno viene dalle visite grezze).
+foreach ( array( array( 5, 'spam19.wp5w-verify.example', 7 ), array( 2, 'spam19.wp5w-verify.example', 50 ), array( 5, 'android-app://com.wp5w.app/', 3 ) ) as $wp5w_row ) {
+	$wpdb->query( $wpdb->prepare( "INSERT INTO {$v19_ref} (day, object_type, object_id, referrer, channel, source, visitors, origin) VALUES (%s, 'post', %d, %s, 'referral', '', %d, 'wps')", $v19_ago( $wp5w_row[0] ), $post_a, $wp5w_row[1], $wp5w_row[2] ) );
+}
+
+$v19_query = new AudienceQuery( new SearchQuery() );
+$v19_pages = $v19_query->referrer_pages( 'spam19.wp5w-verify.example', 7 );
+$v19_cols  = static fn( array $row ): string => implode( '|', array( $row['today'] ?? 'null', $row['yesterday'] ?? 'null', $row['visitors'], $row['ips'] ?? 'null' ) );
+$check( 'modale 0.19: due contenuti, A prima di B', $post_a . ',' . $post_b, implode( ',', array_column( $v19_pages['rows'], 'id' ) ) );
+$check( 'modale 0.19: articolo A oggi 2, ieri 2, totale 12 (5 grezzi + 7 aggregati), 2 IP diversi', '2|2|12|2', $v19_cols( $v19_pages['rows'][0] ) );
+$check( 'modale 0.19: articolo B oggi 1, ieri 0, totale 1, 1 IP', '1|0|1|1', $v19_cols( $v19_pages['rows'][1] ) );
+$check( 'modale 0.19: totale mai sotto oggi + ieri', 0, count( array_filter( $v19_pages['rows'], static fn( array $row ): bool => $row['visitors'] < (int) $row['today'] + (int) $row['yesterday'] ) ) );
+$check( 'modale 0.19: intestazione dalle righe (13 visitatori, 2 contenuti)', '13|2', $v19_pages['totals']['visitors'] . '|' . $v19_pages['totals']['contents'] );
+$check( 'modale 0.19: sorgenti (aggregato fino al giorno prima delle visite grezze)', $v19_ago( 6 ) . '|' . $v19_ago( 4 ) . '|' . $v19_ago( 3 ) . '|' . $v19_today, $v19_pages['sources']['aggregate']['from'] . '|' . $v19_pages['sources']['aggregate']['to'] . '|' . $v19_pages['sources']['raw']['from'] . '|' . $v19_pages['sources']['raw']['to'] );
+$check( 'modale 0.19: IP disponibili dal primo giorno con hash', $v19_ago( 2 ), $v19_pages['ip_from'] ?? 'null' );
+$v19_today_pages = $v19_query->referrer_pages( 'spam19.wp5w-verify.example', 1 );
+$check( 'modale 0.19 oggi: ieri non disponibile, totale = oggi', '2|null|2|1', $v19_cols( $v19_today_pages['rows'][0] ) );
+$v19_app = $v19_query->referrer_pages( 'android-app://com.wp5w.app/', 7 );
+$check( 'modale 0.19: referrer android-app:// di WP Statistics trova le visite grezze com.wp5w.app', '1|0|4|1', $v19_cols( $v19_app['rows'][0] ?? array() ) );
+
+// Dettaglio delle visite: filtri, conteggi su tutte le visite, raggruppamenti, orario del sito e hash corto.
+$v19_visits = new Mavida\FiveW\Query\VisitsQuery();
+$v19_detail = $v19_visits->get( 'post', $post_a, 7, 'spam19.wp5w-verify.example', null );
+$check( 'dettaglio: 6 visite, 5 visitatori, 2 IP', '6|5|2', implode( '|', $v19_detail['totals'] ) );
+$check( 'dettaglio: per IP, A con 4 visite in testa e hash corto', substr( $v19_ip['A'], 0, 8 ) . '|4', $v19_detail['by_ip'][0]['ip'] . '|' . $v19_detail['by_ip'][0]['visits'] );
+$check( 'dettaglio: la visita senza hash è n.d. (ip vuoto e user agent vuoto)', 1, count( array_filter( $v19_detail['rows'], static fn( array $row ): bool => '' === $row['ip'] && '' === $row['ua'] ) ) );
+$check( 'dettaglio: la più recente prima, orario del sito', get_date_from_gmt( $v19_today . ' 10:10:00', 'Y-m-d H:i:s' ), $v19_detail['rows'][0]['time'] );
+$check( 'dettaglio: per user agent, UA-v1 con 2 visite in testa', 'UA-v1|2', $v19_detail['by_ua'][0]['ua'] . '|' . $v19_detail['by_ua'][0]['visits'] );
+$check( 'dettaglio: titolo del contenuto', html_entity_decode( get_the_title( $post_a ), ENT_QUOTES, 'UTF-8' ), $v19_detail['content']['title'] );
+$check( 'dettaglio per IP (tutte le provenienze): A ha 4 visite sull\'articolo A', 4, $v19_visits->get( 'post', $post_a, 7, null, $v19_ip['A'] )['totals']['visits'] );
+$check( 'dettaglio diretto (referrer vuoto): una visita', 1, $v19_visits->get( 'post', $post_a, 7, '', null )['totals']['visits'] );
+$check( 'dettaglio con referrer android-app://: la visita com.wp5w.app', 1, $v19_visits->get( 'post', $post_a, 7, 'android-app://com.wp5w.app/', null )['totals']['visits'] );
+$check( 'dettaglio: nessuna chiave visitor nella risposta', 0, (int) str_contains( (string) wp_json_encode( $v19_detail ), '"visitor"' ) );
+for ( $wp5w_i = 0; $wp5w_i < 510; $wp5w_i++ ) {
+	$v19_hit( 0, "m{$wp5w_i}", 'post', $post_b, '', 'B' );
+}
+$v19_many = $v19_visits->get( 'post', $post_b, 7, '', null );
+$check( 'dettaglio: al massimo 500 righe, conteggi su tutte le 510', '500|510|510', count( $v19_many['rows'] ) . '|' . $v19_many['totals']['visits'] . '|' . $v19_many['by_ip'][0]['visits'] );
+
+// Rotta REST del dettaglio: permessi, parametri e referrer vuoto («diretto») distinto da quello assente.
+$v19_route = '/wp5w/v1/admin/visits';
+$check( 'dettaglio senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$check( 'dettaglio con amministratore e referrer vuoto: 200 e una visita', '200|1', ( static function () use ( $rest_call, $v19_route, $post_a ): string {
+	$response = $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'days' => 7, 'referrer' => '' ) );
+	return $response->get_status() . '|' . ( $response->get_data()['totals']['visits'] ?? '' );
+} )() );
+$check( 'dettaglio senza referrer: tutte le visite dell\'articolo A (8)', 8, $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'days' => 7 ) )->get_data()['totals']['visits'] ?? '' );
+$check( 'dettaglio con hash IP non valido: 400', 400, $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'ip' => 'zz' ) )->get_status() );
+$check( 'dettaglio con days 91: 400', 400, $rest_call( 'GET', $v19_route, array( 'type' => 'post', 'id' => $post_a, 'days' => 91 ) )->get_status() );
+$check( 'dettaglio senza tipo: 400', 400, $rest_call( 'GET', $v19_route, array( 'id' => $post_a ) )->get_status() );
+$check( 'modale via REST: colonne today, yesterday, visitors e ips', 'today,yesterday,visitors,ips', implode( ',', array_values( array_intersect( array( 'today', 'yesterday', 'visitors', 'ips' ), array_keys( $rest_call( 'GET', '/wp5w/v1/admin/audience/referrer', array( 'referrer' => 'spam19.wp5w-verify.example', 'days' => 7 ) )->get_data()['rows'][0] ?? array() ) ) ) ) );
+$admin_user( 0 );
+$v19_clean();
+
 // ---------------------------------------------------------------------------
 // 20. Pulizia finale.
 // ---------------------------------------------------------------------------
