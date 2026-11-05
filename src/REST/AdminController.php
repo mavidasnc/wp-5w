@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace Mavida\FiveW\REST;
 
+use Mavida\FiveW\Etl\Anomalies;
 use Mavida\FiveW\Etl\Importer;
 use Mavida\FiveW\Etl\Scheduler;
 use Mavida\FiveW\Geo\CountryDatabase;
@@ -270,6 +271,17 @@ final class AdminController extends RestController {
 			)
 		);
 
+		// Avvisi sulle visite anomale della Panoramica: l'ultimo calcolo del passaggio orario (calcolato qui solo se manca).
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/alerts',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn() => $this->respond( self::alerts_data() ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+			)
+		);
+
 		// «Online adesso»: nessun parametro, la finestra è di 5 minuti.
 		register_rest_route(
 			self::API_NAMESPACE,
@@ -402,6 +414,14 @@ final class AdminController extends RestController {
 							'type'  => 'array',
 							'items' => array( 'type' => 'string' ),
 						),
+					) + array_map(
+						// Soglie degli avvisi (0.19.0): interi con i limiti di Settings::ALERT_LIMITS.
+						static fn( array $limits ): array => array(
+							'type'    => 'integer',
+							'minimum' => $limits[0],
+							'maximum' => $limits[1],
+						),
+						Settings::ALERT_LIMITS
 					),
 				),
 			)
@@ -562,6 +582,20 @@ final class AdminController extends RestController {
 	}
 
 	/**
+	 * Ultimo calcolo degli avvisi con le soglie in uso e lo stato della raccolta propria.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function alerts_data(): array {
+		$saved    = get_option( Anomalies::OPTION, null );
+		$settings = Settings::get();
+		return ( is_array( $saved ) ? $saved : Anomalies::run() ) + array(
+			'tracking'   => $settings['own_tracking'],
+			'thresholds' => array_intersect_key( $settings, Settings::ALERT_LIMITS ),
+		);
+	}
+
+	/**
 	 * Controlla gli IP esclusi: un array di stringhe, ognuna un IP o un intervallo CIDR valido.
 	 *
 	 * @param mixed            $value   Valore ricevuto.
@@ -635,7 +669,14 @@ final class AdminController extends RestController {
 			update_option( Settings::OWN_SINCE, (string) $request->get_param( 'own_since' ) );
 		}
 
-		// Passo 3: «Raccolta propria» e «Rispetta DNT» finiscono nell'HTML in cache (blocco JSON e dnt): si svuota LiteSpeed.
+		// Passo 3: gli avvisi si ricalcolano subito con le soglie nuove (o si svuotano se la raccolta è spenta).
+		try {
+			Anomalies::run();
+		} catch ( \Throwable $e ) {
+			error_log( 'wp5w: calcolo degli avvisi fallito: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il salvataggio delle opzioni non deve fallire per gli avvisi.
+		}
+
+		// Passo 4: «Raccolta propria» e «Rispetta DNT» finiscono nell'HTML in cache (blocco JSON e dnt): si svuota LiteSpeed.
 		$saved = Settings::get();
 		if ( $saved['own_tracking'] !== $current['own_tracking'] || $saved['respect_dnt'] !== $current['respect_dnt'] ) {
 			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Hook di LiteSpeed Cache.

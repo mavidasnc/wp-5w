@@ -19,12 +19,24 @@ const errorMessage = ( error ) => {
 	return error?.message ?? __( 'Errore sconosciuto.', 'wp-5w' );
 };
 
+// Soglie degli avvisi sulle visite anomale: chiave, etichetta, spiegazione e limiti (gli stessi di Settings::ALERT_LIMITS).
+const ALERT_FIELDS = [
+	{ key: 'alert_hours', min: 1, max: 168, label: __( 'Finestra (ore)', 'wp-5w' ), help: __( 'Le ultime ore controllate a ogni calcolo.', 'wp-5w' ) },
+	{ key: 'alert_min_visitors', min: 1, max: 10000, label: __( 'Visitatori minimi', 'wp-5w' ), help: __( 'Sotto questo numero una coppia sito-contenuto non è mai un picco.', 'wp-5w' ) },
+	{ key: 'alert_factor', min: 1, max: 100, label: __( 'Volte la mediana', 'wp-5w' ), help: __( 'Il picco deve superare questa volta la mediana dei visitatori al giorno (con mediana minima 1).', 'wp-5w' ) },
+	{ key: 'alert_baseline_days', min: 7, max: 90, label: __( 'Giorni della mediana', 'wp-5w' ), help: __( 'Giorni interi prima della finestra su cui si calcola la mediana.', 'wp-5w' ) },
+	{ key: 'alert_countries', min: 2, max: 250, label: __( 'Paesi diversi', 'wp-5w' ), help: __( 'Firma anomala: visitatori da almeno tanti paesi.', 'wp-5w' ) },
+	{ key: 'alert_share', min: 50, max: 100, label: __( 'Stesso browser e sistema (%)', 'wp-5w' ), help: __( 'Firma anomala: quota dei visitatori con la stessa combinazione di browser e sistema operativo.', 'wp-5w' ) },
+	{ key: 'alert_ip_visits', min: 2, max: 10000, label: __( 'Visite da un solo IP', 'wp-5w' ), help: __( 'Firma anomala, e avviso a sé: visite dello stesso IP allo stesso contenuto nella finestra.', 'wp-5w' ) },
+];
+
 /**
  * Dalla risposta del server ai valori dei campi (gli IP diventano un testo, una regola per riga).
  *
  * @param {Object} data Risposta di /admin/settings.
  */
 const toFields = ( data ) => ( {
+	...Object.fromEntries( ALERT_FIELDS.map( ( { key } ) => [ key, String( data[ key ] ) ] ) ),
 	own_tracking: !! data.own_tracking,
 	exclude_users: data.exclude_users,
 	excluded_ips: ( data.excluded_ips ?? [] ).join( '\n' ),
@@ -73,6 +85,7 @@ export default function OptionsPage() {
 				respect_dnt: fields.respect_dnt,
 				retention_days: parseInt( fields.retention_days, 10 ) || 0,
 				ip_retention_days: parseInt( fields.ip_retention_days, 10 ) || 0,
+				...Object.fromEntries( ALERT_FIELDS.map( ( { key } ) => [ key, parseInt( fields[ key ], 10 ) || 0 ] ) ),
 				own_since: fields.own_since,
 				log_glob: fields.log_glob.trim(),
 				log_excluded_paths: fields.log_excluded_paths
@@ -202,6 +215,30 @@ export default function OptionsPage() {
 					value={ fields.ip_retention_days }
 					onChange={ set( 'ip_retention_days' ) }
 				/>
+			</Card>
+
+			<Card id="options-alerts" title={ __( 'Avvisi sulle visite anomale', 'wp-5w' ) }>
+				<p className="wp5w-note wp5w-note--top">
+					{ __(
+						'Ogni ora, per ogni coppia sito di provenienza e contenuto (l\'accesso diretto conta come un sito): avviso se nella finestra c\'è un picco (visitatori minimi e volte la mediana) e almeno un segnale di firma anomala (paesi, stesso browser e sistema, visite da un solo IP). Un picco senza firma, come un articolo condiviso sui social, compare solo come nota. I valori predefiniti sono calibrati sulle visite del blog di ottobre e novembre 2026: scattano per lo spam da aocr.org e per il bot sulla home, non per LinkedIn e Facebook. Al salvataggio gli avvisi si ricalcolano.',
+						'wp-5w'
+					) }
+				</p>
+				<div className="wp5w-columns">
+					{ ALERT_FIELDS.map( ( field ) => (
+						<TextControl
+							key={ field.key }
+							__nextHasNoMarginBottom
+							type="number"
+							min={ field.min }
+							max={ field.max }
+							label={ `${ field.label } (${ field.min }-${ field.max })` }
+							help={ field.help }
+							value={ fields[ field.key ] }
+							onChange={ set( field.key ) }
+						/>
+					) ) }
+				</div>
 			</Card>
 
 			<Card id="options-origin" title={ __( 'Origine dei dati', 'wp-5w' ) }>

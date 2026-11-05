@@ -1004,7 +1004,7 @@ $check( 'POST settings: purge di LiteSpeed alla modifica di own_tracking', 1, $p
 $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'retention_days' => 61 ) );
 $check( 'POST settings: nessun purge se own_tracking e DNT non cambiano', 1, $purges );
 $get = $rest_call( 'GET', '/wp5w/v1/admin/settings' )->get_data();
-$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,ip_retention_days,log_glob,log_excluded_paths,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
+$check( 'GET settings: chiavi', 'own_tracking,exclude_users,excluded_ips,respect_dnt,retention_days,ip_retention_days,alert_hours,alert_min_visitors,alert_factor,alert_baseline_days,alert_countries,alert_share,alert_ip_visits,log_glob,log_excluded_paths,own_since,own_first_day', implode( ',', array_keys( $get ) ) );
 $check( 'GET settings: own_first_day', $today, $get['own_first_day'] ?? '' );
 $check( 'GET settings: own_since', $today, $get['own_since'] ?? '' );
 update_option( Settings::OPTION, Settings::defaults() );
@@ -3646,6 +3646,133 @@ $check( 'dettaglio senza tipo: 400', 400, $rest_call( 'GET', $v19_route, array( 
 $check( 'modale via REST: colonne today, yesterday, visitors e ips', 'today,yesterday,visitors,ips', implode( ',', array_values( array_intersect( array( 'today', 'yesterday', 'visitors', 'ips' ), array_keys( $rest_call( 'GET', '/wp5w/v1/admin/audience/referrer', array( 'referrer' => 'spam19.wp5w-verify.example', 'days' => 7 ) )->get_data()['rows'][0] ?? array() ) ) ) ) );
 $admin_user( 0 );
 $v19_clean();
+
+// Avvisi sulle visite anomale (Anomalies, regola in Support\Anomaly): casi sintetici con le forme di quelli reali del blog.
+// Base: la home in accesso diretto ha 5 visitatori al giorno nei 10 giorni prima della finestra (il primo giorno di raccolta,
+// 12 giorni fa, è parziale e non conta). Finestra: le ultime 24 ore prima di $al_now.
+update_option( Settings::OPTION, Settings::defaults() );
+delete_option( Mavida\FiveW\Etl\Anomalies::OPTION );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
+$al_now = time();
+$al_n   = 0;
+$al_hit = static function ( int $ts, string $referrer, string $type, int $id, string $country, string $combo, ?string $ip = null, int $entry = 1 ) use ( $wpdb, $hits_table, &$al_n ): void {
+	[ $browser, $os ] = explode( '|', $combo );
+	++$al_n;
+	$wpdb->query(
+		$wpdb->prepare(
+			"INSERT INTO {$hits_table} (ts, day, visitor, object_type, object_id, uri, referrer_host, channel, is_entry, country, browser, os, ip_hash, ua) VALUES (%s, %s, UNHEX(%s), %s, %d, '/al/', %s, 'referral', %d, %s, %s, %s, IF( %s = '', NULL, UNHEX(%s) ), 'UA-al')",
+			gmdate( 'Y-m-d H:i:s', $ts ),
+			wp_date( 'Y-m-d', $ts ),
+			md5( "al-{$al_n}" ),
+			$type,
+			$id,
+			$referrer,
+			$entry,
+			$country,
+			$browser,
+			$os,
+			$ip ?? '',
+			$ip ?? ''
+		)
+	);
+};
+$al_countries = array( 'IT', 'DE', 'FR', 'US', 'GB', 'NL', 'JP', 'IN', 'BR', 'PL', 'SE', 'RO' );
+$al_combos    = array( 'Chrome|Windows', 'Safari|Mac', 'Chrome Mobile|Android', 'Mobile Safari|iOS', 'Firefox|GNU/Linux' );
+// Mezzogiorno del sito N giorni fa (giorni della base lontani dalla mezzanotte).
+$al_noon = static fn( int $days ): int => ( new DateTimeImmutable( wp_date( 'Y-m-d', $al_now - $days * DAY_IN_SECONDS ) . ' 12:00:00', wp_timezone() ) )->getTimestamp();
+$al_hit( $al_noon( 12 ), '', 'home', 0, 'IT', 'Chrome|Windows' );
+for ( $wp5w_d = 2; $wp5w_d <= 11; $wp5w_d++ ) {
+	for ( $wp5w_i = 0; $wp5w_i < 5; $wp5w_i++ ) {
+		$al_hit( $al_noon( $wp5w_d ), '', 'home', 0, 'IT', $al_combos[ $wp5w_i ] );
+	}
+}
+for ( $wp5w_i = 0; $wp5w_i < 32; $wp5w_i++ ) {
+	// Spam (come aocr.org): 32 visitori, 12 paesi, tutti Chrome/Windows, su un contenuto senza storico.
+	$al_hit( $al_now - 3 * HOUR_IN_SECONDS + $wp5w_i, 'spam.wp5w-al.example', 'post', $post_a, $al_countries[ $wp5w_i % 12 ], 'Chrome|Windows' );
+}
+for ( $wp5w_i = 0; $wp5w_i < 30; $wp5w_i++ ) {
+	// Bot sulla home: 30 ingressi diretti (6 volte la mediana 5), 12 paesi, due combinazioni alla pari.
+	$al_hit( $al_now - 5 * HOUR_IN_SECONDS + $wp5w_i, '', 'home', 0, $al_countries[ $wp5w_i % 12 ], $wp5w_i % 2 ? 'Chrome Mobile|Android' : 'Chrome Mobile iOS|iOS' );
+}
+for ( $wp5w_i = 0; $wp5w_i < 25; $wp5w_i++ ) {
+	// LinkedIn su un articolo nuovo: 25 visitatori, 2 paesi, browser vari. Picco senza firma.
+	$al_hit( $al_now - 2 * HOUR_IN_SECONDS + $wp5w_i, 'linkedin.com', 'post', $post_b, $wp5w_i % 2 ? 'IT' : 'CH', $al_combos[ $wp5w_i % 5 ] );
+	// Visite senza browser e sistema riconosciuti: la combinazione sconosciuta non è mai dominante.
+	$al_hit( $al_now - 2 * HOUR_IN_SECONDS + $wp5w_i, 'ignoto.wp5w-al.example', 'post', $post_b, 'IT', '|' );
+}
+for ( $wp5w_i = 0; $wp5w_i < 5; $wp5w_i++ ) {
+	// Poche visite tutte uguali: sotto il minimo, niente.
+	$al_hit( $al_now - HOUR_IN_SECONDS, 'piccolo.wp5w-al.example', 'post', $post_a, 'RU', 'Chrome|Windows' );
+}
+$al_ip = array(
+	'X' => substr( md5( 'al-ip-X' ), 0, 16 ),
+	'Y' => substr( md5( 'al-ip-Y' ), 0, 16 ),
+	'Z' => substr( md5( 'al-ip-Z' ), 0, 16 ),
+);
+for ( $wp5w_i = 0; $wp5w_i < 16; $wp5w_i++ ) {
+	// Un IP con 16 visite (non ingressi) allo stesso contenuto: avviso per IP. Un altro con 14: niente.
+	$al_hit( $al_now - 4 * HOUR_IN_SECONDS + $wp5w_i, '', 'post', $post_b, 'IT', 'Chrome|Windows', $al_ip['X'], 0 );
+	if ( $wp5w_i < 14 ) {
+		$al_hit( $al_now - 4 * HOUR_IN_SECONDS + $wp5w_i, '', 'post', $post_a, 'IT', 'Chrome|Windows', $al_ip['Y'], 0 );
+	}
+}
+for ( $wp5w_i = 0; $wp5w_i < 20; $wp5w_i++ ) {
+	// Coppia con picco e un solo IP che fa 15 dei 20 ingressi: firma «ip».
+	$al_hit( $al_now - 6 * HOUR_IN_SECONDS + $wp5w_i, 'ripetuto.wp5w-al.example', 'page', 99, $wp5w_i % 2 ? 'IT' : 'FR', $al_combos[ $wp5w_i % 5 ], $wp5w_i < 15 ? $al_ip['Z'] : null );
+}
+// Fuori dalla finestra (25 ore fa): non conta.
+for ( $wp5w_i = 0; $wp5w_i < 30; $wp5w_i++ ) {
+	$al_hit( $al_now - 25 * HOUR_IN_SECONDS, 'vecchio.wp5w-al.example', 'post', $post_a, $al_countries[ $wp5w_i % 12 ], 'Chrome|Windows' );
+}
+
+$al_res   = Mavida\FiveW\Etl\Anomalies::compute( $al_now );
+$al_keys  = static fn( array $items ): string => implode( ',', array_map( static fn( array $a ): string => 'pair' === $a['kind'] ? ( '' === $a['referrer'] ? '(diretto)' : $a['referrer'] ) . '>' . $a['type'] . ':' . implode( '+', $a['reasons'] ) : 'ip>' . substr( $a['ip'], 0, 4 ) . '>' . $a['visits'], $items ) );
+$al_alert = static fn( string $referrer ) => array_values( array_filter( $al_res['alerts'], static fn( array $a ): bool => 'pair' === $a['kind'] && $a['referrer'] === $referrer ) )[0] ?? array();
+$check( 'avvisi: spam, bot sulla home, IP ripetuto e due IP con 16 e 15 visite (dal più grande)', 'spam.wp5w-al.example>post:countries+combo,(diretto)>home:countries,ripetuto.wp5w-al.example>page:ip,ip>' . substr( $al_ip['X'], 0, 4 ) . '>16,ip>' . substr( $al_ip['Z'], 0, 4 ) . '>15', $al_keys( $al_res['alerts'] ) );
+// Stessi visitatori (25): l'ordine tra i due non è definito, si confrontano ordinati.
+$al_sorted = static function ( string $keys ): string {
+	$list = explode( ',', $keys );
+	sort( $list );
+	return implode( ',', $list );
+};
+$check( 'avvisi: picchi senza firma (LinkedIn e visite senza browser riconosciuto)', 'ignoto.wp5w-al.example>post:,linkedin.com>post:', $al_sorted( $al_keys( $al_res['peaks'] ) ) );
+$check( 'avvisi: spam con 32 visitatori, mediana 0, 12 paesi e 100% Chrome/Windows', '32|0|12|Chrome|Windows|100', implode( '|', array( $al_alert( 'spam.wp5w-al.example' )['visitors'] ?? '', $al_alert( 'spam.wp5w-al.example' )['median'] ?? '', $al_alert( 'spam.wp5w-al.example' )['countries'] ?? '', $al_alert( 'spam.wp5w-al.example' )['combo']['combo'] ?? '', $al_alert( 'spam.wp5w-al.example' )['combo']['share'] ?? '' ) ) );
+$check( 'avvisi: home con mediana 5 su 10 giorni (il primo giorno di raccolta non conta)', '30|5|10', implode( '|', array( $al_alert( '' )['visitors'] ?? '', $al_alert( '' )['median'] ?? '', $al_alert( '' )['base_days'] ?? '' ) ) );
+$check( 'avvisi: IP ripetuto con 15 ingressi dallo stesso hash', 15, $al_alert( 'ripetuto.wp5w-al.example' )['ip_max'] ?? '' );
+$check( 'avvisi: titolo dell\'articolo nello spam', html_entity_decode( get_the_title( $post_a ), ENT_QUOTES, 'UTF-8' ), $al_alert( 'spam.wp5w-al.example' )['title'] ?? '' );
+
+// Soglie: con 33 visitatori minimi restano solo gli avvisi per IP; con K = 7 la home (30 contro 7 x 5) non è più un picco.
+update_option( Settings::OPTION, array( 'alert_min_visitors' => 33 ) + Settings::defaults() );
+$check( 'avvisi con MIN 33: solo gli avvisi per IP', 'ip>' . substr( $al_ip['X'], 0, 4 ) . '>16,ip>' . substr( $al_ip['Z'], 0, 4 ) . '>15',$al_keys( Mavida\FiveW\Etl\Anomalies::compute( $al_now )['alerts'] ) );
+update_option( Settings::OPTION, array( 'alert_factor' => 7 ) + Settings::defaults() );
+$check( 'avvisi con K 7: la home non scatta più', 0, (int) str_contains( $al_keys( Mavida\FiveW\Etl\Anomalies::compute( $al_now )['alerts'] ), '(diretto)' ) );
+update_option( Settings::OPTION, array( 'alert_hours' => 2 ) + Settings::defaults() );
+$check( 'avvisi con finestra di 2 ore: solo il piccolo e LinkedIn sono dentro, nessun avviso', '', $al_keys( Mavida\FiveW\Etl\Anomalies::compute( $al_now )['alerts'] ) );
+update_option( Settings::OPTION, Settings::defaults() );
+
+// Salvataggio: run() salva l'opzione e conserva la data del primo avviso; con la raccolta spenta si svuota.
+$al_first = Mavida\FiveW\Etl\Anomalies::run( $al_now - HOUR_IN_SECONDS );
+$al_again = Mavida\FiveW\Etl\Anomalies::run( $al_now );
+$check( 'avvisi salvati: la data del primo avviso resta quella del primo calcolo', $al_now - HOUR_IN_SECONDS, array_column( $al_again['alerts'], 'since', 'key' )[ 'pair:spam.wp5w-al.example|post|' . $post_a ] ?? '' );
+$check( 'avvisi salvati: opzione non caricata in automatico', 1, (int) in_array( $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", Mavida\FiveW\Etl\Anomalies::OPTION ) ), array( 'no', 'off' ), true ) );
+update_option( Settings::OPTION, array( 'own_tracking' => false ) + Settings::defaults() );
+$check( 'avvisi con la raccolta spenta: nessuno', 0, count( Mavida\FiveW\Etl\Anomalies::run( $al_now )['alerts'] ) );
+update_option( Settings::OPTION, Settings::defaults() );
+
+// Rotte: GET /admin/alerts e ricalcolo al salvataggio delle Opzioni (con l'ora attuale).
+$al_route = '/wp5w/v1/admin/alerts';
+$check( 'avvisi senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $al_route )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$check( 'POST settings con alert_share 40: 400', 400, $rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'alert_share' => 40 ) )->get_status() );
+$rest_call( 'POST', '/wp5w/v1/admin/settings', array( 'alert_min_visitors' => 20 ) );
+$al_response = $rest_call( 'GET', $al_route );
+$check( 'avvisi con amministratore: 200, raccolta attiva e 7 soglie', '200|1|7', $al_response->get_status() . '|' . (int) $al_response->get_data()['tracking'] . '|' . count( $al_response->get_data()['thresholds'] ) );
+$check( 'avvisi dopo il salvataggio delle Opzioni: ricalcolati adesso', 1, (int) ( abs( (int) $al_response->get_data()['computed_at'] - time() ) < 120 ) );
+$check( 'avvisi: risposta senza la chiave visitor', 0, (int) str_contains( (string) wp_json_encode( $al_response->get_data() ), '"visitor"' ) );
+$admin_user( 0 );
+update_option( Settings::OPTION, Settings::defaults() );
+delete_option( Mavida\FiveW\Etl\Anomalies::OPTION );
+$wpdb->query( "TRUNCATE TABLE {$hits_table}" );
 
 // ---------------------------------------------------------------------------
 // 20. Pulizia finale.

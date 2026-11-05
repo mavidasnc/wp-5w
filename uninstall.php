@@ -53,6 +53,7 @@ foreach ( array( 'site_daily', 'object_daily', 'entry_daily', 'referrer_daily', 
 delete_option( 'wp5w_db_version' );
 delete_option( 'wp5w_etl_state' );
 delete_option( 'wp5w_settings' );
+delete_option( 'wp5w_alerts' );
 delete_option( 'wp5w_own_since' );
 delete_option( 'wp5w_gsc_state' );
 delete_option( 'wp5w_gsc_empty_days' );

@@ -9,6 +9,7 @@ import SearchContent from '../components/SearchContent';
 import ChannelList from '../components/ChannelList';
 import PostDetailModal from '../components/PostDetailModal';
 import { TrendCard } from '../components/Trend';
+import Alerts from '../components/Alerts';
 
 // Preset del periodo: giorni fino a oggi, oppure tutto lo storico del sito.
 const PERIODS = [
@@ -116,6 +117,9 @@ export default function OverviewPage() {
 							) }
 						</section>
 					</div>
+
+					{ /* Subito sotto i grafici di andamento: l'ultimo calcolo orario, indipendente dal periodo scelto. */ }
+					<Alerts />
 
 					<TopContents range={ data.range } onOpen={ setDetail } />
 					<SearchContent onOpen={ setDetail } />

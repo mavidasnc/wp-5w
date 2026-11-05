@@ -107,7 +107,7 @@ final class Scheduler {
 	}
 
 	/**
-	 * Passaggio orario: aggregazione della raccolta propria, poi conservazione di hash dell'IP e user agent.
+	 * Passaggio orario: aggregazione della raccolta propria, conservazione di hash dell'IP e user agent, avvisi sulle visite anomale.
 	 *
 	 * Ogni passo ha il suo try: un errore della pulizia non deve fermare l'aggregazione, e viceversa.
 	 *
@@ -120,6 +120,12 @@ final class Scheduler {
 			Privacy::purge();
 		} catch ( \Throwable $e ) {
 			error_log( 'wp5w: pulizia di hash IP e user agent fallita: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il passaggio orario non ha altra interfaccia per gli errori.
+		}
+
+		try {
+			Anomalies::run();
+		} catch ( \Throwable $e ) {
+			error_log( 'wp5w: calcolo degli avvisi fallito: ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Il passaggio orario non ha altra interfaccia per gli errori.
 		}
 	}
 
