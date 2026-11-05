@@ -2,6 +2,18 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
+## [Non rilasciato]
+
+Filtro del periodo e modale dei contenuti nel box «Provenienza» della scheda Visitatori. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.
+
+### Added
+- **Periodo del box «Provenienza»:** Oggi, 7 giorni (predefinito, come prima), 30 giorni e 90 giorni, con il selettore degli altri box (`PeriodSwitch` accetta ora la prop facoltativa `periods`). Il box carica da sé da `GET /admin/audience/referrers?days=1|7|30|90` (componente `Referrers.jsx`).
+- **«Oggi» in tempo reale:** con `days=1` siti e contenuti si leggono da `wp5w_hits` (sempre raccolta propria, come la scheda «Oggi»: nessuna eccezione alla regola dell'origine), con la stessa SELECT con cui `OwnSource` scrive `referrer_daily`; dopo l'aggregazione oraria i numeri coincidono con le righe `own` di oggi. Gli altri periodi leggono `referrer_daily` con la regola dell'origine, quindi oggi vi è parziale (raccolta propria) o assente (WP Statistics).
+- **Modale dei contenuti raggiunti da un sito** (clic sul sito, `ReferrerModal.jsx`, `GET /admin/audience/referrer?referrer=...&days=...`): titolo con link e visitatori entrati da quel sito per contenuto, dal più visitato, nello stesso periodo del box (al massimo 100 righe). Il referrer è un parametro e non un pezzo del percorso, perché può essere `android-app://pacchetto/`. Il conteggio sono i visitatori (un visitatore per contenuto e per giorno, come `referrer_daily`): le visualizzazioni per sito di provenienza non vengono salvate. La somma delle righe è il numero della tabella dei siti.
+
+### Changed
+- `GET /admin/audience` non restituisce più la chiave `referrers` (il box ha la sua rotta); `AudienceQuery::referrers()` è pubblico e prende i giorni.
+
 ## [0.17.0] — 2026-10-28
 
 Media di 7 giorni e barre orarie nella scheda «Oggi», log di accesso in tutti i box del Confronto, visitatori senza JavaScript nella Panoramica. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo. **Dopo l'aggiornamento:** `wp 5w log-import` per scrivere il dettaglio per contenuto dei log sui giorni già importati (gli archivi già ruotati restano senza, e il Confronto li mostra con «–»).
