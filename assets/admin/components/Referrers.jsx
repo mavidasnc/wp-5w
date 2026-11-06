@@ -3,13 +3,10 @@ import { __ } from '@wordpress/i18n';
 import { Button, Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Card from './Card';
-import PeriodSwitch, { PERIODS } from './PeriodSwitch';
+import PeriodSwitch from './PeriodSwitch';
 import ShowMore from './ShowMore';
 import ReferrerModal, { sourcesNote } from './ReferrerModal';
 import { LABELS } from './ChannelList';
-
-// «Oggi» (1 giorno) prima dei tre periodi soliti.
-const REFERRER_PERIODS = [ { days: 1, label: __( 'Oggi', 'wp-5w' ) }, ...PERIODS ];
 
 /**
  * Box «Provenienza»: siti di provenienza di oggi o degli ultimi N giorni; carica da /admin/audience/referrers.
@@ -47,7 +44,7 @@ export default function Referrers() {
 					) }
 				</>
 			}
-			actions={ <PeriodSwitch days={ days } onChange={ setDays } periods={ REFERRER_PERIODS } /> }
+			actions={ <PeriodSwitch days={ days } onChange={ setDays } /> }
 		>
 			{ error && <Notice status="error" isDismissible={ false }>{ error }</Notice> }
 			{ ! data && ! error && <Spinner /> }

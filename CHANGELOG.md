@@ -2,7 +2,15 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
-## [Non rilasciato]
+## [0.20.0] — 2026-11-06
+
+Filtri del periodo uniformi in tutte le schede e in tutti i box. Nessuna tabella nuova, nessuna migrazione dello schema e nessun evento cron nuovo.
+
+### Changed
+- **Stessi pulsanti ovunque: Oggi, 7, 30 e 90 giorni** (`PeriodSwitch`, `PERIODS` ora con «Oggi»). Li usano i box di Articoli (Articoli più visti, che prima aveva Settimana e Mese, 404 e Ricerche interne), Visitatori (Pubblico, Campagne, Provenienza), le due card di Search Console della Panoramica (prima una select 7, 28, 90 e 180 giorni: 28 diventa 30, 180 sparisce, e «Oggi» è l'ultimo giorno con dati di Google, che arrivano con 2-3 giorni di ritardo), il periodo della Panoramica (select sostituita dai pulsanti, con «1 anno» e «Tutto» in fondo per non perdere le funzioni di prima) e il dettaglio di un contenuto (con «Dalla pubblicazione» in fondo). Le colonne «Settimana» e «Mese» di Articoli più visti prendono il nome del periodo scelto.
+- **Rotte REST con `days`:** `audience/dimensions`, `audience/campaigns`, `notfound`, `searches`, `posts/top`, `search/pages` e `search/opportunities` accettano 1, 7, 30 e 90 (`AdminController::PERIOD_DAYS`, come già `audience/referrers`). `search/*` ha ora 30 come predefinito (era 28) e non accetta più 28 e 180; `SearchQuery::DAYS` è stata tolta.
+
+## [0.19.0] — 2026-11-05
 
 Analisi delle visite anomale: hash dell'IP e user agent nelle visite della raccolta propria (schema v7). **Dati personali in più:** prima del rilascio serve il sì di Maurizio; dopo l'installazione va aggiornata a mano la pagina privacy del blog (il testo suggerito è in Impostazioni > Privacy > Guida).
 

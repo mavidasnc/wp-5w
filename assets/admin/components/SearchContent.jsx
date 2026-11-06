@@ -1,15 +1,10 @@
 import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Button, Notice, SelectControl, Spinner } from '@wordpress/components';
+import { Button, Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber } from '../api';
 import Card from './Card';
+import PeriodSwitch from './PeriodSwitch';
 import ShowMore from './ShowMore';
-
-// Periodi: ultimi N giorni disponibili in Search Console (come SearchQuery::DAYS).
-const DAYS_OPTIONS = [ 7, 28, 90, 180 ].map( ( days ) => ( {
-	value: String( days ),
-	label: `${ days } ${ __( 'giorni', 'wp-5w' ) }`,
-} ) );
 
 // Tipi di opportunità: etichetta e spiegazione (vedi SearchQuery::opportunities()).
 const KINDS = {
@@ -27,7 +22,7 @@ const KINDS = {
  * Pagine o opportunità degli ultimi giorni disponibili, ricaricate quando cambia il periodo.
  *
  * @param {string} part 'pages' o 'opportunities'.
- * @param {string} days Numero di giorni.
+ * @param {number} days Numero di giorni.
  */
 const useSearchPart = ( part, days ) => {
 	const [ state, setState ] = useState( { data: null, error: null } );
@@ -57,26 +52,6 @@ function Title( { text, range } ) {
 				</span>
 			) }
 		</>
-	);
-}
-
-/**
- * Selettore del numero di giorni nell'intestazione della card.
- *
- * @param {Object}   props
- * @param {string}   props.value    Giorni.
- * @param {Function} props.onChange Cambio del periodo.
- */
-function DaysSelect( { value, onChange } ) {
-	return (
-		<SelectControl
-			__nextHasNoMarginBottom
-			label={ __( 'Giorni', 'wp-5w' ) }
-			hideLabelFromVision
-			value={ value }
-			options={ DAYS_OPTIONS }
-			onChange={ onChange }
-		/>
 	);
 }
 
@@ -195,8 +170,8 @@ function OpportunitiesTable( { rows } ) {
  * @param {Function} props.onOpen Apertura del dettaglio di un contenuto.
  */
 export default function SearchContent( { onOpen } ) {
-	const [ oppDays, setOppDays ] = useState( '28' );
-	const [ pageDays, setPageDays ] = useState( '28' );
+	const [ oppDays, setOppDays ] = useState( 30 );
+	const [ pageDays, setPageDays ] = useState( 30 );
 	const opportunities = useSearchPart( 'opportunities', oppDays );
 	const pages = useSearchPart( 'pages', pageDays );
 
@@ -205,7 +180,7 @@ export default function SearchContent( { onOpen } ) {
 			<Card
 				id="gsc-opportunities"
 				title={ <Title text={ __( 'Opportunità su Google', 'wp-5w' ) } range={ opportunities.data?.range } /> }
-				actions={ <DaysSelect value={ oppDays } onChange={ setOppDays } /> }
+				actions={ <PeriodSwitch days={ oppDays } onChange={ setOppDays } /> }
 			>
 				<Loaded state={ opportunities }>
 					{ ( data ) => (
@@ -227,13 +202,13 @@ export default function SearchContent( { onOpen } ) {
 			<Card
 				id="gsc-pages"
 				title={ <Title text={ __( 'Pagine su Google', 'wp-5w' ) } range={ pages.data?.range } /> }
-				actions={ <DaysSelect value={ pageDays } onChange={ setPageDays } /> }
+				actions={ <PeriodSwitch days={ pageDays } onChange={ setPageDays } /> }
 			>
 				<Loaded state={ pages }>
 					{ ( data ) => <ShowMore rows={ data.rows }>{ ( rows ) => <PagesTable pages={ rows } onOpen={ onOpen } /> }</ShowMore> }
 				</Loaded>
 				<p className="wp5w-note">
-					{ __( 'Ultimi giorni disponibili in Search Console, che pubblica i dati con 2-3 giorni di ritardo.', 'wp-5w' ) }
+					{ __( 'Ultimi giorni disponibili in Search Console, che pubblica i dati con 2-3 giorni di ritardo: «Oggi» è l\'ultimo giorno con dati.', 'wp-5w' ) }
 				</p>
 			</Card>
 		</>

@@ -1947,6 +1947,18 @@ foreach ( array( '/wp5w/v1/admin/notfound', '/wp5w/v1/admin/searches' ) as $wp5w
 	$admin_user( 0 );
 }
 
+// Pulsanti uniformi (0.20.0): ogni rotta con un periodo accetta Oggi (1), 7, 30 e 90 giorni e rifiuta gli altri valori (28 e 180 erano di Search Console).
+$admin_user( $admin_id );
+foreach ( array( 'audience/dimensions', 'audience/campaigns', 'audience/referrers', 'notfound', 'searches', 'posts/top', 'search/pages', 'search/opportunities' ) as $wp5w_route ) {
+	foreach ( array( 1, 7, 30, 90 ) as $wp5w_days ) {
+		$check( "periodi: {$wp5w_route} con days={$wp5w_days}: 200", 200, $rest_call( 'GET', "/wp5w/v1/admin/{$wp5w_route}", array( 'days' => $wp5w_days ) )->get_status() );
+	}
+	foreach ( array( 15, 28, 180 ) as $wp5w_days ) {
+		$check( "periodi: {$wp5w_route} con days={$wp5w_days}: 400", 400, $rest_call( 'GET', "/wp5w/v1/admin/{$wp5w_route}", array( 'days' => $wp5w_days ) )->get_status() );
+	}
+}
+$admin_user( 0 );
+
 // Passo 8: ricerche interne.
 $sig_search = Tracker::signature( 'search', 0 );
 $hit_search = static fn( array $extra, string $ip ): int => $send_hit( $extra + array( 't' => 'search', 'id' => 0, 's' => $sig_search, 'u' => '/' ), $ip, $chrome );

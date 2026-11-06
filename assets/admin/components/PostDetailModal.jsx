@@ -1,19 +1,15 @@
 import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { Modal, Notice, SelectControl, Spinner } from '@wordpress/components';
+import { Modal, Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber, shiftDay, today } from '../api';
+import PeriodSwitch, { PERIODS } from './PeriodSwitch';
 import KpiCard from './KpiCard';
 import TrendChart from './TrendChart';
 import ChannelList from './ChannelList';
 import QueryTable from './QueryTable';
 
-// Periodi del dettaglio: giorni fino a oggi oppure dalla pubblicazione.
-export const DETAIL_PERIODS = [
-	{ value: '7', label: __( 'Ultimi 7 giorni', 'wp-5w' ) },
-	{ value: '30', label: __( 'Ultimi 30 giorni', 'wp-5w' ) },
-	{ value: '90', label: __( 'Ultimi 90 giorni', 'wp-5w' ) },
-	{ value: 'pub', label: __( 'Dalla pubblicazione', 'wp-5w' ) },
-];
+// Periodi del dettaglio: i soliti (Oggi, 7, 30 e 90 giorni) oppure dalla pubblicazione.
+export const DETAIL_PERIODS = [ ...PERIODS, { days: 'pub', label: __( 'Dalla pubblicazione', 'wp-5w' ) } ];
 
 const KPIS = [
 	{ key: 'views', label: __( 'Visualizzazioni', 'wp-5w' ) },
@@ -30,11 +26,11 @@ const KPIS = [
  * Intervallo di un periodo; "dalla pubblicazione" parte dalla data del post
  * (il server lo accorcia al primo giorno con dati).
  *
- * @param {string}  period Periodo.
- * @param {?string} date   Data di pubblicazione (Y-m-d).
+ * @param {number|string} period Giorni, oppure 'pub'.
+ * @param {?string}      date   Data di pubblicazione (Y-m-d).
  */
 const rangeFor = ( period, date ) => ( {
-	from: period === 'pub' ? date || '1970-01-01' : shiftDay( today, -( Number( period ) - 1 ) ),
+	from: period === 'pub' ? date || '1970-01-01' : shiftDay( today, -( period - 1 ) ),
 	to: today,
 } );
 
@@ -43,10 +39,10 @@ const rangeFor = ( period, date ) => ( {
  *
  * @param {Object}   props
  * @param {Object}   props.post          { id, title, date? }.
- * @param {string}   props.initialPeriod Periodo iniziale (vedi DETAIL_PERIODS).
+ * @param {number|string} props.initialPeriod Periodo iniziale (vedi DETAIL_PERIODS).
  * @param {Function} props.onClose       Chiusura del modale.
  */
-export default function PostDetailModal( { post, initialPeriod = '30', onClose } ) {
+export default function PostDetailModal( { post, initialPeriod = 30, onClose } ) {
 	const [ period, setPeriod ] = useState( initialPeriod );
 	const [ data, setData ] = useState( null );
 	const [ error, setError ] = useState( null );
@@ -63,14 +59,7 @@ export default function PostDetailModal( { post, initialPeriod = '30', onClose }
 	return (
 		<Modal title={ post.title } onRequestClose={ onClose } size="large" className="wp5w-modal">
 			<div className="wp5w-toolbar">
-				<SelectControl
-					__nextHasNoMarginBottom
-					__next40pxDefaultSize
-					label={ __( 'Periodo', 'wp-5w' ) }
-					value={ period }
-					options={ DETAIL_PERIODS }
-					onChange={ setPeriod }
-				/>
+				<PeriodSwitch days={ period } onChange={ setPeriod } periods={ DETAIL_PERIODS } />
 				{ data && (
 					<p className="wp5w-toolbar__compare">
 						{ formatDay( data.range.from ) } – { formatDay( data.range.to ) }

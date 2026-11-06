@@ -37,6 +37,13 @@ defined( 'ABSPATH' ) || exit;
 final class AdminController extends RestController {
 
 	/**
+	 * Periodi dei pulsanti di ogni scheda e box (assets/admin/components/PeriodSwitch.jsx): oggi (1) e gli ultimi 7, 30 e 90 giorni.
+	 *
+	 * @var int[]
+	 */
+	private const PERIOD_DAYS = array( 1, 7, 30, 90 );
+
+	/**
 	 * Costruttore.
 	 *
 	 * @param Importer        $importer   Importer.
@@ -140,8 +147,8 @@ final class AdminController extends RestController {
 					'args'                => array(
 						'days' => array(
 							'type'    => 'integer',
-							'enum'    => SearchQuery::DAYS,
-							'default' => 28,
+							'enum'    => self::PERIOD_DAYS,
+							'default' => 30,
 						),
 					),
 				)
@@ -158,7 +165,7 @@ final class AdminController extends RestController {
 			)
 		);
 
-		// Box «Pubblico»: paesi, dispositivi, browser e sistemi degli ultimi N giorni (compreso oggi).
+		// Box «Pubblico»: paesi, dispositivi, browser e sistemi di oggi (1) o degli ultimi 7, 30 e 90 giorni (compreso oggi).
 		register_rest_route(
 			self::API_NAMESPACE,
 			'/admin/audience/dimensions',
@@ -169,7 +176,7 @@ final class AdminController extends RestController {
 				'args'                => array(
 					'days' => array(
 						'type'    => 'integer',
-						'enum'    => array( 7, 30, 90 ),
+						'enum'    => self::PERIOD_DAYS,
 						'default' => 30,
 					),
 				),
@@ -191,7 +198,7 @@ final class AdminController extends RestController {
 		// Box «Provenienza»: siti di provenienza di oggi (1, dalla raccolta propria in tempo reale) o degli ultimi 7, 30 e 90 giorni.
 		$referrer_days = array(
 			'type'    => 'integer',
-			'enum'    => array( 1, 7, 30, 90 ),
+			'enum'    => self::PERIOD_DAYS,
 			'default' => 7,
 		);
 		register_rest_route(
@@ -385,7 +392,7 @@ final class AdminController extends RestController {
 				'args'                => array(
 					'days' => array(
 						'type'    => 'integer',
-						'enum'    => array( 7, 30 ),
+						'enum'    => self::PERIOD_DAYS,
 						'default' => 7,
 					),
 				),
@@ -467,7 +474,7 @@ final class AdminController extends RestController {
 	}
 
 	/**
-	 * Parametro days (7, 30 o 90, predefinito 30) delle rotte «ultimi N giorni» della fase 4.
+	 * Parametro days (1, 7, 30 o 90, predefinito 30) delle rotte «ultimi N giorni» della fase 4.
 	 *
 	 * @return array<string,array<string,mixed>>
 	 */
@@ -475,7 +482,7 @@ final class AdminController extends RestController {
 		return array(
 			'days' => array(
 				'type'    => 'integer',
-				'enum'    => array( 7, 30, 90 ),
+				'enum'    => self::PERIOD_DAYS,
 				'default' => 30,
 			),
 		);

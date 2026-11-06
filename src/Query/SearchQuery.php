@@ -54,14 +54,7 @@ final class SearchQuery {
 	private const MIN_IMPRESSIONS = 20;
 
 	/**
-	 * Periodi selezionabili (giorni) per pagine e opportunità.
-	 *
-	 * @var int[]
-	 */
-	public const DAYS = array( 7, 28, 90, 180 );
-
-	/**
-	 * Ultimi $days giorni disponibili in Search Console (i dati arrivano con 2-3 giorni di ritardo).
+	 * Ultimi $days giorni disponibili in Search Console (i dati arrivano con 2-3 giorni di ritardo; 1 = l'ultimo giorno con dati).
 	 *
 	 * @param int $days Numero di giorni.
 	 * @return DateRange|null Null se la tabella è vuota.
