@@ -1,7 +1,8 @@
 import { useEffect, useState } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
-import { Notice, SelectControl, Spinner } from '@wordpress/components';
+import { Notice, Spinner } from '@wordpress/components';
 import { api, formatDay, formatNumber, shiftDay, today } from '../api';
+import PeriodSwitch, { PERIODS } from '../components/PeriodSwitch';
 import KpiCard from '../components/KpiCard';
 import TrendChart, { TOOL_KEYS } from '../components/TrendChart';
 import TopContents from '../components/TopContents';
@@ -11,13 +12,12 @@ import PostDetailModal from '../components/PostDetailModal';
 import { TrendCard } from '../components/Trend';
 import Alerts from '../components/Alerts';
 
-// Preset del periodo: giorni fino a oggi, oppure tutto lo storico del sito.
-const PERIODS = [
-	{ value: '7', label: __( 'Ultimi 7 giorni', 'wp-5w' ) },
-	{ value: '30', label: __( 'Ultimi 30 giorni', 'wp-5w' ) },
-	{ value: '90', label: __( 'Ultimi 90 giorni', 'wp-5w' ) },
-	{ value: '365', label: __( 'Ultimo anno', 'wp-5w' ) },
-	{ value: 'all', label: __( 'Tutto lo storico', 'wp-5w' ) },
+// Preset del periodo: i soliti (Oggi, 7, 30 e 90 giorni), poi l'ultimo anno e tutto lo storico del sito (ALL_HISTORY).
+const ALL_HISTORY = 0;
+const OVERVIEW_PERIODS = [
+	...PERIODS,
+	{ days: 365, label: __( '1 anno', 'wp-5w' ) },
+	{ days: ALL_HISTORY, label: __( 'Tutto', 'wp-5w' ) },
 ];
 
 // Primo giorno con dati di traffico sul blog (i totali di WP Statistics partono dal 2023).
@@ -36,15 +36,15 @@ const KPIS = [
 /**
  * Intervallo del preset scelto.
  *
- * @param {string} period Valore del preset.
+ * @param {number} period Giorni del preset, ALL_HISTORY per tutto lo storico.
  */
 const rangeFor = ( period ) => ( {
-	from: period === 'all' ? HISTORY_FROM : shiftDay( today, -( Number( period ) - 1 ) ),
+	from: period === ALL_HISTORY ? HISTORY_FROM : shiftDay( today, -( period - 1 ) ),
 	to: today,
 } );
 
 export default function OverviewPage() {
-	const [ period, setPeriod ] = useState( '30' );
+	const [ period, setPeriod ] = useState( 30 );
 	const [ data, setData ] = useState( null );
 	const [ error, setError ] = useState( null );
 	const [ detail, setDetail ] = useState( null );
@@ -61,14 +61,7 @@ export default function OverviewPage() {
 	return (
 		<div className="wp5w-overview">
 			<div className="wp5w-toolbar">
-				<SelectControl
-					__nextHasNoMarginBottom
-					__next40pxDefaultSize
-					label={ __( 'Periodo', 'wp-5w' ) }
-					value={ period }
-					options={ PERIODS }
-					onChange={ setPeriod }
-				/>
+				<PeriodSwitch days={ period } onChange={ setPeriod } periods={ OVERVIEW_PERIODS } />
 				{ data && (
 					<p className="wp5w-toolbar__compare">
 						{ __( 'Confronto con', 'wp-5w' ) } { formatDay( data.previous.from ) } – { formatDay( data.previous.to ) }
@@ -126,7 +119,7 @@ export default function OverviewPage() {
 				</>
 			) }
 
-			{ detail && <PostDetailModal post={ detail } initialPeriod="30" onClose={ () => setDetail( null ) } /> }
+			{ detail && <PostDetailModal post={ detail } initialPeriod={ 30 } onClose={ () => setDetail( null ) } /> }
 		</div>
 	);
 }

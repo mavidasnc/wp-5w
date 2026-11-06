@@ -5,6 +5,7 @@ import { api, formatDay, formatNumber } from '../api';
 import Sparkline from '../components/Sparkline';
 import PostDetailModal from '../components/PostDetailModal';
 import Card from '../components/Card';
+import PeriodSwitch, { PERIODS } from '../components/PeriodSwitch';
 import NotFound from '../components/NotFound';
 import SiteSearches from '../components/SiteSearches';
 import { TrendBadge } from '../components/Trend';
@@ -92,7 +93,7 @@ function PostsTable( { state, columns, onOpen, showDate = false } ) {
 export default function PostsPage() {
 	const [ days, setDays ] = useState( 7 );
 	// Modale già aperto se l'URL ha `&detail=<ID>` (colonna «Visite (30 g)» e barra di amministrazione): id, titolo e data li dà il PHP.
-	const [ detail, setDetail ] = useState( () => ( window.wp5wAdmin.detail ? { post: window.wp5wAdmin.detail, period: '30' } : null ) );
+	const [ detail, setDetail ] = useState( () => ( window.wp5wAdmin.detail ? { post: window.wp5wAdmin.detail, period: 30 } : null ) );
 	const latest = useEndpoint( '/admin/posts/latest' );
 	const top = useEndpoint( `/admin/posts/top?days=${ days }` );
 
@@ -143,21 +144,12 @@ export default function PostsPage() {
 			<Card
 				id="posts-top"
 				title={ __( 'Articoli più visti', 'wp-5w' ) }
-				actions={
-					<div className="wp5w-switch">
-						<Button size="compact" variant={ days === 7 ? 'primary' : 'secondary' } onClick={ () => setDays( 7 ) }>
-							{ __( 'Settimana', 'wp-5w' ) }
-						</Button>
-						<Button size="compact" variant={ days === 30 ? 'primary' : 'secondary' } onClick={ () => setDays( 30 ) }>
-							{ __( 'Mese', 'wp-5w' ) }
-						</Button>
-					</div>
-				}
+				actions={ <PeriodSwitch days={ days } onChange={ setDays } /> }
 			>
 				<PostsTable
 					state={ top }
-					onOpen={ ( row ) => setDetail( { post: row, period: String( days ) } ) }
-					columns={ [ { label: days === 7 ? __( 'Settimana', 'wp-5w' ) : __( 'Mese', 'wp-5w' ), value: ( row ) => pair( row.period ) } ] }
+					onOpen={ ( row ) => setDetail( { post: row, period: days } ) }
+					columns={ [ { label: PERIODS.find( ( period ) => period.days === days ).label, value: ( row ) => pair( row.period ) } ] }
 				/>
 			</Card>
 
