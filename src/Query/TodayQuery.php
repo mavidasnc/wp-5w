@@ -14,6 +14,7 @@ use Mavida\FiveW\Settings;
 use Mavida\FiveW\Support\Channels;
 use Mavida\FiveW\Support\LocalTime;
 use Mavida\FiveW\Support\Metrics;
+use Mavida\FiveW\Support\Referrers;
 use Mavida\FiveW\Support\TodayWindow;
 
 defined( 'ABSPATH' ) || exit;
@@ -221,22 +222,18 @@ final class TodayQuery {
 	private function pages( string $today, int $visitors ): array {
 		global $wpdb;
 
-		$hits = Schema::table( 'hits' );
-		$ai   = Channels::ai_sql( 'f.referrer_host', 'f.utm_source' );
+		$hits     = Schema::table( 'hits' );
+		$arrivals = $this->arrivals_sql();
 
 		// Passo 1: canale di ogni visitatore dalla sua prima visita di oggi, poi le visite di oggi per contenuto.
 		$rows = $wpdb->get_results(
-			$wpdb->prepare(
+			$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Il primo %s sta in arrivals_sql().
 				"SELECT h.object_type, h.object_id, MIN(h.uri) AS uri, COUNT(*) AS views, COUNT(DISTINCT h.visitor) AS visitors,
 					COUNT(IF( v.ch = 'direct', 1, NULL )) AS direct,
 					COUNT(IF( v.ch = 'search', 1, NULL )) AS search,
 					COUNT(IF( v.ch = 'bot', 1, NULL )) AS bot
 				FROM {$hits} h
-				JOIN (
-					SELECT f.visitor, IF( f.bot <> '', 'bot', IF( {$ai} <> '', 'ai', f.channel ) ) AS ch
-					FROM {$hits} f
-					JOIN ( SELECT MIN(id) AS id FROM {$hits} WHERE day = %s GROUP BY visitor ) m ON m.id = f.id
-				) v ON v.visitor = h.visitor
+				JOIN ( {$arrivals} ) v ON v.visitor = h.visitor
 				WHERE h.day = %s
 				GROUP BY h.object_type, h.object_id
 				ORDER BY views DESC, h.object_type, h.object_id",
@@ -287,5 +284,100 @@ final class TodayQuery {
 			'rows'   => $pages,
 			'totals' => $totals,
 		);
+	}
+
+	/**
+	 * Da dove sono arrivati i visitatori di una pagina vista oggi (modale della scheda Oggi).
+	 *
+	 * Stessa regola della tabella «Pagine viste oggi» (arrivals_sql()): ogni visualizzazione prende la provenienza della prima visita
+	 * del giorno del suo visitatore, anche se quella visita era su un'altra pagina. Quindi chi entra da Google sulla home e poi apre
+	 * l'articolo compare sotto Google, e le righe tornano con la tabella: la somma delle visualizzazioni è `views` della pagina e quella
+	 * dei visitatori è `visitors` (a ogni visitatore corrisponde una sola riga, perché la prima visita del giorno è una sola).
+	 * Le righe sono per canale, sito di provenienza ed etichetta del bot (i bot hanno il canale `bot` con la loro firma).
+	 * Legge solo `wp5w_hits`. Gli IP diversi sono quelli delle visite alla pagina con l'hash dell'IP (null se nessuna lo ha).
+	 *
+	 * @param string   $type Tipo di contenuto.
+	 * @param int      $id   ID del contenuto.
+	 * @param int|null $now  Istante di riferimento (timestamp UNIX), solo per i test: predefinito l'ora attuale.
+	 * @return array<string,mixed>
+	 */
+	public function page_sources( string $type, int $id, ?int $now = null ): array {
+		global $wpdb;
+
+		$today    = wp_date( 'Y-m-d', $now ?? time() );
+		$hits     = Schema::table( 'hits' );
+		$arrivals = $this->arrivals_sql();
+
+		$rows = $wpdb->get_results(
+			$wpdb->prepare( // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Il primo %s sta in arrivals_sql().
+				"SELECT v.ch, v.host, v.bot, MAX(v.src) AS src, MIN(h.uri) AS uri, COUNT(*) AS views, COUNT(DISTINCT h.visitor) AS visitors,
+					COUNT(DISTINCT h.ip_hash) AS ips
+				FROM {$hits} h
+				JOIN ( {$arrivals} ) v ON v.visitor = h.visitor
+				WHERE h.day = %s AND h.object_type = %s AND h.object_id = %d
+				GROUP BY v.ch, v.host, v.bot
+				ORDER BY visitors DESC, views DESC, v.ch, v.host, v.bot",
+				$today,
+				$today,
+				$type,
+				$id
+			),
+			ARRAY_A
+		);
+
+		$items  = array();
+		$totals = array(
+			'views'    => 0,
+			'visitors' => 0,
+		);
+		$uri    = '';
+		foreach ( (array) $rows as $row ) {
+			$host                = (string) $row['host'];
+			$ips                 = (int) $row['ips'];
+			$uri                 = '' !== $uri ? $uri : (string) $row['uri'];
+			$items[]             = array(
+				'channel'  => (string) $row['ch'],
+				'referrer' => $host,
+				'label'    => '' === $host ? '' : Referrers::label( $host ),
+				'bot'      => (string) $row['bot'],
+				'source'   => (string) $row['src'],
+				'visitors' => (int) $row['visitors'],
+				'views'    => (int) $row['views'],
+				'ips'      => $ips > 0 ? $ips : null,
+			);
+			$totals['views']    += (int) $row['views'];
+			$totals['visitors'] += (int) $row['visitors'];
+		}
+
+		return array(
+			'day'     => $today,
+			'content' => array(
+				'type' => $type,
+				'id'   => $id,
+			) + OnlineQuery::describe( $type, $id, $uri ),
+			'totals'  => $totals,
+			'rows'    => $items,
+		);
+	}
+
+	/**
+	 * Tabella derivata con la provenienza di ogni visitatore di oggi, dalla sua prima visita del giorno.
+	 *
+	 * Colonne: `visitor`, `host` (referrer), `bot` (etichetta, vuota per le persone), `ch` (canale: `bot` ha la precedenza su `ai`, e `ai` sul canale
+	 * di WP Statistics, come la dimensione `channel` di OwnSource; senza `ai_sql()` chatgpt.com finirebbe in «Motori di ricerca») e `src`
+	 * (nome della sorgente, quello dell'assistente AI se lo è). Contiene un solo segnaposto `%s` per il giorno: lo passa il chiamante,
+	 * perché annidare due `prepare()` lascerebbe i `%` dei `LIKE` dell'elenco AI senza protezione.
+	 * Usata dalla tabella delle pagine e dalla modale, così le due non possono divergere.
+	 *
+	 * @return string
+	 */
+	private function arrivals_sql(): string {
+		$hits = Schema::table( 'hits' );
+		$ai   = Channels::ai_sql( 'f.referrer_host', 'f.utm_source' );
+
+		return "SELECT f.visitor, f.referrer_host AS host, f.bot, IF( f.bot <> '', 'bot', IF( {$ai} <> '', 'ai', f.channel ) ) AS ch,
+				IF( {$ai} <> '', {$ai}, f.source ) AS src
+			FROM {$hits} f
+			JOIN ( SELECT MIN(id) AS id FROM {$hits} WHERE day = %s GROUP BY visitor ) m ON m.id = f.id";
 	}
 }
