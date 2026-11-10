@@ -338,6 +338,29 @@ final class AdminController extends RestController {
 			)
 		);
 
+		// Modale della tabella «Pagine viste oggi»: provenienza dei visitatori di una pagina. Sempre il giorno in corso, quindi senza `days`.
+		register_rest_route(
+			self::API_NAMESPACE,
+			'/admin/today/page',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => fn( \WP_REST_Request $request ) => $this->respond( $this->today->page_sources( (string) $request->get_param( 'type' ), (int) $request->get_param( 'id' ) ) ),
+				'permission_callback' => array( $this, 'check_admin_permission' ),
+				'args'                => array(
+					'type' => array(
+						'type'     => 'string',
+						'required' => true,
+						'pattern'  => '^[a-z0-9_]{1,40}$',
+					),
+					'id'   => array(
+						'type'     => 'integer',
+						'required' => true,
+						'minimum'  => 0,
+					),
+				),
+			)
+		);
+
 		// Pagine non trovate e ricerche interne degli ultimi N giorni (scheda Articoli).
 		register_rest_route(
 			self::API_NAMESPACE,

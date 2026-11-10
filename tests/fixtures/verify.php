@@ -3331,6 +3331,29 @@ $today_totals = $today_data['pages']['totals'];
 $check( 'oggi: totali (visualizzazioni, visitatori distinti, diretto, ricerca, bot, altri)', '6|5|2|1|1|2', implode( '|', array( $today_totals['views'], $today_totals['visitors'], $today_totals['direct'], $today_totals['search'], $today_totals['bot'], $today_totals['other'] ) ) );
 $check( 'oggi: diretto + ricerca + bot + altri = visualizzazioni', $today_totals['views'], $today_totals['direct'] + $today_totals['search'] + $today_totals['bot'] + $today_totals['other'] );
 $check( 'oggi: le visualizzazioni di oggi sono le righe grezze di wp5w_hits', (string) $today_kpis['views']['value'], $wpdb->get_var( "SELECT COUNT(*) FROM {$hits_table} WHERE day = '2026-10-27'" ) );
+// Modale della pagina (page_sources): le righe tornano con la tabella. post_a: t1 diretto, t2 Google (ricerca), t3 ChatGPT (ai); post_b: t1 diretto
+// (la sua prima visita del giorno era su post_a, non qui) e t5 Facebook (social); home: il bot t4.
+$today_src_rows = static function ( string $type, int $id ) use ( $today_now ): array {
+	$data = ( new TodayQuery() )->page_sources( $type, $id, $today_now );
+	return array(
+		$data,
+		implode( ',', array_map( static fn( array $row ): string => $row['channel'] . ':' . ( '' !== $row['bot'] ? $row['bot'] : $row['referrer'] ) . ':' . $row['visitors'] . '/' . $row['views'], $data['rows'] ) ),
+	);
+};
+[ $today_src_a, $today_src_a_rows ] = $today_src_rows( 'post', $post_a );
+[ $today_src_b, $today_src_b_rows ] = $today_src_rows( 'post', $post_b );
+[ $today_src_h, $today_src_h_rows ] = $today_src_rows( 'home', 0 );
+$check( 'oggi provenienze: primo articolo per canale, sito e visitatori/visualizzazioni', 'ai:chatgpt.com:1/1,direct::1/1,search:google.it:1/1', $today_src_a_rows );
+$check( 'oggi provenienze: secondo articolo, t1 conta sotto «diretto» per la prima visita del giorno', 'direct::1/1,social:facebook.com:1/1', $today_src_b_rows );
+$check( 'oggi provenienze: la home è del bot con la sua firma', 'bot:googlebot:1/1', $today_src_h_rows );
+$check( 'oggi provenienze: totali uguali alla riga della tabella (articoli e home)', '3|3|2|2|1|1', implode( '|', array( $today_src_a['totals']['visitors'], $today_src_a['totals']['views'], $today_src_b['totals']['visitors'], $today_src_b['totals']['views'], $today_src_h['totals']['visitors'], $today_src_h['totals']['views'] ) ) );
+foreach ( array( $post_a => $today_src_a, $post_b => $today_src_b, 0 => $today_src_h ) as $today_src_id => $today_src ) {
+	$check( "oggi provenienze: pagina {$today_src_id}, visitatori e visualizzazioni come nella tabella", $today_pages[ $today_src_id ]['visitors'] . '|' . $today_pages[ $today_src_id ]['views'], $today_src['totals']['visitors'] . '|' . $today_src['totals']['views'] );
+}
+$check( 'oggi provenienze: l\'assistente AI ha il suo nome e senza hash dell\'IP gli IP sono null', 'ChatGPT||', ( $today_src_a['rows'][0]['source'] ?? '' ) . '|' . ( $today_src_a['rows'][0]['ips'] ?? '' ) . '|' );
+$check( 'oggi provenienze: titolo e link del contenuto', '1|1', (int) ( '' !== $today_src_a['content']['title'] ) . '|' . (int) str_contains( $today_src_a['content']['url'], 'http' ) );
+$today_src_none = $today_src_rows( 'post', 999999 )[0];
+$check( 'oggi provenienze: pagina senza visite, nessuna riga', '0|0|0', count( $today_src_none['rows'] ) . '|' . $today_src_none['totals']['visitors'] . '|' . $today_src_none['totals']['views'] );
 // Andamento orario cumulato. Oggi: t1 alle 9 (due visualizzazioni), t2 e t3 alle 10, t4 e t5 alle 11; si ferma alle 12.
 // Ieri (ora solare): y1 alle 9, y2 alle 11, y3 alle 15.
 $hourly_today = $today_data['hourly']['today'];
@@ -3368,6 +3391,17 @@ $today_response = $rest_call( 'GET', $today_route );
 $admin_user( 0 );
 $check( 'oggi con amministratore: 200', 200, $today_response->get_status() );
 $check( 'oggi: la risposta ha kpis e pagine', '1|1', (int) isset( $today_response->get_data()['kpis']['visitors'] ) . '|' . (int) isset( $today_response->get_data()['pages']['rows'] ) );
+
+// Rotta della modale: stesso permesso, `type` e `id` obbligatori e validati.
+$today_page_route = '/wp5w/v1/admin/today/page';
+$check( 'oggi provenienze senza utente: 401 o 403', true, in_array( $rest_call( 'GET', $today_page_route, array( 'type' => 'post', 'id' => 1 ) )->get_status(), array( 401, 403 ), true ) );
+$admin_user( $admin_id );
+$today_page_ok  = $rest_call( 'GET', $today_page_route, array( 'type' => 'post', 'id' => 1 ) );
+$today_page_bad = $rest_call( 'GET', $today_page_route, array( 'type' => 'Post;DROP', 'id' => 1 ) );
+$today_page_nid = $rest_call( 'GET', $today_page_route, array( 'type' => 'post' ) );
+$admin_user( 0 );
+$check( 'oggi provenienze con amministratore: 200 con righe, totali e contenuto', '200|1|1|1', $today_page_ok->get_status() . '|' . (int) isset( $today_page_ok->get_data()['rows'] ) . '|' . (int) isset( $today_page_ok->get_data()['totals']['visitors'] ) . '|' . (int) isset( $today_page_ok->get_data()['content']['title'] ) );
+$check( 'oggi provenienze: tipo non valido o id mancante, 400', '400|400', $today_page_bad->get_status() . '|' . $today_page_nid->get_status() );
 
 // Fuso a scostamento fisso («+02:00»): getTransitions() restituisce false e la query non deve fermarsi. Alle 12:00 locali
 // (10:00 UTC) la visita delle 10:30 locali (08:30 UTC) conta alla stessa ora, quella delle 12:30 locali (10:30 UTC) no.

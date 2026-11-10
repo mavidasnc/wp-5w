@@ -1,10 +1,12 @@
 import { __, sprintf } from '@wordpress/i18n';
-import { Notice, Spinner } from '@wordpress/components';
+import { useState } from '@wordpress/element';
+import { Button, Notice, Spinner } from '@wordpress/components';
 import { formatDay, formatNumber } from '../api';
 import Card from '../components/Card';
 import HourlyChart from '../components/HourlyChart';
 import ShowMore from '../components/ShowMore';
 import TodayKpi from '../components/TodayKpi';
+import TodayPageModal from '../components/TodayPageModal';
 import usePolledApi from '../hooks/usePolledApi';
 
 // Ogni quanto si aggiorna, in millisecondi.
@@ -17,6 +19,8 @@ const REFRESH_MS = 60000;
  */
 export default function TodayPage() {
 	const { data, error } = usePolledApi( '/admin/today', REFRESH_MS );
+	// Pagina aperta nella modale: sta qui e non nei dati, così l'aggiornamento ogni minuto non la chiude.
+	const [ page, setPage ] = useState( null );
 
 	// Senza dati: l'errore del primo caricamento oppure lo spinner. Un errore successivo non toglie gli ultimi dati.
 	if ( ! data ) {
@@ -73,7 +77,9 @@ export default function TodayPage() {
 										{ visible.map( ( row ) => (
 											<tr key={ `${ row.type }-${ row.id }-${ row.url }` }>
 												<td>
-													<a href={ row.url } target="_blank" rel="noreferrer">{ row.title }</a>
+													<Button variant="link" onClick={ () => setPage( row ) }>
+														{ row.title }
+													</Button>
 												</td>
 												<td className="num">{ formatNumber( row.views ) }</td>
 												<td className="num">{ formatNumber( row.visitors ) }</td>
@@ -101,8 +107,9 @@ export default function TodayPage() {
 					</ShowMore>
 				) }
 				<p className="wp5w-note">
-					{ __( 'Ogni visualizzazione prende il canale con cui il visitatore è arrivato oggi (la sua prima visita del giorno): Diretto, Motori di ricerca, Bot (crawler e browser automatici, compresi nei totali) e Altri canali (social, siti esterni, email, assistenti AI). I visitatori in fondo sono quelli distinti del giorno: chi vede più pagine compare in ognuna.', 'wp-5w' ) }
+					{ __( 'Ogni visualizzazione prende il canale con cui il visitatore è arrivato oggi (la sua prima visita del giorno): Diretto, Motori di ricerca, Bot (crawler e browser automatici, compresi nei totali) e Altri canali (social, siti esterni, email, assistenti AI). I visitatori in fondo sono quelli distinti del giorno: chi vede più pagine compare in ognuna. Clicca sul titolo di una pagina per vedere da dove sono arrivati i suoi visitatori.', 'wp-5w' ) }
 				</p>
+				{ page && <TodayPageModal page={ page } onClose={ () => setPage( null ) } /> }
 			</Card>
 		</div>
 	);
