@@ -2,7 +2,7 @@
 
 Tutte le modifiche rilevanti del plugin. Formato basato su [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioni [SemVer](https://semver.org/lang/it/).
 
-## [Non rilasciato]
+## [0.21.0] — 2026-11-10
 
 ### Added
 - **Modale delle provenienze nella scheda Oggi** (tabella «Pagine viste oggi»): il titolo di una pagina apre una modale con i visitatori e le visualizzazioni di quella pagina divisi per provenienza (sito o app, sorgente, canale, quota, IP diversi) e il pulsante «Dettaglio visite» con le singole visite di oggi (`VisitsDetail`). `TodayQuery::page_sources()` e `GET /admin/today/page` (`type` e `id`, solo raccolta propria, sempre il giorno in corso). Stessa regola della tabella: la provenienza di un visitatore è quella della sua prima visita del giorno, anche se era su un'altra pagina, quindi le righe tornano con la tabella (somma dei visitatori e delle visualizzazioni uguale ai valori della riga). I bot hanno il canale `bot` e la loro firma al posto del sito. Il link alla pagina passa dal titolo della tabella alla modale.
